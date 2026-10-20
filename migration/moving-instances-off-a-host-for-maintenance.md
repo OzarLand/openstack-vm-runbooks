@@ -72,6 +72,19 @@ patched, instances can move onto it but not back off it to an unpatched host. Th
 decides where instances can go: plan the sequence so that patched capacity is available to receive from the next
 host. The destination's CPU model must also be compatible with the source's (`cpu_mode`, `cpu_models`).
 
+## Possible causes
+
+Why moving an instance off the host fails or stalls, and how to tell:
+
+| Cause | How to tell |
+|---|---|
+| No destination with enough CPU, memory or disk | `No valid host` on the migration; `allocation candidate list` empty for the flavor |
+| Destination CPU model incompatible | Live migration pre-check error mentioning CPU compatibility; source and destination `cpu_mode`/`cpu_models` differ |
+| Destination runs an older libvirt/QEMU than the source | Pre-check refuses the move; happens once a patching campaign has started |
+| Memory changes faster than it is copied | Migration stays `running` with remaining memory not decreasing; no auto-converge or post-copy |
+| Passthrough device, SR-IOV direct port, vGPU | `hostdev` or `mdev` in the domain XML; Nova refuses or the move fails late |
+| Local disk without `--block-migration` | Error about shared storage; instance disks under the compute's instances path |
+
 **Patching protects only restarted or migrated instances.** An instance that keeps running on the old QEMU binary
 is not patched, even if the host package is. A live migration (which starts a new QEMU process on the destination)
 or a restart is required for the fix to apply to the instance.

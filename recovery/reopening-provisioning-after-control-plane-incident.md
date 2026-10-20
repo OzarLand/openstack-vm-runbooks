@@ -53,6 +53,25 @@ node instead. The two situations start from the same alert and need different pr
 Before stopping, record who authorised the stop and communicate it as a protection decision: what is restricted,
 why continuing would create greater risk, what remains protected, and what condition will allow reopening.
 
+## Diagnosis
+
+Establish the state of the shared dependencies before deciding, read-only, with
+[VM creation fails platform-wide: check the shared dependencies first](../diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md):
+Galera status on every node, RabbitMQ cluster status, partitions, alarms and queues without consumers, compute
+services and network agents reporting, and what changed recently. Write down what you observe before acting: it is
+the evidence the incident review will need, and the state will change once you start recovering.
+
+## Possible causes
+
+| Cause | How to tell | Is this runbook the right one? |
+|---|---|---|
+| RabbitMQ network partition | `rabbitmqctl cluster_status` lists partitions | Yes. This was the cause in the source incident |
+| RabbitMQ memory or disk alarm | `rabbitmq-diagnostics check_alarms` | Usually not: free memory or disk and the alarm clears; no stop needed |
+| One RabbitMQ node left a cluster that keeps its majority | One node missing, no partition | No: rejoin or reset that node only |
+| Galera lost quorum on one node | That node `non-Primary`, others `Primary` | No: restart that node and let it rejoin |
+| Galera lost quorum on every node | All nodes `non-Primary` | Yes, combined with step 3 |
+| Expired certificates or Fernet keys | Authentication fails everywhere at a precise time | No: see the certificates page in `diagnostics/` |
+
 ## Resolution
 
 ### Step 1: stop accepting requests
