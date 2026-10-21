@@ -127,7 +127,9 @@ openstack flavor set --property hw:emulator_threads_policy=share <flavor>
 vmstat 5 12            # st column stays at 0
 # On the host
 virsh vcpupin <instance-name>; virsh emulatorpin <instance-name>
-ps -eLo psr,comm | awk '$1==<pinned-cpu>' | sort | uniq -c    # only the instance's vCPU threads
+ps -eLo psr,comm | awk '$1==<pinned-cpu>' | sort | uniq -c
+# expected: the instance's vCPU threads (CPU n/KVM) plus the per-CPU kernel threads that always exist on every
+# CPU (ksoftirqd/N, migration/N, cpuhp/N, kworker/N); no other process or daemon
 ```
 
 Verify over days, not minutes: the symptom was intermittent.
@@ -138,7 +140,7 @@ Derived from an operator's incident on a platform with dedicated-CPU workloads; 
 facts matter: live migration of instances with a NUMA topology (including pinned CPUs) only became NUMA-aware in
 Train (Nova 20.0); on Stein with the `enable_numa_live_migration` workaround, and earlier, the instance moved
 without recalculating the guest-to-host mapping and could itself create overlapping pinning. `hw:emulator_threads_policy=share`
-with `cpu_shared_set` dates from Stein. The host-isolation steps depend on the OS and hardware; check your vendor's
+with `cpu_shared_set` dates from Rocky (Nova 18.0); check the release notes of your release. The host-isolation steps depend on the OS and hardware; check your vendor's
 guidance for real-time or NFV hosts.
 
 ## Related

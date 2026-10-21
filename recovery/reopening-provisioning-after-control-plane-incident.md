@@ -83,11 +83,13 @@ the evidence the incident review will need, and the state will change once you s
 Preferred: disable the API backends at the load balancer, so that the VIP answers with an error rather than
 timing out, and the action is reversible in one place. Alternative: stop the API services or containers.
 
-**Kolla-Ansible:** on each controller, `docker stop nova_api neutron_server cinder_api glance_api placement_api
-keystone` (adapt to the services you run); or set the backends to `MAINT` in HAProxy.
+**Kolla-Ansible:** on each controller, `docker stop nova_api neutron_server cinder_api glance_api placement_api`
+(adapt to the services you run); or set those backends to `MAINT` in HAProxy.
 **Any:** `systemctl stop <api services>` or the equivalent HAProxy change.
 
-Keep Keystone up if you can: you need tokens to verify later, and nothing user-facing works without it anyway.
+Leave Keystone running. The verification gate before reopening needs tokens, and with the other APIs stopped
+Keystone alone gives users nothing they can act on. Stop it only if Keystone itself, or its database access, is
+part of the failure; you will then need to start it first in step 4 before any verification is possible.
 
 ### Step 2: recover the message bus
 
@@ -127,8 +129,9 @@ Confirm on every node: `wsrep_cluster_size` is full, `wsrep_cluster_status` is `
 > clean RPC connections. Agent restarts can briefly interrupt data-plane changes on the host; `nova-compute`
 > restarts do not affect running instances.
 
-Restart conductors and schedulers on the controllers, then `nova-compute` and network agents (or `ovn-controller`
-is unaffected by RabbitMQ; OVN deployments skip the Neutron agents) in batches.
+Restart conductors and schedulers on the controllers, then `nova-compute` and, with an agent-based backend
+(ML2/OVS), the Neutron agents, in batches. With OVN there are no Neutron agents on the bus: `ovn-controller` talks to
+the OVN databases, not to RabbitMQ, and does not need a restart for this.
 
 ## Verification, before reopening
 
@@ -142,7 +145,7 @@ mysql -e "SHOW STATUS LIKE 'wsrep_cluster_size'; SHOW STATUS LIKE 'wsrep_cluster
 
 # 2. Every compute service and network agent reporting again
 openstack compute service list --service nova-compute | grep -c down     # 0
-openstack network agent list | grep -c -w False                          # 0 alive=False (agent-based backends)
+openstack network agent list -f value -c Alive | grep -vc True          # 0 = every agent alive (agent-based backends)
 
 # 3. End-to-end: create, reach, delete a test instance (with the APIs reopened internally, or from a controller)
 openstack server create --flavor <flavor> --image <image> --network <network> --wait reopen-test

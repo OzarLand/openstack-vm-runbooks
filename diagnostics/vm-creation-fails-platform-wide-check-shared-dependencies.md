@@ -108,7 +108,8 @@ whether the cluster uses the Mnesia metadata store (every version before 3.13, a
 where `cluster_partition_handling` (`pause_minority` is the usual OpenStack choice) governs behaviour, or the Khepri
 store (default for new clusters in recent 4.x), where that setting no longer applies; and whether the queues are
 quorum queues (recommended by oslo.messaging, `rabbit_quorum_queue`), which need a majority of their members and
-are lost when two nodes of three are down.
+become unavailable when two nodes of three are down (their data is kept on the surviving member and they come back
+once a majority returns).
 
 A queue whose messages accumulate while its consumers vanish is a service that has stopped processing, whatever
 its process list says. A `nova-compute` that reports `up` but has a stale bus connection does nothing.

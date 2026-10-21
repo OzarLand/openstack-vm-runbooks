@@ -72,13 +72,6 @@ variants for other methods are added by whoever has them.
 | [Control plane down: what still works for running instances](diagnostics/control-plane-down-what-still-works-for-instances.md) | nova, neutron, ovn, ovs | unrecorded | draft |
 | [Every API call fails at once: expired certificates or inconsistent Fernet keys](diagnostics/expired-certificates-and-fernet-keys-break-every-api-call.md) | keystone, haproxy | unrecorded | draft |
 
-**About the seed pages.** The first pages were written from incidents and technical notes described by the
-founding maintainer in *OpenStack, the Day After Tomorrow*, rewritten in runbook form with the author's
-permission. The source does not record the OpenStack release on which each incident happened, so these pages carry
-`openstack_releases: [unrecorded]` and `status: draft`. The first confirmations from other operators will add the
-releases and move them to `validated`. Confirming one of them on your platform is the most useful first
-contribution you can make.
-
 ## Pages wanted next
 
 Candidate runbooks that almost every operator has met and that are not written yet. Each needs a real occurrence

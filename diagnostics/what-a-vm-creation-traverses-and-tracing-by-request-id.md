@@ -106,7 +106,7 @@ to the next.
 
 ## Validity and limits
 
-Describes the Nova cells v2 architecture (mandatory since Pike) with the libvirt driver and the Neutron ML2 or OVN
+Describes the Nova cells v2 architecture (mandatory since Ocata) with the libvirt driver and the Neutron ML2 or OVN
 backends. Log paths are given for Kolla-Ansible; other deployments differ. Request-id pairing in logs depends on
 release and on `oslo.log` configuration.
 

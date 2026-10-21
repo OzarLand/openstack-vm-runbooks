@@ -131,7 +131,7 @@ mapped automatically. Verify how your deployment tool handles this before changi
 ### Fix inventory or ratios
 
 Set `cpu_allocation_ratio`, `ram_allocation_ratio`, `disk_allocation_ratio` and `reserved_host_*` in the
-`[DEFAULT]` or `[compute]` section of `nova.conf` on the compute host, restart `nova-compute`, and check the
+`[DEFAULT]` section of `nova.conf` on the compute host, restart `nova-compute`, and check the
 inventory again. Changing a ratio directly in Placement is overridden by the compute on its next update unless the
 `initial_*_allocation_ratio` logic applies; prefer the Nova configuration.
 
@@ -161,7 +161,7 @@ openstack server delete sched-test
 ## Validity and limits
 
 Derived from an operator's account of "capacity exists but nothing lands on it"; release not recorded. Cells v2
-and Placement have been mandatory since Pike (16.0), so the mapping mechanism applies to every current release.
+and Placement have been mandatory since Ocata (15.0), so the mapping mechanism applies to every current release.
 The `osc-placement` plugin is required for the `openstack resource provider` and `allocation candidate` commands.
 Not covered: scheduling failures specific to Ironic bare-metal nodes.
 

@@ -37,8 +37,8 @@ $ openstack volume list --all-projects --status in-use            # attached to 
 $ nova-manage placement audit --verbose                           # allocations for consumers that do not exist
 ```
 
-Also: quota "in use" higher than what the project actually runs; `openstack hypervisor stats show` disagreeing with
-the sum of running instances.
+Also: quota "in use" higher than what the project actually runs; Placement usage
+(`openstack resource provider usage show <rp-uuid>`) disagreeing with the instances the host actually runs.
 
 ## Impact
 
@@ -55,9 +55,11 @@ openstack server list --all-projects --long -c ID -c Status -c "Task State" -c H
 # Placement allocations without a matching instance
 nova-manage placement audit --verbose              # read-only without --delete
 
-# Ports whose device no longer exists (compare device_id with server list)
-openstack port list --long -c ID -c "Device Owner" -c device_id -f value | awk '$2=="compute:nova"{print $3}' \
-  | sort -u | while read id; do openstack server show "$id" -c id -f value >/dev/null 2>&1 || echo "orphan device_id $id"; done
+# Ports whose device no longer exists (port list has no device_id column, so read it per port)
+for p in $(openstack port list --device-owner compute:nova -f value -c ID); do
+  d=$(openstack port show "$p" -f value -c device_id)
+  openstack server show "$d" -f value -c id >/dev/null 2>&1 || echo "port $p: device $d not found"
+done
 
 # Volumes attached to a missing instance
 openstack volume list --all-projects --status in-use -c ID -c "Attached to" -f value
@@ -133,13 +135,25 @@ openstack port delete <port-id>
 # Volume still "in-use" for an instance that no longer exists
 openstack volume attachment list --volume <volume-id>
 openstack volume attachment delete <attachment-id>
-# Older Cinder APIs: openstack volume set --state available --detached <volume-id>   (check the data is not in use!)
+```
+
+> 🛑 **Destructive.** On Cinder API versions without attachment objects, the fallback is to force the volume's
+> state. It only changes Cinder's record: if a hypervisor still has the volume attached, a second attachment can
+> write to it concurrently and corrupt the data. Precondition: confirm on the compute host that no domain uses the
+> volume (`virsh domblklist <instance-name>` on the host that last had it; for RBD, `rbd status <pool>/volume-<volume-id>`
+> shows no watcher). Cannot be undone if two writers have touched the disk.
+
+```bash
+openstack volume set --state available --detached <volume-id>
 ```
 
 ### Archive and purge soft-deleted rows
 
-> ⚠️ **State-changing.** Moves soft-deleted rows to the shadow tables, then purges them. Reduces database size and
-> query time. Irreversible once purged; it only touches rows already marked deleted.
+> 🛑 **Destructive.** `archive_deleted_rows` moves soft-deleted rows to the shadow tables; `purge` then deletes them
+> for good. What is lost: the history of deleted instances, volumes and their actions, which audits, billing and
+> incident reviews may rely on. It only touches rows already marked deleted; live resources are not affected.
+> Precondition: a database backup, and your retention requirements checked (keep the rows the business needs, for
+> example with `--before <date>`). Cannot be undone without the backup.
 
 ```bash
 nova-manage db archive_deleted_rows --until-complete --verbose
@@ -163,7 +177,7 @@ row before and after, and the reason, in the change record.
 openstack server list --all-projects --long | awk '$4=="BUILD" || $6!="None"'   # empty or explainable
 nova-manage placement audit --verbose                                         # no orphan allocations
 openstack quota show --usage <project>                                        # matches reality
-openstack hypervisor stats show                                               # consistent with instance counts
+openstack resource provider usage show <rp-uuid>                              # matches what the host runs
 ```
 
 ## Validity and limits

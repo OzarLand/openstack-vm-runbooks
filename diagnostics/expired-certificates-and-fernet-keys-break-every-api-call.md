@@ -88,8 +88,9 @@ its own keys with `fernet_setup` instead of receiving the shared set is the othe
 
 This page is read-only. Fixing is a deployment-tool procedure: regenerate and distribute certificates, or
 distribute one consistent Fernet key set to every Keystone node and restart Keystone, with the tool you deployed
-with (Kolla-Ansible: `kolla-ansible certificates` then `reconfigure`; Fernet: redistribute `/etc/kolla/keystone-fernet`
-or re-run the Keystone deployment). After the fix, every service and agent that cached the old certificate may need
+with (Kolla-Ansible: `kolla-ansible certificates` then `reconfigure`; Fernet keys live in the `keystone_fernet_tokens`
+volume on each controller, and `kolla-ansible reconfigure -t keystone` re-runs the Keystone deployment that
+distributes them). After the fix, every service and agent that cached the old certificate may need
 a restart.
 
 ## Prevention, which is the actual runbook

@@ -95,8 +95,9 @@ A host that is "up" by any of these channels is isolated, not dead. Instances ma
 Power off through the out-of-band interface and confirm the power state:
 
 ```bash
-ipmitool -I lanplus -H <bmc-address> -U <user> -P '<password>' chassis power off
-ipmitool -I lanplus -H <bmc-address> -U <user> -P '<password>' chassis power status
+# -E reads the password from the IPMI_PASSWORD environment variable, so it stays out of the process list and history
+ipmitool -I lanplus -H <bmc-address> -U <user> -E chassis power off
+ipmitool -I lanplus -H <bmc-address> -U <user> -E chassis power status
 ```
 
 If out-of-band management is unavailable, isolate the host at the switch (shut its ports) so it cannot write to
