@@ -2,7 +2,7 @@
 title: Compute host unreachable, instances down. Fence before you evacuate
 kind: runbook
 status: draft
-openstack_releases: [unrecorded]
+openstack_releases: ["2026.1"]
 components: [nova, libvirt, cinder, ceph]
 deployment_methods: [any]
 environment:
@@ -15,7 +15,7 @@ confirmed_by: []
 upstream_refs:
   - https://docs.openstack.org/nova/latest/admin/evacuate.html
   - https://docs.openstack.org/nova/latest/admin/node-down.html
-last_verified: 2026-10-18
+last_verified: 2026-10-21
 ---
 
 # Compute host unreachable, instances down. Fence before you evacuate
@@ -38,6 +38,11 @@ $ openstack server list --all-projects --host compute-07 -c ID -c Status
 Monitoring shows the host unreachable (no ping, no SSH, no agent). Users report their instances on that host are
 not responding.
 
+Nova keeps those instances `ACTIVE`, power state Running, on the dead host: it cannot know they stopped. The
+host's Neutron agent is usually reported dead too, but not necessarily at the same moment: Neutron's
+`agent_down_time` (75 s by default) can lag Nova's `service_down_time` (60 s), so for a while the agent may still
+show as alive.
+
 ## Impact
 
 Every instance on the host is down or unreachable. Nothing else is affected unless the host also ran a network
@@ -59,7 +64,11 @@ ssh <host> uptime            # if it answers, the host is NOT dead; stop here an
 ```
 
 If the host answers on the management network, this is a `nova-compute` or message-bus problem, not a dead host.
-Do not evacuate. Restart `nova-compute` and investigate its connection to RabbitMQ.
+Do not evacuate. Restart `nova-compute` and investigate its connection to RabbitMQ: see
+[nova-compute down, instances still running](nova-compute-down-instances-still-running.md). If the host answers on
+TCP but refuses your SSH login, it is alive too: see
+[nova-compute down, host alive, SSH refused](nova-compute-down-host-alive-ssh-refused.md). Only a failure at the TCP
+level, confirmed out of band, points to a dead host.
 
 ## Diagnosis
 
@@ -112,6 +121,17 @@ disks) but prevents the double-writer problem on shared storage.
 openstack compute service set --disable --disable-reason "fenced <date>, hardware failure" <host> nova-compute
 ```
 
+Optionally, mark the service down so that Nova accepts the evacuation without waiting for `service_down_time`. Do
+it only after step 1: it tells Nova the host is fenced.
+
+> ⚠️ **State-changing.** Nova treats the compute service as down at once, whatever its heartbeat says. Affects this
+> host only. Needs compute API microversion 2.11 or later. Undo: `openstack compute service set --up <host>
+> nova-compute` (step 4).
+
+```bash
+openstack compute service set --down <host> nova-compute
+```
+
 ### Step 3: evacuate
 
 > 🛑 **Destructive.** Evacuation rebuilds the instance on another host. With shared instance storage or
@@ -124,6 +144,10 @@ openstack compute service set --disable --disable-reason "fenced <date>, hardwar
 openstack server evacuate --host <destination-host> <server-id>
 # Older clients: nova evacuate [--on-shared-storage] <server-id> [<destination-host>]
 ```
+
+From compute API microversion 2.95, an evacuated instance stays stopped on its new host and must be started
+(`openstack server start <server-id>`); before 2.95 it comes back `ACTIVE`. Check which microversion your client
+sends, or pass it explicitly with `--os-compute-api-version`.
 
 To evacuate every instance of the host in one go, check whether your deployment provides `nova host-evacuate`
 (legacy client) or script a loop over the list from the quick checks. Evacuate in batches on a large host: each
@@ -138,10 +162,29 @@ Nova handles a returning evacuated host: on startup, `nova-compute` finds the ev
 destroys the local copies of the evacuated instances. Do not start `nova-compute` on the host before confirming the
 evacuations completed, and keep the service disabled until the host is diagnosed.
 
+If you marked the service down in step 2, mark it up once the host is back and `nova-compute` reports again (its
+`Updated At` changes in `openstack compute service list --long`):
+
+> ⚠️ **State-changing.** Nova reads the service state from its heartbeat again. Precondition: the evacuations are
+> complete and the host's `nova-compute` has started and cleaned up. Undo: `--down` again.
+
+```bash
+openstack compute service set --up <host> nova-compute
+```
+
+Then check on the host that libvirt no longer holds the evacuated instances:
+
+```bash
+# On the host. Kolla-Ansible:
+docker exec nova_libvirt virsh list --all
+# Any:
+virsh list --all
+```
+
 ## Verification
 
 ```bash
-# Every instance has a new host and is ACTIVE
+# Every instance has a new host and is ACTIVE (SHUTOFF until started, from microversion 2.95)
 openstack server list --all-projects --long -c ID -c Status -c Host | grep -F "<previous-host>"   # should be empty
 openstack server show <server-id> -c status -c OS-EXT-SRV-ATTR:host
 
@@ -158,15 +201,52 @@ openstack compute service list --host <previous-host>
 Reach a sample of the evacuated instances from the network and check their application state; a rebuilt instance
 boots from scratch and may need its services started.
 
+## Lab observations
+
+On the lab, compute-2, a virtual machine, was powered off at once with no clean shutdown, as a power failure would,
+and stayed off until the recovery powered it on again through its hosting cloud: it was fenced by construction.
+
+| | Before | During (120 s) | After evacuation and return of the host |
+|---|---|---|---|
+| Instance on compute-2, seen from the network | answering | **down** (from 2 s after the power-off) | answering again after a gap of **181.5 s** |
+| Instance on compute-1, seen from the network | answering | 291 requests, 0 lost | 1155 requests, 0 lost |
+| Instance of compute-2 in Nova | ACTIVE on compute-2 | **ACTIVE, running, on compute-2** (host off) | evacuated: ACTIVE on compute-1 in about 15 s |
+| Services | 22 up | **nova-compute and Open vSwitch agent of compute-2 down** | 22 up |
+| libvirt on compute-2 after its return | – | – | **empty**: the evacuated instance was cleaned up |
+
+- Recovery as run on the lab: `openstack compute service set --down`, then `openstack server evacuate <server-id>`
+  with `--os-compute-api-version 2.29` and no destination (the scheduler chose compute-1), then power-on of the host,
+  wait until its `nova-compute` reported again (a new `Updated At`), `openstack compute service set --up`, and
+  `virsh list --all` on the host.
+- The 181.5 s include the 120 s the lab waited before recovering (in production: detection and decision), the
+  evacuation (about 15 s) and the boot of the instance on compute-1 with its floating IP (about 45 s).
+- The instance had a local disk: it was rebuilt from its image on compute-1, and kept its port and floating IP.
+- On the host's return, `nova-compute` destroyed its copy of the evacuated instance: libvirt on compute-2 was empty.
+- Instances on the other compute were not affected.
+- Same result on three lab builds; last observed run 2026-10-13.
+
 ## Validity and limits
 
 Derived from a real incident described by an operator: the team refused to evacuate on the strength of a missing
 heartbeat, confirmed the host's state through its out-of-band interface, shut it down, and only then evacuated.
-Release not recorded. The commands assume the libvirt driver. Evacuation semantics for local storage, and the
-behaviour of a returning host, should be checked against the Nova documentation of your release.
+The commands assume the libvirt driver. Evacuation semantics for local storage, and the behaviour of a returning
+host, should be checked against the Nova documentation of your release.
+
+The lab part was observed on lab builds with OpenStack 2026.1, Kolla-Ansible 22.2.0, ml2/OVS, Docker, Ubuntu 24.04,
+3 controllers and 2 computes, local instance disks and no Cinder. Observed: the symptom, marking the service down,
+the evacuation of one instance with a local disk (microversion 2.29), and the cleanup on the host's return with the
+service marked up. Not observed on the lab: fencing through IPMI or the switch (the host was off by construction),
+disabling the service (step 2), evacuation with shared storage, boot from volume, Cinder or Ceph, the Ceph checks of
+the diagnosis, evacuation in batches, microversion 2.95 or later, OVN, other releases and deployment tools,
+production scale.
 
 ## Related
 
 - [Moving instances off a host for planned maintenance](../migration/moving-instances-off-a-host-for-maintenance.md): the planned counterpart, where the host is healthy.
 - [Stale records](../lifecycle/stale-records-stuck-instances-orphan-ports-attachments.md): what an interrupted evacuation leaves behind.
+- [nova-compute down, instances still running](nova-compute-down-instances-still-running.md): the host is alive,
+  only the agent is down. Do not evacuate.
+- [nova-compute down, host alive, SSH refused](nova-compute-down-host-alive-ssh-refused.md): a refused login is not
+  a dead host.
 - Source: *OpenStack, the Day After Tomorrow* (S. Zaouam), chapter 10, "Unplanned host failure".
+- Source: lab reproduction by the OzarLand maintainer (OpenStack 2026.1, Kolla-Ansible 22.2.0).

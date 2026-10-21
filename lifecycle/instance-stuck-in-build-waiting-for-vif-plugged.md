@@ -2,7 +2,7 @@
 title: Instance stuck in BUILD, then ERROR after vif_plugging_timeout
 kind: runbook
 status: draft
-openstack_releases: [unrecorded]
+openstack_releases: ["2026.1"]
 components: [nova, neutron, ovn, ovs]
 deployment_methods: [any]
 environment:
@@ -15,6 +15,7 @@ confirmed_by: []
 upstream_refs:
   - https://docs.openstack.org/nova/latest/admin/architecture.html
   - https://docs.openstack.org/nova/latest/configuration/config.html#DEFAULT.vif_plugging_timeout
+  - https://docs.openstack.org/nova/latest/configuration/config.html#DEFAULT.vif_plugging_is_fatal
   - https://docs.openstack.org/neutron/latest/admin/ovn/
 last_verified: 2026-10-18
 ---
@@ -34,19 +35,25 @@ task_state  | spawning
 vm_state    | building
 ```
 
-After `vif_plugging_timeout` seconds (default 300), the instance goes to `ERROR` with a fault like:
+After `vif_plugging_timeout` seconds (default 300), the instance goes to `ERROR`. With `vif_plugging_is_fatal`
+(default true) the fault message is:
 
 ```text
-Virtual Interface creation failed
+Build of instance <server-id> aborted: Failed to allocate the network(s), not rescheduling.
 ```
 
-or, in `nova-compute.log` on the selected host:
+Its details, and `nova-compute.log` on the selected host, show the chain behind it:
 
 ```text
 Timeout waiting for [('network-vif-plugged', '<port-id>')] for instance with vm_state building and task_state spawning
+... InstanceEventTimeout
+... VirtualInterfaceCreateException: Virtual Interface creation failed
+... BuildAbortException ... not rescheduling
 ```
 
-Scheduling itself succeeded: the instance has a host (`OS-EXT-SRV-ATTR:host`) and an allocation in Placement.
+Scheduling itself succeeded: while the instance is in `BUILD` it has a host (`OS-EXT-SRV-ATTR:host`) and an
+allocation in Placement. Once the build is aborted, Nova clears the host field: an `ERROR` instance of this kind shows
+no host (observed on a lab). The build is not retried on another host.
 
 ## Impact
 
@@ -60,6 +67,8 @@ Run on a controller with admin credentials, unless stated otherwise.
 ```bash
 # 1. Which host was selected, and the fault
 openstack server show <server-id> -c OS-EXT-SRV-ATTR:host -c fault
+#    Empty host on an ERROR instance: the build was aborted and the host cleared. Find the host in
+#    nova-compute.log on the computes (grep <server-id>) or from the other failed builds.
 
 # 2. Is the port bound, and to what?
 openstack port list --server <server-id> -c ID -c Status -c "Binding Host"
@@ -98,7 +107,16 @@ Search `neutron-server.log` for the port UUID. Look for the binding attempt and 
 
 ### Agent or OVN controller (compute host)
 
-**ML2/OVS:** `openstack network agent list --host <host>` must show `Open vSwitch agent` alive. On the host,
+**ML2/OVS:** `openstack network agent list --host <host>` must show `Open vSwitch agent` alive. An agent whose
+process is frozen stops reporting and shows not alive, while its container still looks up:
+
+```bash
+# On the compute (Kolla-Ansible)
+docker ps -a --filter name=neutron_openvswitch_agent --format '{{.Names}} {{.Status}}'
+#    "Up ... (Paused)" means the container is paused; "Exited" means it stopped
+```
+
+On the host,
 `ovs-vsctl show` should list the tap device of the port under `br-int`; `neutron-openvswitch-agent.log` shows the
 port being processed. An agent that is alive but has a stale or stuck RPC connection (after a RabbitMQ incident, for
 example) processes nothing: look for `AMQP server unreachable` or long gaps in the log.
@@ -139,8 +157,22 @@ or stale bus. See [VM creation fails platform-wide: check the shared dependencie
 > and, on some versions and configurations, existing flows; restarting `ovn-controller` is usually transparent
 > but re-syncs every port on the host. Do it on one host first.
 
-**Kolla-Ansible:** `docker restart neutron_openvswitch_agent` or `docker restart ovn_controller` on the host.
+**Kolla-Ansible:** `docker restart neutron_openvswitch_agent` or `docker restart ovn_controller` on the host, or
+through the systemd unit Kolla-Ansible creates for the container:
+`systemctl restart kolla-neutron_openvswitch_agent-container.service`.
 **Any:** `systemctl restart neutron-openvswitch-agent` or `systemctl restart ovn-controller`.
+
+If `docker ps` shows the agent container `(Paused)`, resume it instead of restarting it:
+
+> ⚠️ **State-changing.** Resumes the frozen agent process; it then processes the ports that changed meanwhile. Undo:
+> `docker pause neutron_openvswitch_agent` (which reproduces the failure). Find out what paused it.
+
+```bash
+# On the compute (Kolla-Ansible)
+docker unpause neutron_openvswitch_agent
+```
+
+Builds that already failed are not retried: clean them up as below.
 
 ### Bridge mappings or physical network mismatch
 
@@ -184,15 +216,48 @@ openstack server delete vif-test
 openstack network agent list
 ```
 
+## Lab observations
+
+Reproduced on a lab: OpenStack 2026.1, Kolla-Ansible 22.2.0, ML2/OVS with VXLAN, Docker, Ubuntu Noble, 3 controllers
+and 2 computes. Kolla-Ansible 22.2.0 sets neither `vif_plugging_timeout` nor `vif_plugging_is_fatal`, so Nova's
+defaults (300 s, true) applied. The failure was produced by freezing (pausing) the Open vSwitch agent container of
+compute-1, then requesting a test instance on that compute.
+
+| | Before | During (360 s) | After (agent resumed) |
+|---|---|---|---|
+| Open vSwitch agent compute-1 | alive | **not alive** (container `Up (Paused)`) | alive |
+| Test instance | none | **fault after 317 s**: `Failed to allocate the network(s), not rescheduling` (`InstanceEventTimeout` → `VirtualInterfaceCreateException`), no host | deleted |
+
+- The fault arrived about 300 s after the request, as `vif_plugging_timeout` predicts, and the build was not tried on
+  the other compute.
+- The fault message is the `Build of instance … aborted` one; `Virtual Interface creation failed` appears in its
+  details and in `nova-compute.log`, not as the message itself. The earlier version of this page said otherwise.
+- The host field of the `ERROR` instance was empty.
+- An earlier attempt, on a lab that had run many other failures overnight, gave a fault after 134 s without this
+  signature. Its message was not read; it is not counted.
+
 ## Validity and limits
 
-Derived from an operator's description of the provisioning path; the OpenStack release on which the incidents were
-observed is not recorded. The mechanism (Nova waiting for `network-vif-plugged`, bounded by `vif_plugging_timeout`)
-is stable across recent releases. OVN commands assume the Neutron OVN driver; ML2/OVS commands assume the OVS
-agent. Not tested with Linux Bridge or SR-IOV ports, where binding failures have additional causes.
+The mechanism (Nova waiting for `network-vif-plugged`, bounded by `vif_plugging_timeout`) is stable across recent
+releases. It was first written from an operator's description of the provisioning path, release not recorded.
+
+- Observed on one lab build: OpenStack 2026.1, Kolla-Ansible 22.2.0, ML2/OVS (VXLAN), Docker, Ubuntu Noble,
+  3 controllers and 2 computes. Cause observed: the Open vSwitch agent of one compute frozen.
+- Observed steps: the symptom and fault chain, the agent shown not alive, resuming the agent (`docker unpause`), and
+  deleting the failed instance.
+- Not run on the lab: `docker restart` or `systemctl restart` of the agent, every OVN step, the bridge-mapping,
+  stale-RPC, Nova-notification and slow-host causes, disabling the compute service, the test boot of Verification.
+- OVN commands assume the Neutron OVN driver; ML2/OVS commands assume the OVS agent. Not tested with Linux Bridge or
+  SR-IOV ports, where binding failures have additional causes, nor on other releases, other deployment tools or at
+  production scale.
 
 ## Related
 
 - [No valid host with free capacity](../scheduling/no-valid-host-with-free-capacity.md): the other common build failure, which happens before a host is selected.
 - [What a VM creation traverses, and tracing it by request id](../diagnostics/what-a-vm-creation-traverses-and-tracing-by-request-id.md).
+- [Restarting the OVS agent does not cut instances](../networking/restarting-the-ovs-agent-does-not-cut-instances.md):
+  what a restart of the agent does to running traffic.
+- [ovs-vswitchd down on a compute](../networking/ovs-vswitchd-down-on-compute.md)
+- Nova: [`vif_plugging_timeout` and `vif_plugging_is_fatal`](https://docs.openstack.org/nova/latest/configuration/config.html#DEFAULT.vif_plugging_is_fatal)
 - Source: *OpenStack, the Day After Tomorrow* (S. Zaouam), chapter 5, technical note on the provisioning path.
+- Source: lab reproduction by the OzarLand maintainer (OpenStack 2026.1, Kolla-Ansible 22.2.0).
