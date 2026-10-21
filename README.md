@@ -78,7 +78,7 @@ Candidate runbooks that almost every operator has met and that are not written y
 behind it; open a *Problem solved* issue if you have one.
 
 1. Live migration fails: pre-check errors, shared storage assumptions, CPU model mismatch.
-2. Instance has no network: no DHCP lease versus no metadata versus no external connectivity, and how to tell.
+2. Instance unreachable from outside while it has its address and metadata (security groups, router, external network).
 3. Floating IP does not answer: where to look between the router, the gateway and the security groups.
 4. Volume stuck in `attaching` or `detaching` (the Cinder side of stale attachments).
 5. Instance in `ERROR` after a resize: recovering with `reset-state` and what that does not fix.
