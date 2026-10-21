@@ -1,7 +1,7 @@
 ---
 title: nova-compute is down on a compute, but its instances are still running
 kind: runbook
-status: lab-verified
+status: draft
 openstack_releases: ["2026.1"]
 components: [nova, libvirt]
 deployment_methods: [kolla-ansible]
@@ -11,8 +11,7 @@ environment:
   storage: local instance disks on the computes (no Cinder)
   os: ubuntu-24.04 (noble), docker
 risk: state-changing
-confirmed_by:
-  - { who: "lab:ozarland-maintainer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, OVS, Docker, Ubuntu Noble", date: 2026-10-13, note: "failure injected and observed on 3 lab builds; symptom and signature observed (compute service down, nova_compute exited, instances running in libvirt); fix = starting nova_compute again observed, service back up; finding why the agent stopped and the evacuation branch for a fenced host not run" }
+confirmed_by: []
 upstream_refs:
   - https://docs.openstack.org/nova/latest/admin/evacuate.html
   - https://docs.openstack.org/nova/latest/admin/node-down.html

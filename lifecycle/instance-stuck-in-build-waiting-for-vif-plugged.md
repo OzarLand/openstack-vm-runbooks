@@ -1,7 +1,7 @@
 ---
 title: Instance stuck in BUILD, then ERROR after vif_plugging_timeout
 kind: runbook
-status: lab-verified
+status: draft
 openstack_releases: ["2026.1"]
 components: [nova, neutron, ovn, ovs]
 deployment_methods: [any]
@@ -11,8 +11,7 @@ environment:
   storage: any
   os: any
 risk: state-changing
-confirmed_by:
-  - { who: "lab:ozarland-maintainer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, OVS, Docker, Ubuntu Noble", date: 2026-10-09, note: "failure injected and observed on 1 lab build (ML2/OVS, Open vSwitch agent of one compute frozen); symptom and signature observed (fault after 317 s, InstanceEventTimeout then VirtualInterfaceCreateException, not rescheduled, host cleared, agent not alive); fix = making the frozen agent run again (docker unpause) and deleting the failed instance observed; docker restart, OVN steps, bridge-mapping and Nova-notification causes and the test boot of Verification not run" }
+confirmed_by: []
 upstream_refs:
   - https://docs.openstack.org/nova/latest/admin/architecture.html
   - https://docs.openstack.org/nova/latest/configuration/config.html#DEFAULT.vif_plugging_timeout

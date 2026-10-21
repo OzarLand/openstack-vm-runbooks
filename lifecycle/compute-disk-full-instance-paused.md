@@ -1,7 +1,7 @@
 ---
 title: Compute disk full. An instance that writes is frozen, while Nova still shows it ACTIVE
 kind: runbook
-status: lab-verified
+status: draft
 openstack_releases: ["2026.1"]
 components: [nova, libvirt, qemu]
 deployment_methods: [kolla-ansible]
@@ -11,8 +11,7 @@ environment:
   storage: local qcow2 instance disks on the computes, instance store on its own ext4 file system (no Cinder)
   os: ubuntu-24.04 (noble), docker
 risk: destructive
-confirmed_by:
-  - { who: "lab:ozarland-maintainer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, OVS, Docker, Ubuntu Noble", date: 2026-10-13, note: "failure injected and observed on 4 lab builds; symptom and signature observed (store at 100 %, domain paused on I/O error, Nova ACTIVE with power state Paused, nothing in nova-compute.log); fix = freeing the space and virsh resume observed; disabling the compute service and finding what filled a real store not run" }
+confirmed_by: []
 upstream_refs:
   - https://docs.openstack.org/nova/latest/configuration/config.html#DEFAULT.disk_allocation_ratio
   - https://docs.openstack.org/nova/latest/configuration/config.html#DEFAULT.reserved_host_disk_mb

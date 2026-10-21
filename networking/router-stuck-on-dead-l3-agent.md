@@ -1,7 +1,7 @@
 ---
 title: L3 agent dead, instances still reachable, router not moved
 kind: runbook
-status: lab-verified
+status: draft
 openstack_releases: ["2026.1"]
 components: [neutron]
 deployment_methods: [kolla-ansible]
@@ -11,8 +11,7 @@ environment:
   storage: none (no Cinder on the lab)
   os: ubuntu-24.04 (noble), docker
 risk: destructive
-confirmed_by:
-  - { who: "lab:ozarland-maintainer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, OVS, Docker, Ubuntu Noble", date: 2026-10-09, note: "failure injected and observed on 1 lab build; symptom and signature observed (L3 agent not alive, router left on it, instances behind it lost no traffic); fix = starting the agent again observed; a change to the router while the agent was down, moving the router to another agent and L3 HA not run" }
+confirmed_by: []
 upstream_refs:
   - https://docs.openstack.org/neutron/latest/admin/deploy-ovs-ha-vrrp.html
   - https://docs.openstack.org/neutron/latest/configuration/neutron.html

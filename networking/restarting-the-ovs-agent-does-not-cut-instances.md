@@ -1,7 +1,7 @@
 ---
 title: I need to restart the Open vSwitch agent on a compute. Its instances keep their network
 kind: runbook
-status: lab-verified
+status: draft
 openstack_releases: ["2026.1"]
 components: [neutron, ovs]
 deployment_methods: [kolla-ansible]
@@ -11,8 +11,7 @@ environment:
   storage: local ephemeral disk on the computes, no Cinder
   os: ubuntu-24.04 (noble), docker
 risk: state-changing
-confirmed_by:
-  - { who: "lab:ozarland-maintainer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, OVS, Docker, Ubuntu Noble", date: 2026-10-09, note: "restart of the agent's unit run and observed on 1 lab build; no request lost on the instances of the restarted compute or the other one, all agents alive afterwards; drop_flows_on_start check, flow dump during the restart and the Any form not run" }
+confirmed_by: []
 upstream_refs:
   - https://docs.openstack.org/neutron/latest/contributor/internals/openvswitch_agent.html
   - https://docs.openstack.org/neutron/latest/configuration/openvswitch-agent.html

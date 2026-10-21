@@ -1,7 +1,7 @@
 ---
 title: I need to restart nova_libvirt on a compute. Its instances keep running
 kind: runbook
-status: lab-verified
+status: draft
 openstack_releases: ["2026.1"]
 components: [nova, libvirt]
 deployment_methods: [kolla-ansible]
@@ -11,8 +11,7 @@ environment:
   storage: local ephemeral disk on the computes, no Cinder
   os: ubuntu-24.04 (noble), docker
 risk: state-changing
-confirmed_by:
-  - { who: "lab:ozarland-maintainer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, OVS, Docker, Ubuntu Noble", date: 2026-10-09, note: "restart of the nova_libvirt unit run and observed on 1 lab build; no request lost, same libvirt domain ID before and after, instance ACTIVE and running; qemu PID read before the restart only; pid_mode check, migration check and the Any form not run" }
+confirmed_by: []
 upstream_refs:
   - https://docs.openstack.org/kolla-ansible/latest/reference/compute/libvirt-guide.html
   - https://docs.openstack.org/nova/latest/admin/configuration/hypervisor-kvm.html

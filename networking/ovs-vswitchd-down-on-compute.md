@@ -1,7 +1,7 @@
 ---
 title: Every instance on one compute loses the network while Nova shows them ACTIVE (ovs-vswitchd down)
 kind: runbook
-status: lab-verified
+status: draft
 openstack_releases: ["2026.1"]
 components: [neutron, ovs]
 deployment_methods: [kolla-ansible]
@@ -11,8 +11,7 @@ environment:
   storage: local ephemeral disk on the computes, no Cinder
   os: ubuntu-24.04 (noble), docker
 risk: state-changing
-confirmed_by:
-  - { who: "lab:ozarland-maintainer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, OVS, Docker, Ubuntu Noble", date: 2026-10-09, note: "failure injected and observed on 1 lab build; symptom and signature observed (instances of one compute unreachable, its OVS agent not alive, Nova ACTIVE); fix = starting ovs-vswitchd again observed, instances recovered without further action; root-cause search (logs, OOM) not run" }
+confirmed_by: []
 upstream_refs:
   - https://docs.openstack.org/neutron/latest/admin/deploy-ovs-selfservice.html
   - https://docs.openstack.org/neutron/latest/contributor/internals/openvswitch_agent.html

@@ -1,7 +1,7 @@
 ---
 title: Instances of one compute answer ping, but large transfers stall
 kind: runbook
-status: lab-verified
+status: draft
 openstack_releases: ["2026.1"]
 components: [neutron, ovs]
 deployment_methods: [kolla-ansible]
@@ -11,8 +11,7 @@ environment:
   storage: none (no Cinder on the lab)
   os: ubuntu-24.04 (noble), docker
 risk: state-changing
-confirmed_by:
-  - { who: "lab:ozarland-maintainer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, OVS, Docker, Ubuntu Noble", date: 2026-10-13, note: "failure injected and observed on 3 lab builds (full before/during/after series on the last 2); symptom and signature observed (tunnel MTU lowered by 100 bytes on one compute, largest do-not-fragment ping lost, small pings fine); fix = restoring the interface MTU with ip link observed; making it persistent and the global_physnet_mtu change not run" }
+confirmed_by: []
 upstream_refs:
   - https://docs.openstack.org/neutron/latest/admin/config-mtu.html
   - https://docs.openstack.org/kolla-ansible/latest/reference/networking/neutron.html

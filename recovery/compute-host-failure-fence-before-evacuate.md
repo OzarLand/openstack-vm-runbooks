@@ -1,7 +1,7 @@
 ---
 title: Compute host unreachable, instances down. Fence before you evacuate
 kind: runbook
-status: lab-verified
+status: draft
 openstack_releases: ["2026.1"]
 components: [nova, libvirt, cinder, ceph]
 deployment_methods: [any]
@@ -11,8 +11,7 @@ environment:
   storage: shared instance storage or boot-from-volume for evacuation to preserve disks
   os: any
 risk: destructive
-confirmed_by:
-  - { who: "lab:ozarland-maintainer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, OVS, Docker, Ubuntu Noble", date: 2026-10-13, note: "failure (abrupt power-off of a compute) injected and observed on 3 lab builds; symptom observed (compute service and OVS agent down, instance still ACTIVE on the dead host in Nova); service marked down, evacuation (microversion 2.29, local disk, rebuilt from image) and cleanup by nova-compute on the host's return observed; fencing through IPMI or the switch not run (the host was off by construction), disabling the service, Cinder and Ceph not tested" }
+confirmed_by: []
 upstream_refs:
   - https://docs.openstack.org/nova/latest/admin/evacuate.html
   - https://docs.openstack.org/nova/latest/admin/node-down.html

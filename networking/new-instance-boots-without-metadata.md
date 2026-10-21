@@ -1,7 +1,7 @@
 ---
 title: New instance has an address, but no SSH key, no user data, default hostname
 kind: runbook
-status: lab-verified
+status: draft
 openstack_releases: ["2026.1"]
 components: [neutron, nova]
 deployment_methods: [kolla-ansible]
@@ -11,8 +11,7 @@ environment:
   storage: none (no Cinder on the lab)
   os: ubuntu-24.04 (noble), docker
 risk: destructive
-confirmed_by:
-  - { who: "lab:ozarland-maintainer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, OVS, Docker, Ubuntu Noble", date: 2026-10-09, note: "failure injected and observed on 1 lab build; symptom and signature observed (all metadata agents not alive, new CirrOS instance ACTIVE, metadata requests failed 20/20, no instance ID); fix = starting the metadata agents observed (agents alive again); rebuild of the affected instance, a new instance reading its metadata afterwards and running instances not observed" }
+confirmed_by: []
 upstream_refs:
   - https://docs.openstack.org/nova/latest/admin/metadata-service.html
   - https://docs.openstack.org/neutron/latest/configuration/metadata-agent.html

@@ -1,7 +1,7 @@
 ---
 title: The logs of one compute do not line up with the controllers. Its clock has drifted
 kind: runbook
-status: lab-verified
+status: draft
 openstack_releases: ["2026.1"]
 components: [nova, neutron, ntp]
 deployment_methods: [kolla-ansible]
@@ -11,8 +11,7 @@ environment:
   storage: local ephemeral disk on the computes, no Cinder
   os: ubuntu-24.04 (noble), docker, systemd-timesyncd
 risk: state-changing
-confirmed_by:
-  - { who: "lab:ozarland-maintainer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, OVS, Docker, Ubuntu Noble", date: 2026-10-09, note: "300 s backward drift injected on one compute and observed on 1 lab build; symptom observed (logs stamped about 5 min early, services up, new instance ACTIVE, no warning about time); fix = starting systemd-timesyncd observed, clock back within 5 s of the first controller; chrony, forward drift and drift on a controller not run" }
+confirmed_by: []
 upstream_refs:
   - https://docs.openstack.org/install-guide/environment-ntp.html
   - https://docs.openstack.org/nova/latest/admin/service-groups.html

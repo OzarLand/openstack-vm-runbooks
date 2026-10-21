@@ -1,7 +1,7 @@
 ---
 title: New instance is ACTIVE but unreachable, it never got an IP address
 kind: runbook
-status: lab-verified
+status: draft
 openstack_releases: ["2026.1"]
 components: [neutron, nova]
 deployment_methods: [kolla-ansible]
@@ -11,8 +11,7 @@ environment:
   storage: none (no Cinder on the lab)
   os: ubuntu-24.04 (noble), docker
 risk: state-changing
-confirmed_by:
-  - { who: "lab:ozarland-maintainer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, OVS, Docker, Ubuntu Noble", date: 2026-10-09, note: "failure injected and observed on 2 lab builds (one run each); symptom and signature observed (all DHCP agents not alive, new instance ACTIVE with no lease, running instances lost nothing); fix = starting the DHCP agents observed, networks rescheduled to another agent; reboot of the affected instance and a new instance getting its lease afterwards not run" }
+confirmed_by: []
 upstream_refs:
   - https://docs.openstack.org/neutron/latest/admin/config-dhcp-ha.html
   - https://docs.openstack.org/neutron/latest/configuration/dhcp-agent.html

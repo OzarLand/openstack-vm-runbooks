@@ -1,7 +1,7 @@
 ---
 title: nova-compute is down and the compute refuses an SSH login, but the host is alive
 kind: runbook
-status: lab-verified
+status: draft
 openstack_releases: ["2026.1"]
 components: [nova, libvirt, ssh]
 deployment_methods: [kolla-ansible]
@@ -11,8 +11,7 @@ environment:
   storage: local instance disks on the computes (no Cinder)
   os: ubuntu-24.04 (noble), docker
 risk: state-changing
-confirmed_by:
-  - { who: "lab:ozarland-maintainer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, OVS, Docker, Ubuntu Noble", date: 2026-10-14, note: "failure injected and observed on 1 lab build (one run); symptom and signature observed (compute service down, instance running in libvirt, login refused with 'listed in DenyUsers' in the sshd journal, same user accepted elsewhere); fix = removing the DenyUsers rule, reloading sshd and starting nova_compute observed; ping of the host and the other SSH refusal causes not observed" }
+confirmed_by: []
 upstream_refs:
   - https://docs.openstack.org/nova/latest/admin/evacuate.html
   - https://docs.openstack.org/nova/latest/admin/node-down.html
