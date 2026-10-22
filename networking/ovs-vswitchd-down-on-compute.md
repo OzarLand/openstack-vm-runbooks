@@ -72,9 +72,13 @@ Run on the compute:
 docker ps -a --filter name=openvswitch --format '{{.Names}} {{.Status}}'
 
 # 4. ovs-vswitchd does not answer, while ovsdb-server does
-docker exec openvswitch_db ovs-appctl -t ovs-vswitchd version   # fails while ovs-vswitchd is down
-docker exec openvswitch_db ovs-vsctl show                       # still answers
+docker exec openvswitch_vswitchd ovs-appctl version   # fails while ovs-vswitchd is down (container not running)
+docker exec openvswitch_db ovs-vsctl show             # still answers
 ```
+
+`ovs-appctl` runs in the `openvswitch_vswitchd` container. From `openvswitch_db`, `ovs-appctl -t ovs-vswitchd` reads a
+pidfile that is not valid there and fails even while ovs-vswitchd runs (`stale pidfile`, `cannot read pidfile`),
+as a lab review on Kolla-Ansible 22.2.0 found.
 
 If all four match, you are looking at this problem.
 
@@ -119,7 +123,8 @@ The `openvswitch_vswitchd` container is stopped or restarting. The reason is in 
 
 ### Cause 2: ovs-vswitchd runs but is stuck
 
-The container is up but `ovs-appctl -t ovs-vswitchd version` hangs or times out. Not observed on the lab; the
+The container is up but `docker exec openvswitch_vswitchd ovs-appctl version` hangs or times out. Not observed on
+the lab; the
 resolution below (a restart instead of a start) is expected to apply, but was not tested.
 
 ## Resolution
@@ -183,7 +188,7 @@ ping -c 10 <instance-address>
 On the compute:
 
 ```bash
-docker exec openvswitch_db ovs-appctl -t ovs-vswitchd version   # answers
+docker exec openvswitch_vswitchd ovs-appctl version   # answers
 docker exec openvswitch_vswitchd ovs-ofctl dump-flows br-int | head
 ```
 

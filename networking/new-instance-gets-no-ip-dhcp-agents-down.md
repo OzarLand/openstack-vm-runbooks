@@ -140,7 +140,8 @@ Then read the agent log and the unit status from before the restart to find why 
 
 ### For the instances created during the outage
 
-Their DHCP client may retry by itself after a while, depending on the image. Otherwise reboot them.
+Their DHCP client may retry by itself after a while, depending on the image. Otherwise reboot them. On the lab,
+CirrOS had not retried 90 s after the agent came back, and got its lease at the next boot.
 
 > ⚠️ **State-changing.** Reboots the instance. Its owner loses whatever runs in it for the time of the boot; nothing
 > is lost on disk. Tell the owner first. It cannot be undone, but it changes nothing beyond a normal reboot.
@@ -193,17 +194,27 @@ then requesting a test instance on compute-1. A continuous ping to the running i
   when the network moved. It was a flaw of the measurement, not of the instances; the second run, from a namespace of
   its own, confirmed the instances lost nothing.
 
+A lab review on a second platform (all-in-one, one DHCP agent, same releases) repeated cause 1 for about 7.5 minutes:
+
+- running instances lost nothing (1328 requests, 0 lost), the agent was alive 23 s after its unit was started;
+- the dnsmasq and haproxy wrapper containers (`neutron_dhcp_agent_dnsmasq_qdhcp-<network-id>`,
+  `neutron_dhcp_agent_haproxy_qdhcp-<network-id>`) stayed `Up` while the agent was down: dnsmasq keeps running but
+  never learns the new port;
+- an instance created during the outage still had no lease 90 s after the restart (CirrOS's DHCP client had timed
+  out), and got it after `openstack server reboot`;
+- with a single agent, the network stayed on the same agent: the move between agents above needs several agents.
+
 ## Validity and limits
 
 - Observed on lab builds with the configuration above: OpenStack 2026.1, Kolla-Ansible 22.2.0, ML2/OVS with VXLAN,
   Docker, Ubuntu Noble, 3 controllers and 2 computes, CirrOS test instances, default `neutron_agents_wrappers`.
 - Observed: the symptom and signature, running instances unaffected during the outage and the restart, the fix by
   starting the agents, and the networks moving to another DHCP agent on restart.
-- Not run: rebooting an instance created during the outage, and a new instance getting its lease after the restart
-  (the test instance was deleted). Causes 2, 3 and 4 were not reproduced.
+- Also observed, on an all-in-one lab: the reboot of an instance created during the outage (CirrOS), a new instance
+  getting its lease after the restart, and the wrapper containers staying up. Causes 2, 3 and 4 were not reproduced.
+- The networks moving to another DHCP agent rests on the multinode runs only.
 - Not tested: an outage longer than the lease, DHCP agent HA (`enable_neutron_agent_ha`), OVN (which has no DHCP
   agent), cloud-init images, other releases, other deployment tools, production scale.
-- Whether the dnsmasq wrapper containers kept running while the agents were down was not checked.
 
 ## Related
 
