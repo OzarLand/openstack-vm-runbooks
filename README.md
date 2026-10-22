@@ -75,6 +75,7 @@ variants for other methods are added by whoever has them.
 | [L3 agent dead, instances still reachable, router not moved](networking/router-stuck-on-dead-l3-agent.md) | neutron | 2026.1 | draft |
 | [New instance has an address, but no SSH key, no user data, default hostname](networking/new-instance-boots-without-metadata.md) | neutron, nova | 2026.1 | draft |
 | [New instance is ACTIVE but unreachable, it never got an IP address](networking/new-instance-gets-no-ip-dhcp-agents-down.md) | neutron, nova | 2026.1 | draft |
+| [Instance has its address and metadata, but is unreachable from outside](networking/instance-unreachable-from-outside.md) | neutron, nova, ovs, ovn | 2026.1 | draft |
 | [Control plane down. What still works for running instances, and what does not](diagnostics/control-plane-down-what-still-works-for-instances.md) | nova, neutron, ovn, ovs, libvirt | unrecorded | draft |
 | [Every API call fails at once. Expired TLS certificates or inconsistent Keystone Fernet keys](diagnostics/expired-certificates-and-fernet-keys-break-every-api-call.md) | keystone, haproxy, rabbitmq, mariadb, memcached | unrecorded | draft |
 | [The logs of one compute do not line up with the controllers. Its clock has drifted](diagnostics/compute-clock-skew.md) | nova, neutron, ntp | 2026.1 | draft |
@@ -93,11 +94,10 @@ Candidate runbooks that almost every operator has met and that are not written y
 behind it; open a *Problem solved* issue if you have one.
 
 1. Live migration fails: pre-check errors, shared storage assumptions, CPU model mismatch.
-2. Instance unreachable from outside while it has its address and metadata (security groups, router, external network).
-3. Floating IP does not answer: where to look between the router, the gateway and the security groups.
-4. Instance in `ERROR` after a resize: recovering with `reset-state` and what that does not fix.
-5. Console not available: VNC/SPICE proxy and hypervisor side.
-6. Instance stuck in `deleting` after the compute host was lost (the deletion-specific details beyond the stale-records page).
+2. Floating IP does not answer: where to look between the router, the gateway and the security groups.
+3. Instance in `ERROR` after a resize: recovering with `reset-state` and what that does not fix.
+4. Console not available: VNC/SPICE proxy and hypervisor side.
+5. Instance stuck in `deleting` after the compute host was lost (the deletion-specific details beyond the stale-records page).
 
 ## Contributing
 
