@@ -84,6 +84,8 @@ variants for other methods are added by whoever has them.
 | [Reopening provisioning after a control-plane incident. Stop the APIs, recover, verify, reopen](recovery/reopening-provisioning-after-control-plane-incident.md) | nova, neutron, rabbitmq, mariadb, haproxy | unrecorded | draft |
 | [nova-compute is down and the compute refuses an SSH login, but the host is alive](recovery/nova-compute-down-host-alive-ssh-refused.md) | nova, libvirt, ssh | 2026.1 | draft |
 | [nova-compute is down on a compute, but its instances are still running](recovery/nova-compute-down-instances-still-running.md) | nova, libvirt | 2026.1 | draft |
+| [Volume stuck in attaching, reserved or detaching. The attach or detach never finishes](volumes/volume-stuck-in-attaching-or-detaching.md) | cinder, nova, libvirt | 2026.1 | draft |
+| [Stale volume attachment. The volume is still in-use for an instance that was deleted or evacuated](volumes/stale-volume-attachment-after-instance-deleted-or-evacuated.md) | cinder, nova, libvirt | 2026.1 | draft |
 
 ## Pages wanted next
 
@@ -93,10 +95,9 @@ behind it; open a *Problem solved* issue if you have one.
 1. Live migration fails: pre-check errors, shared storage assumptions, CPU model mismatch.
 2. Instance unreachable from outside while it has its address and metadata (security groups, router, external network).
 3. Floating IP does not answer: where to look between the router, the gateway and the security groups.
-4. Volume stuck in `attaching` or `detaching` (the Cinder side of stale attachments).
-5. Instance in `ERROR` after a resize: recovering with `reset-state` and what that does not fix.
-6. Console not available: VNC/SPICE proxy and hypervisor side.
-7. Instance stuck in `deleting` after the compute host was lost (the deletion-specific details beyond the stale-records page).
+4. Instance in `ERROR` after a resize: recovering with `reset-state` and what that does not fix.
+5. Console not available: VNC/SPICE proxy and hypervisor side.
+6. Instance stuck in `deleting` after the compute host was lost (the deletion-specific details beyond the stale-records page).
 
 ## Contributing
 
