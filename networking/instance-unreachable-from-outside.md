@@ -1,7 +1,7 @@
 ---
 title: Instance has its address and metadata, but is unreachable from outside
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [neutron, nova, ovs, ovn]
 deployment_methods: [kolla-ansible, any]
@@ -11,7 +11,8 @@ environment:
   storage: any
   os: any
 risk: state-changing
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible all-in-one, ml2/ovs", date: 2026-10-22, note: "symptom, quick checks and ML2/OVS namespace checks run; causes 1 and 2 reproduced and resolved; Neutron's cause-3 refusals observed; OVN steps and causes 4 to 6 not run" }
 upstream_refs:
   - https://docs.openstack.org/neutron/2026.1/admin/intro-os-networking.html
   - https://docs.openstack.org/neutron/2026.1/admin/deploy-ovs-selfservice.html
