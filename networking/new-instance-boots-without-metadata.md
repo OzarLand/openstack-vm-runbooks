@@ -1,7 +1,7 @@
 ---
 title: New instance has an address, but no SSH key, no user data, default hostname
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [neutron, nova]
 deployment_methods: [kolla-ansible]
@@ -11,12 +11,13 @@ environment:
   storage: none (no Cinder on the lab)
   os: ubuntu-24.04 (noble), docker
 risk: destructive
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-22, note: "full procedure for cause 1 on a disposable lab, including reboot and rebuild of an instance created during the outage (CirrOS); causes 2 and 3 not reproduced" }
 upstream_refs:
   - https://docs.openstack.org/nova/latest/admin/metadata-service.html
   - https://docs.openstack.org/neutron/latest/configuration/metadata-agent.html
   - https://docs.openstack.org/nova/latest/admin/config-drive.html
-last_verified: 2026-10-21
+last_verified: 2026-10-22
 ---
 
 # New instance has an address, but no SSH key, no user data, default hostname
