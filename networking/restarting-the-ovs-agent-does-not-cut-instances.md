@@ -58,11 +58,15 @@ On the compute:
 
 ```bash
 # 3. ovs-vswitchd runs: this is what keeps the instances connected during the restart
-docker exec openvswitch_db ovs-appctl -t ovs-vswitchd version
+docker exec openvswitch_vswitchd ovs-appctl version
 
 # 4. drop_flows_on_start is not enabled (no output, or "False", means the default: flows are kept)
 docker exec neutron_openvswitch_agent grep -rn drop_flows_on_start /etc/neutron/
 ```
+
+`ovs-appctl` runs in the `openvswitch_vswitchd` container. From `openvswitch_db`, `ovs-appctl -t ovs-vswitchd` reads a
+pidfile that is not valid there and fails even while ovs-vswitchd runs (`stale pidfile`, `cannot read pidfile`),
+as a lab review on Kolla-Ansible 22.2.0 found.
 
 If ovs-vswitchd does not answer, stop here: you are in
 [ovs-vswitchd down on a compute](ovs-vswitchd-down-on-compute.md), and restarting the agent will not help.

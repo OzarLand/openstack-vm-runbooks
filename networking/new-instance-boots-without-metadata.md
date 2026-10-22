@@ -184,16 +184,27 @@ controllers), then requesting a CirrOS test instance on compute-1.
 
 - CirrOS waited about 3 minutes for its metadata, then went on booting without it.
 - The measurement of running instances' traffic on this run was not valid (it read a leftover of a previous test on
-  another host), so running instances were not measured.
+  another host), so running instances were not measured on this run.
+
+A lab review on a second platform (all-in-one, one metadata agent, same releases, CirrOS 0.6.3, no config drive)
+repeated cause 1 for about 5 minutes:
+
+- running instances lost nothing during the outage and the restart (1179 requests, 0 lost);
+- the agent was alive within 12 s of its unit being started;
+- the instance created during the outage got its key and instance ID back after `openstack server reboot`: CirrOS
+  reads the metadata at every boot;
+- the 🛑 rebuild, run on a disposable test instance, also brought the metadata back.
 
 ## Validity and limits
 
 - Observed on one lab build with the configuration above: OpenStack 2026.1, Kolla-Ansible 22.2.0, ML2/OVS with VXLAN,
   Docker, Ubuntu Noble, 3 controllers and 2 computes, CirrOS test instance, no config drive.
 - Observed: the symptom and signature, and the agents alive again after their units were started.
-- Not run: rebooting or rebuilding an instance created during the outage, a new instance reading its metadata after
-  the restart (the test instance was deleted), running instances during the outage. Causes 2 and 3 were not
-  reproduced.
+- Also observed, on an all-in-one lab with CirrOS: running instances unaffected during the outage, the reboot and the
+  rebuild of an instance created during the outage, and a new instance reading its metadata after the restart.
+  Causes 2 and 3 were not reproduced.
+- Whether a reboot is enough depends on the image: observed on CirrOS, which reads the metadata at every boot; not
+  tested on cloud-init images.
 - Not tested: cloud-init images, config drive, OVN (its metadata agent is different), other releases, other
   deployment tools, production scale.
 
