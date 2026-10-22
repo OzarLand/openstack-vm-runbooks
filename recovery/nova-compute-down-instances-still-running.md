@@ -1,7 +1,7 @@
 ---
 title: nova-compute is down on a compute, but its instances are still running
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [nova, libvirt]
 deployment_methods: [kolla-ansible]
@@ -11,13 +11,14 @@ environment:
   storage: local instance disks on the computes (no Cinder)
   os: ubuntu-24.04 (noble), docker
 risk: state-changing
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-22, note: "full procedure on a disposable lab (agent stopped through its unit); the local delete of an instance while the agent was down was observed, its domain destroyed when the agent came back" }
 upstream_refs:
   - https://docs.openstack.org/nova/latest/admin/evacuate.html
   - https://docs.openstack.org/nova/latest/admin/node-down.html
   - https://docs.openstack.org/nova/latest/configuration/config.html#DEFAULT.service_down_time
   - https://docs.openstack.org/python-openstackclient/latest/cli/command-objects/compute-service.html
-last_verified: 2026-10-21
+last_verified: 2026-10-22
 ---
 
 # nova-compute is down on a compute, but its instances are still running
