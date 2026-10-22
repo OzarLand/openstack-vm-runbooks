@@ -1,7 +1,7 @@
 ---
 title: New instance is ACTIVE but unreachable, it never got an IP address
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [neutron, nova]
 deployment_methods: [kolla-ansible]
@@ -11,12 +11,13 @@ environment:
   storage: none (no Cinder on the lab)
   os: ubuntu-24.04 (noble), docker
 risk: state-changing
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-22, note: "full procedure for cause 1 on a disposable lab, including the reboot of an instance created during the outage; causes 2 to 4 not reproduced" }
 upstream_refs:
   - https://docs.openstack.org/neutron/latest/admin/config-dhcp-ha.html
   - https://docs.openstack.org/neutron/latest/configuration/dhcp-agent.html
   - https://docs.openstack.org/kolla-ansible/latest/reference/networking/neutron.html
-last_verified: 2026-10-21
+last_verified: 2026-10-22
 ---
 
 # New instance is ACTIVE but unreachable, it never got an IP address
