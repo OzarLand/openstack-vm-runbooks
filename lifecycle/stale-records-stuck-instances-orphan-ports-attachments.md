@@ -82,7 +82,7 @@ For each stale record, establish what is real before touching it:
 - **Orphan port**: `device_id` points to a deleted server. Confirm the server is really deleted
   (`openstack server show <id>` returns not found; `nova-manage` shows it archived) before deleting the port.
 - **Volume attached to a missing instance**: Cinder has an attachment the instance does not. Compare
-  `openstack volume attachment list` with `openstack server show` on the instance, if it exists.
+  `openstack --os-volume-api-version 3.27 volume attachment list` with `openstack server show` on the instance, if it exists.
 - **Phantom allocation**: `placement audit` lists allocations whose consumer (instance) no longer exists, or exists
   on a different host than the allocation says (left over from a failed migration or evacuation).
 
@@ -133,8 +133,8 @@ nova-manage placement heal_allocations --verbose
 openstack port delete <port-id>
 
 # Volume still "in-use" for an instance that no longer exists
-openstack volume attachment list --volume <volume-id>
-openstack volume attachment delete <attachment-id>
+openstack --os-volume-api-version 3.27 volume attachment list --all-projects --volume-id <volume-id>
+openstack --os-volume-api-version 3.27 volume attachment delete <attachment-id>
 ```
 
 > 🛑 **Destructive.** On Cinder API versions without attachment objects, the fallback is to force the volume's
