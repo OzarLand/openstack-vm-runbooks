@@ -34,6 +34,9 @@ $ ssh <user>@<floating-ip>
 ssh: connect to host <floating-ip> port 22: Connection timed out
 ```
 
+A client on the external network's own segment may see `No route to host` instead: when no router holds the
+floating IP, nothing answers ARP for it. A client farther away sees a timeout.
+
 If the instance never got an address, or got one but no metadata, see
 [new instance gets no IP](new-instance-gets-no-ip-dhcp-agents-down.md) or
 [new instance boots without metadata](new-instance-boots-without-metadata.md) instead.
@@ -60,8 +63,9 @@ openstack security group rule list --ingress <security-group-id>
 openstack floating ip list --port <port-id>
 
 # 4. The router of the tenant network: its gateway and its interfaces
-openstack port list --network <tenant-network-id> --device-owner network:router_interface -c device_id
+openstack port list --network <tenant-network-id> --device-owner network:router_interface -f value -c ID
 # HA or distributed routers use other device owners: list the network's ports without the filter if this is empty
+openstack port show <router-interface-port-id> -c device_id      # device_id is the router ID
 openstack router show <router-id> -c external_gateway_info -c interfaces_info -c status
 
 # 5. The external network is really external
@@ -93,9 +97,11 @@ group instead of a prefix only admits members of that group.
 - A floating IP exists but is associated with another port, or with another fixed address of a port with several
   (`Fixed IP Address` column): traffic goes elsewhere.
 - No router interface on the tenant network (check 4 empty), or a router without `external_gateway_info`: nothing
-  routes between the external network and the tenant subnet. Neutron normally refuses to associate a floating IP in
-  that situation, so a floating IP that is associated while the path is missing points at a change made afterwards
-  (an interface or a gateway removed).
+  routes between the external network and the tenant subnet. Through the API, this cannot coexist with an
+  associated floating IP: Neutron refuses the association (`External network <network-id> is not reachable from
+  subnet <subnet-id>`), and refuses with HTTP 409 to remove the router interface or the gateway while a floating IP
+  depends on them (observed on 2026.1 with ML2/OVS). This cause therefore applies when no floating IP is associated
+  yet. An associated floating IP with no working path points at the router on its node (cause 4).
 
 ### Where the router lives (only when the API records all look right)
 
@@ -106,13 +112,16 @@ scheduled it on.
 openstack network agent list --router <router-id> --long      # which agent, alive, HA state
 ```
 
-On that node:
+With L3 HA routers the namespace exists on several nodes, and only the one whose `HA State` is `active` carries the
+floating IP. Check that node.
+
+On that node, as root (without it, entering the namespace fails with `Operation not permitted`):
 
 **Kolla-Ansible:**
 
 ```bash
-ip netns exec qrouter-<router-id> ip -brief addr                # the qg- interface carries the floating IP
-ip netns exec qrouter-<router-id> iptables -t nat -S | grep -F "<floating-ip>"
+sudo ip netns exec qrouter-<router-id> ip -brief addr           # the qg- interface carries the floating IP
+sudo ip netns exec qrouter-<router-id> iptables -t nat -S | grep -F "<floating-ip>"
 ```
 
 **Any:** the same commands on the network node that runs `neutron-l3-agent`.
@@ -131,6 +140,9 @@ docker exec ovn_northd ovn-nbctl lr-nat-list neutron-<router-id>   # a dnat_and_
 ```
 
 **Any:** `ovn-nbctl lr-nat-list neutron-<router-id>` wherever `ovn-nbctl` reaches the northbound database.
+
+Not yet checked on a lab: on a multinode or clustered northbound database, `ovn-nbctl` may need
+`--db=<nb-connection>` to find it from that container.
 
 ### Inside the guest
 
@@ -151,8 +163,8 @@ outside this page.
 |---|---|
 | 1. No security group rule admits the traffic | Check 2: no ingress rule for the protocol, port and source |
 | 2. No floating IP, or one associated elsewhere | Check 3 empty, or another port or fixed address |
-| 3. No router path: no interface on the tenant network, or no gateway | Check 4 |
-| 4. The router exists in the API but not on its node (agent down, NAT missing) | Namespace or OVN NAT checks |
+| 3. No router path, before any floating IP is associated: no interface on the tenant network, or no gateway | Check 4; the association fails with `External network … is not reachable from subnet …` |
+| 4. The API shows a router path and an associated floating IP, but the router is not on its node (agent down, NAT missing) | Namespace or OVN NAT checks |
 | 5. The guest drops the traffic | All checks pass; a neighbour cannot connect either |
 | 6. The external network or upstream routing | Every floating IP affected; nothing wrong inside OpenStack |
 
@@ -185,7 +197,7 @@ openstack floating ip set --port <port-id> <floating-ip-id>
 openstack floating ip set --port <port-id> --fixed-ip-address <fixed-ip> <floating-ip-id>
 ```
 
-### For cause 3: give the tenant network a path to the external network
+### For cause 3: give the tenant network a path to the external network, then associate the floating IP
 
 > ⚠️ **State-changing.** Setting a gateway gives every instance of the router's networks outbound access (SNAT) to
 > the external network, and consumes an address on it. Adding an interface connects the tenant subnet to the router
@@ -196,6 +208,8 @@ openstack floating ip set --port <port-id> --fixed-ip-address <fixed-ip> <floati
 openstack router set --external-gateway <external-network-id> <router-id>
 openstack router add subnet <router-id> <tenant-subnet-id>
 ```
+
+Then associate the floating IP as for cause 2.
 
 ### For cause 4: the router is missing on its node
 
@@ -226,7 +240,11 @@ ssh <user>@<floating-ip>
 Written from the Neutron 2026.1 documentation (networking introduction for the security group defaults, the
 self-service deployment guide, the OVN routing guide), the Kolla-Ansible 2026.1 Neutron reference (`ovn-nbctl` from
 the `ovn_northd` container) and the python-openstackclient 2026.1 source for every option used. Not observed on a
-platform yet; a lab run or an operator's confirmation is wanted, in particular of the namespace and OVN checks.
+platform when first written.
+
+A lab review on 2026.1 (Kolla-Ansible 22.2.0, all-in-one, ML2/OVS with the L3 agent, legacy router, CirrOS) ran the
+symptom, the quick checks, the ML2/OVS namespace checks, causes 1 and 2 with their resolutions, and Neutron's
+refusals described under cause 3. The OVN steps and causes 4 to 6 were not run; a lab run on ML2/OVN is wanted.
 
 Not covered: DVR, BGP-announced floating IPs, IPv6 without NAT, provider networks attached directly to instances
 (no router, no floating IP), and repairing the Neutron to OVN synchronisation.
