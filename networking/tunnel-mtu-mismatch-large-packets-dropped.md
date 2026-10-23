@@ -1,7 +1,7 @@
 ---
 title: Instances of one compute answer ping, but large transfers stall
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [neutron, ovs]
 deployment_methods: [kolla-ansible]
@@ -11,12 +11,13 @@ environment:
   storage: none (no Cinder on the lab)
   os: ubuntu-24.04 (noble), docker
 risk: state-changing
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible multinode (1 controller, 2 computes)", date: 2026-10-23, note: "cause 1 reproduced on one compute and fixed with ip link set, persisted with netplan apply; the host-to-host DF ping from the other host did not detect the lowered MTU" }
 upstream_refs:
   - https://docs.openstack.org/neutron/latest/admin/config-mtu.html
   - https://docs.openstack.org/kolla-ansible/latest/reference/networking/neutron.html
   - https://docs.openstack.org/kolla-ansible/latest/admin/advanced-configuration.html
-last_verified: 2026-10-21
+last_verified: 2026-10-23
 ---
 
 # Instances of one compute answer ping, but large transfers stall
