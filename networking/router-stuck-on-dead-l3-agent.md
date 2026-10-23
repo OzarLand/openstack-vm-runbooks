@@ -1,7 +1,7 @@
 ---
 title: L3 agent dead, instances still reachable, router not moved
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [neutron]
 deployment_methods: [kolla-ansible]
@@ -11,12 +11,13 @@ environment:
   storage: none (no Cinder on the lab)
   os: ubuntu-24.04 (noble), docker
 risk: destructive
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible multinode (1 controller, 2 computes, 2 L3 agents)", date: 2026-10-23, note: "cause 1 in full, including a floating IP associated while the agent was dead (DOWN until it came back); cause 2 moved with remove/add router after removing the namespace to simulate a lost host" }
 upstream_refs:
   - https://docs.openstack.org/neutron/latest/admin/deploy-ovs-ha-vrrp.html
   - https://docs.openstack.org/neutron/latest/configuration/neutron.html
   - https://docs.openstack.org/kolla-ansible/latest/reference/networking/neutron.html
-last_verified: 2026-10-21
+last_verified: 2026-10-23
 ---
 
 # L3 agent dead, instances still reachable, router not moved
