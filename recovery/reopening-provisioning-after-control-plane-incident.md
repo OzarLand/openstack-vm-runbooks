@@ -83,7 +83,9 @@ the evidence the incident review will need, and the state will change once you s
 Preferred: disable the API backends at the load balancer, so that the VIP answers with an error rather than
 timing out, and the action is reversible in one place. Alternative: stop the API services or containers.
 
-**Kolla-Ansible:** on each controller, `docker stop nova_api neutron_server cinder_api glance_api placement_api`
+**Kolla-Ansible:** on each controller, stop the systemd units, not the containers: each container runs from a unit
+with `Restart=always`, so a `docker stop` is undone within about a minute. For example
+`systemctl stop kolla-nova_api-container.service kolla-neutron_server-container.service kolla-cinder_api-container.service kolla-glance_api-container.service kolla-placement_api-container.service`
 (adapt to the services you run); or set those backends to `MAINT` in HAProxy.
 **Any:** `systemctl stop <api services>` or the equivalent HAProxy change.
 
@@ -154,7 +156,8 @@ ping -c 3 <address>
 openstack server delete --wait reopen-test
 ```
 
-Only then re-enable the API backends and announce the reopening. Expect a burst of retried requests from users and
+Only then re-enable the API backends (**Kolla-Ansible:** `systemctl start` the units stopped in step 1, or take the
+backends out of `MAINT`) and announce the reopening. Expect a burst of retried requests from users and
 automation.
 
 ## Afterwards
