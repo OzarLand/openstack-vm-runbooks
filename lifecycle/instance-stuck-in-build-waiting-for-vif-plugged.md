@@ -71,8 +71,9 @@ openstack server show <server-id> -c OS-EXT-SRV-ATTR:host -c fault
 #    nova-compute.log on the computes (grep <server-id>) or from the other failed builds.
 
 # 2. Is the port bound, and to what?
-openstack port list --server <server-id> -c ID -c Status -c "Binding Host"
+openstack port list --server <server-id> -c ID -c Status
 openstack port show <port-id> -c binding_vif_type -c binding_host_id -c status
+#    port list has no "Binding Host" column and silently drops it: read the host from port show
 #    binding_vif_type = binding_failed  -> Neutron could not bind the port on that host
 #    status = DOWN with a valid vif_type -> bound, but never came up: agent/controller side
 

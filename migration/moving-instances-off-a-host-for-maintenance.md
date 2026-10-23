@@ -44,7 +44,9 @@ openstack server list --all-projects --host <host> --long -c ID -c Name -c Statu
 # 2. Which instances cannot be live-migrated (PCI passthrough, SR-IOV direct ports, vGPU, special flavors)
 for s in $(openstack server list --all-projects --host <host> -f value -c ID); do
   echo "== $s"; openstack server show $s -c flavor -c OS-EXT-SRV-ATTR:instance_name -f value
-  openstack port list --server $s -c ID -c "VNIC Type" -f value | grep -v normal
+  for p in $(openstack port list --server $s -f value -c ID); do       # port list has no VNIC Type column
+    echo "$p $(openstack port show $p -f value -c binding_vnic_type)"
+  done | grep -v ' normal$'
 done
 # On the host: virsh dumpxml <instance-name> | grep -E 'hostdev|mdev'   -> passthrough or vGPU present
 
