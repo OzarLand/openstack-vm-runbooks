@@ -2,7 +2,7 @@
 title: CPU steal time on instances with dedicated (pinned) CPUs. Live migration moves the symptom, not the cause
 kind: runbook
 status: lab-verified
-openstack_releases: [unrecorded]
+openstack_releases: ["2026.1"]
 components: [nova, libvirt, qemu]
 deployment_methods: [any]
 environment:
