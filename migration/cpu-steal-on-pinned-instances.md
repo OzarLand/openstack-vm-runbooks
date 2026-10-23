@@ -1,7 +1,7 @@
 ---
 title: CPU steal time on instances with dedicated (pinned) CPUs. Live migration moves the symptom, not the cause
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: [unrecorded]
 components: [nova, libvirt, qemu]
 deployment_methods: [any]
@@ -11,11 +11,12 @@ environment:
   storage: any
   os: any
 risk: state-changing
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible multinode (1 controller, 2 computes), nested KVM", date: 2026-10-23, note: "quick checks run; steal reproduced (0.8 % idle, 26.7 % with host processes on the pinned CPU); emulator threads moved with hw:emulator_threads_policy=share; host isolation and migration not run" }
 upstream_refs:
   - https://docs.openstack.org/nova/latest/admin/cpu-topologies.html
   - https://docs.openstack.org/releasenotes/nova/train.html
-last_verified: 2026-10-18
+last_verified: 2026-10-23
 ---
 
 # CPU steal time on instances with dedicated (pinned) CPUs. Live migration moves the symptom, not the cause
