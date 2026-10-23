@@ -1,7 +1,7 @@
 ---
 title: Compute disk full. An instance that writes is frozen, while Nova still shows it ACTIVE
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [nova, libvirt, qemu]
 deployment_methods: [kolla-ansible]
@@ -11,12 +11,13 @@ environment:
   storage: local qcow2 instance disks on the computes, instance store on its own ext4 file system (no Cinder)
   os: ubuntu-24.04 (noble), docker
 risk: destructive
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible multinode (1 controller, 2 computes)", date: 2026-10-23, note: "full procedure on a disposable lab with a dedicated 5 GB instance store filled by a stray file (cause 3); power state returned to Running after the resume, and a new instance built afterwards; df on the Docker volume path needs sudo" }
 upstream_refs:
   - https://docs.openstack.org/nova/latest/configuration/config.html#DEFAULT.disk_allocation_ratio
   - https://docs.openstack.org/nova/latest/configuration/config.html#DEFAULT.reserved_host_disk_mb
   - https://docs.openstack.org/python-openstackclient/latest/cli/command-objects/compute-service.html
-last_verified: 2026-10-21
+last_verified: 2026-10-23
 ---
 
 # Compute disk full. An instance that writes is frozen, while Nova still shows it ACTIVE
