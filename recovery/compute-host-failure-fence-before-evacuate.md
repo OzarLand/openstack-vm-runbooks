@@ -1,7 +1,7 @@
 ---
 title: Compute host unreachable, instances down. Fence before you evacuate
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [nova, libvirt, cinder, ceph]
 deployment_methods: [any]
@@ -11,11 +11,12 @@ environment:
   storage: shared instance storage or boot-from-volume for evacuation to preserve disks
   os: any
 risk: destructive
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible multinode (1 controller, 2 computes)", date: 2026-10-23, note: "full procedure with power-off through the hosting cloud's API as out-of-band channel; local disk rebuilt from the image, boot-from-volume disk kept; microversion 2.103 (instances SHUTOFF after evacuation); clean-up on the host's return" }
 upstream_refs:
   - https://docs.openstack.org/nova/latest/admin/evacuate.html
   - https://docs.openstack.org/nova/latest/admin/node-down.html
-last_verified: 2026-10-21
+last_verified: 2026-10-23
 ---
 
 # Compute host unreachable, instances down. Fence before you evacuate
