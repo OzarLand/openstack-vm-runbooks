@@ -56,7 +56,7 @@ On the compute:
 
 ```bash
 # 2. Did every container unit come back?
-systemctl list-units 'kolla-*' --all --no-pager | grep -v ' running'
+systemctl list-units 'kolla-*' --all --no-pager --state=failed,inactive,activating
 docker ps -a --filter name=openvswitch --format '{{.Names}}\t{{.Status}}'
 
 # 3. Does Nova start the guests that ran before a reboot? (empty output: the default, False)
@@ -128,10 +128,11 @@ If `openvswitch_vswitchd` did not come back, every instance of the compute is wi
 openstack server start <server-id>
 ```
 
-To make Nova start them by itself after the next reboot, set the option through an override:
+To make Nova start them by itself after the next reboot, set the option through an override. This file applies it to
+the computes only; the global `/etc/kolla/config/nova.conf` works too:
 
 ```ini
-# /etc/kolla/config/nova.conf
+# /etc/kolla/config/nova/nova-compute.conf
 [DEFAULT]
 resume_guests_state_on_host_boot = true
 ```
