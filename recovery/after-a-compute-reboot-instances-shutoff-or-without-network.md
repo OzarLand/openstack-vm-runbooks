@@ -1,7 +1,7 @@
 ---
 title: After a compute reboot, instances stay SHUTOFF or come back without network
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [nova, neutron, ovs, libvirt]
 deployment_methods: [kolla-ansible]
@@ -11,13 +11,14 @@ environment:
   storage: any
   os: any
 risk: state-changing
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, all-in-one", date: 2026-10-24, note: "cause 1 reproduced by rebooting the host, with and without resume_guests_state_on_host_boot; cause 3 by taking the external interface down; causes 2, 4 and 5 not reproduced" }
 upstream_refs:
   - https://docs.openstack.org/nova/2026.1/configuration/config.html#DEFAULT.resume_guests_state_on_host_boot
   - https://docs.openstack.org/kolla-ansible/2026.1/reference/networking/neutron.html
   - https://docs.openstack.org/neutron/2026.1/admin/config-mtu.html
 authored_by: agent:ozarland-author
-last_verified: 2026-10-23
+last_verified: 2026-10-24
 ---
 
 # After a compute reboot, instances stay SHUTOFF or come back without network
@@ -58,7 +59,7 @@ On the compute:
 ```bash
 # 2. Did every container unit come back?
 systemctl list-units 'kolla-*' --all --no-pager --state=failed,inactive,activating
-docker ps -a --filter name=openvswitch --format '{{.Names}}\t{{.Status}}'
+sudo docker ps -a --filter name=openvswitch --format '{{.Names}}\t{{.Status}}'
 
 # 3. Does Nova start the guests that ran before a reboot? (empty output: the default, False)
 sudo docker exec nova_compute grep -rn resume_guests_state_on_host_boot /etc/nova/
@@ -82,12 +83,23 @@ the guests that ran before the reboot are not started again, and Nova shows them
 synchronised their power state. This is expected
 behaviour, not a failure.
 
+Until `nova-compute` is back and has synchronised, Nova still shows the instances `ACTIVE` and `Running`, from before
+the reboot. Read quick check 1 only once the compute service is `up` again. On the lab, where the controller and the
+compute were the same host, the instances switched to `SHUTOFF` about a minute after `nova-compute` was back.
+
+With the option set to `true`, `nova-compute` starts them at its own start, and logs for each one
+`Rebooting instance after nova-compute restart.`
+
 ### Kolla-Ansible containers
 
 In Kolla-Ansible 2026.1 each container runs from a systemd unit (`kolla-<container>-container.service`) that is
 `WantedBy=multi-user.target` and ordered after `docker.service` only (the unit template in Kolla-Ansible's
 `kolla_systemd_worker`). The units come back at boot by themselves. A unit that failed to start (for example because
 an interface it needs was not up yet) shows in quick check 2.
+
+Kolla-Ansible does not remove the unit of a service that was disabled after it was deployed (for example
+`enable_haproxy: "no"` set later). Such a unit also shows in quick check 2, `failed` or `activating auto-restart`,
+at every boot. Compare with the services enabled in `globals.yml` before treating it as the cause.
 
 ### Host network
 
@@ -185,11 +197,35 @@ ping -c 3 <instance-floating-ip>
 On the compute, quick checks 2, 4 and 5 show every unit running, every interface up with the expected MTU, and the
 external interface plugged into `br-ex`.
 
+## Lab observations
+
+On a lab: OpenStack 2026.1, Kolla-Ansible 22.2.0, all-in-one (controller and compute on one VM), ML2/OVS, Docker,
+Ubuntu 24.04, two CirrOS instances with floating IPs. The whole host was rebooted twice.
+
+| | Reboot 1, option not set (default) | Reboot 2, option set to `true` |
+|---|---|---|
+| Quick check 3 | Empty | `resume_guests_state_on_host_boot = true` |
+| Instances, as Nova showed them right after the boot | `ACTIVE`, `Running` (not yet synchronised) | `ACTIVE`, `Running` |
+| Instances once `nova-compute` was up | **`SHUTOFF`, `Shutdown`**, about a minute later | `ACTIVE`, `Running`; both domains `running` in `virsh list`; `Rebooting instance after nova-compute restart.` in `nova-compute.log` |
+| Floating IPs | No answer until `openstack server start` | Answered |
+| Quick checks 2, 4, 5 | Every unit back, except two units of services disabled after the deployment (see Diagnosis); interfaces up; the external interface in `br-ex` | Same |
+
+- `openstack server start` brought both instances back; their floating IPs answered.
+- The override file `/etc/kolla/config/nova/nova-compute.conf` and `kolla-ansible reconfigure -i <inventory> --tags nova`
+  worked as written. Only `nova_compute` was recreated, and running instances were not affected. Removing the file
+  and reconfiguring again undid it.
+- Cause 3, without a reboot: with the external interface set `DOWN`, quick check 4 showed it `DOWN` and the floating
+  IPs stopped answering. `ip link set dev <interface> up` restored them.
+- On this all-in-one, the control plane restarted with the host. Keystone answered about 8 to 10 minutes after the
+  boot: every container started at once on 4 vCPU. A compute that is not a controller comes back sooner.
+
 ## Validity and limits
 
 Written from the Nova 2026.1 configuration reference (`resume_guests_state_on_host_boot` and its default), the
 Kolla-Ansible 2026.1 source (the systemd unit template, and no setting of that option) and its Neutron guide, and
-Neutron's MTU guide. Not observed on a lab yet: a reboot of a lab compute, with and without the option, is wanted.
+Neutron's MTU guide. Observed on one all-in-one lab (see Lab observations): cause 1 with and without the option, and
+cause 3 without a reboot. Not observed: causes 2, 4 and 5, and a reboot of a compute of a multinode platform, where
+the controllers stay up during the reboot.
 
 Not covered: ML2/OVN (the gateway chassis and `ovn-controller` behave differently after a reboot), DPDK, instances
 whose disks are on Ceph, an unplanned host failure where the instances must be evacuated (see
