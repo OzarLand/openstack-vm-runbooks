@@ -54,39 +54,97 @@ Each runbook follows the shared [runbook structure](https://github.com/OzarLand/
 symptom, impact, quick checks, diagnosis, possible causes, resolution, verification, validity and limits.
 State-changing commands carry ⚠️, destructive ones carry 🛑 with what can be lost and what to check first.
 
-A runbook's `status` says how much it has been verified: `draft` (one operator), `validated` (confirmed by someone
-else), `experimental` (unconfirmed or possibly outdated). A page written for one deployment method is welcome;
-variants for other methods are added by whoever has them.
+A runbook's `status` says how much it has been verified (see the
+[knowledge lifecycle](https://github.com/OzarLand/ozarland/blob/main/docs/knowledge-lifecycle.md)):
+
+| Status | What it means |
+|---|---|
+| `draft` | Written and reviewed, not yet run on a lab nor confirmed by another operator |
+| `lab-verified` | Its steps were run on a lab, on the release and deployment method stated, and behaved as written |
+| `validated` | Confirmed by an operator other than its author, in another environment |
+| `experimental` | Plausible but unconfirmed, narrow, or possibly outdated |
+
+A page written for one deployment method is welcome; variants for other methods are added by whoever has them.
+
+## Start from what you see
+
+| You see | Start with |
+|---|---|
+| Every instance on one compute lost the network, Nova still shows them ACTIVE | [ovs-vswitchd down](networking/ovs-vswitchd-down-on-compute.md), then [tunnel MTU mismatch](networking/tunnel-mtu-mismatch-large-packets-dropped.md) |
+| Instances answer ping, but large transfers stall | [Tunnel MTU mismatch](networking/tunnel-mtu-mismatch-large-packets-dropped.md) |
+| Every API call fails at once | [Expired certificates or Fernet keys](diagnostics/expired-certificates-and-fernet-keys-break-every-api-call.md) |
+| VM creation fails everywhere, running instances are fine | [Check the shared dependencies first](diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md) |
+| A new instance is ACTIVE but never got an IP address | [DHCP agents down](networking/new-instance-gets-no-ip-dhcp-agents-down.md) |
+| A new instance has an address but no SSH key, default hostname | [Metadata agents down](networking/new-instance-boots-without-metadata.md) |
+| An instance answers from inside its network, not from outside | [Unreachable from outside](networking/instance-unreachable-from-outside.md) |
+| An instance stays in BUILD, then ERROR after about 5 minutes | [Waiting for vif_plugged](lifecycle/instance-stuck-in-build-waiting-for-vif-plugged.md) |
+| "No valid host was found" while computes have room | [No valid host with free capacity](scheduling/no-valid-host-with-free-capacity.md) |
+| A compute is unreachable and its instances are down | [Fence before you evacuate](recovery/compute-host-failure-fence-before-evacuate.md) |
 
 ## Index
 
-| Page | Components | Releases | Status |
-|---|---|---|---|
-| [Compute disk full. An instance that writes is frozen, while Nova still shows it ACTIVE](lifecycle/compute-disk-full-instance-paused.md) | nova, libvirt, qemu | 2026.1 | draft |
-| [I need to restart nova_libvirt on a compute. Its instances keep running](lifecycle/restarting-nova-libvirt-does-not-stop-instances.md) | nova, libvirt | 2026.1 | draft |
-| [Instance stuck in BUILD, then ERROR after vif_plugging_timeout](lifecycle/instance-stuck-in-build-waiting-for-vif-plugged.md) | nova, neutron, ovn, ovs | 2026.1 | draft |
-| [Stale records. Instances stuck in BUILD, ERROR or deleting, orphan ports and attachments, phantom allocations](lifecycle/stale-records-stuck-instances-orphan-ports-attachments.md) | nova, placement, neutron, cinder, mariadb | unrecorded | draft |
-| [No valid host was found, although capacity exists](scheduling/no-valid-host-with-free-capacity.md) | nova, placement | unrecorded | draft |
-| [CPU steal time on instances with dedicated (pinned) CPUs. Live migration moves the symptom, not the cause](migration/cpu-steal-on-pinned-instances.md) | nova, libvirt, qemu | unrecorded | draft |
-| [Moving instances off a compute host for planned maintenance (patching, reboot, hardware)](migration/moving-instances-off-a-host-for-maintenance.md) | nova, libvirt, qemu | unrecorded | draft |
-| [Every instance on one compute loses the network while Nova shows them ACTIVE (ovs-vswitchd down)](networking/ovs-vswitchd-down-on-compute.md) | neutron, ovs | 2026.1 | draft |
-| [I need to restart the Open vSwitch agent on a compute. Its instances keep their network](networking/restarting-the-ovs-agent-does-not-cut-instances.md) | neutron, ovs | 2026.1 | draft |
-| [Instances of one compute answer ping, but large transfers stall](networking/tunnel-mtu-mismatch-large-packets-dropped.md) | neutron, ovs | 2026.1 | draft |
-| [L3 agent dead, instances still reachable, router not moved](networking/router-stuck-on-dead-l3-agent.md) | neutron | 2026.1 | draft |
-| [New instance has an address, but no SSH key, no user data, default hostname](networking/new-instance-boots-without-metadata.md) | neutron, nova | 2026.1 | lab-verified |
-| [New instance is ACTIVE but unreachable, it never got an IP address](networking/new-instance-gets-no-ip-dhcp-agents-down.md) | neutron, nova | 2026.1 | lab-verified |
-| [Instance has its address and metadata, but is unreachable from outside](networking/instance-unreachable-from-outside.md) | neutron, nova, ovs, ovn | 2026.1 | draft |
-| [Control plane down. What still works for running instances, and what does not](diagnostics/control-plane-down-what-still-works-for-instances.md) | nova, neutron, ovn, ovs, libvirt | unrecorded | draft |
-| [Every API call fails at once. Expired TLS certificates or inconsistent Keystone Fernet keys](diagnostics/expired-certificates-and-fernet-keys-break-every-api-call.md) | keystone, haproxy, rabbitmq, mariadb, memcached | unrecorded | draft |
-| [The logs of one compute do not line up with the controllers. Its clock has drifted](diagnostics/compute-clock-skew.md) | nova, neutron, ntp | 2026.1 | draft |
-| [VM creation fails platform-wide while instances keep running. Check the shared dependencies first](diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md) | nova, neutron, rabbitmq, mariadb, memcached | unrecorded | draft |
-| [What a VM creation traverses, and how to trace one failed boot by request id](diagnostics/what-a-vm-creation-traverses-and-tracing-by-request-id.md) | nova, placement, neutron, glance, cinder | unrecorded | draft |
-| [Compute host unreachable, instances down. Fence before you evacuate](recovery/compute-host-failure-fence-before-evacuate.md) | nova, libvirt, cinder, ceph | 2026.1 | draft |
-| [Reopening provisioning after a control-plane incident. Stop the APIs, recover, verify, reopen](recovery/reopening-provisioning-after-control-plane-incident.md) | nova, neutron, rabbitmq, mariadb, haproxy | unrecorded | draft |
-| [nova-compute is down and the compute refuses an SSH login, but the host is alive](recovery/nova-compute-down-host-alive-ssh-refused.md) | nova, libvirt, ssh | 2026.1 | draft |
-| [nova-compute is down on a compute, but its instances are still running](recovery/nova-compute-down-instances-still-running.md) | nova, libvirt | 2026.1 | draft |
-| [Volume stuck in attaching, reserved or detaching. The attach or detach never finishes](volumes/volume-stuck-in-attaching-or-detaching.md) | cinder, nova, libvirt | 2026.1 | draft |
-| [Stale volume attachment. The volume is still in-use for an instance that was deleted or evacuated](volumes/stale-volume-attachment-after-instance-deleted-or-evacuated.md) | cinder, nova, libvirt | 2026.1 | draft |
+Source: **book** (*OpenStack, the Day After Tomorrow*, the maintainer's book), **lab run** (observed on a
+lab), **documentation** (upstream documentation and source), **production incident**.
+
+### Lifecycle
+
+| Page | Components | Releases | Status | Source |
+|---|---|---|---|---|
+| [Compute disk full. An instance that writes is frozen, while Nova still shows it ACTIVE](lifecycle/compute-disk-full-instance-paused.md) | nova, libvirt, qemu | 2026.1 | lab-verified | lab run |
+| [Instance stuck in BUILD, then ERROR after vif_plugging_timeout](lifecycle/instance-stuck-in-build-waiting-for-vif-plugged.md) | nova, neutron, ovn, ovs | 2026.1 | draft | book, lab run |
+| [I need to restart nova_libvirt on a compute. Its instances keep running](lifecycle/restarting-nova-libvirt-does-not-stop-instances.md) | nova, libvirt | 2026.1 | lab-verified | lab run |
+| [Stale records. Instances stuck in BUILD, ERROR or deleting, orphan ports and attachments, phantom allocations](lifecycle/stale-records-stuck-instances-orphan-ports-attachments.md) | nova, placement, neutron, cinder, mariadb | not recorded ([help wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=lifecycle%2Fstale-records-stuck-instances-orphan-ports-attachments.md&title=Release+for+lifecycle%2Fstale-records-stuck-instances-orphan-ports-attachments.md)) | draft | book |
+
+### Scheduling
+
+| Page | Components | Releases | Status | Source |
+|---|---|---|---|---|
+| [No valid host was found, although capacity exists](scheduling/no-valid-host-with-free-capacity.md) | nova, placement | not recorded ([help wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=scheduling%2Fno-valid-host-with-free-capacity.md&title=Release+for+scheduling%2Fno-valid-host-with-free-capacity.md)) | draft | book |
+
+### Migration
+
+| Page | Components | Releases | Status | Source |
+|---|---|---|---|---|
+| [CPU steal time on instances with dedicated (pinned) CPUs. Live migration moves the symptom, not the cause](migration/cpu-steal-on-pinned-instances.md) | nova, libvirt, qemu | 2026.1 | lab-verified | book, lab run |
+| [Moving instances off a compute host for planned maintenance (patching, reboot, hardware)](migration/moving-instances-off-a-host-for-maintenance.md) | nova, libvirt, qemu | not recorded ([help wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=migration%2Fmoving-instances-off-a-host-for-maintenance.md&title=Release+for+migration%2Fmoving-instances-off-a-host-for-maintenance.md)) | draft | book |
+
+### Networking
+
+| Page | Components | Releases | Status | Source |
+|---|---|---|---|---|
+| [Instance has its address and metadata, but is unreachable from outside](networking/instance-unreachable-from-outside.md) | neutron, nova, ovs, ovn | 2026.1 | lab-verified | documentation, lab run |
+| [New instance has an address, but no SSH key, no user data, default hostname](networking/new-instance-boots-without-metadata.md) | neutron, nova | 2026.1 | lab-verified | lab run |
+| [New instance is ACTIVE but unreachable, it never got an IP address](networking/new-instance-gets-no-ip-dhcp-agents-down.md) | neutron, nova | 2026.1 | lab-verified | lab run |
+| [Every instance on one compute loses the network while Nova shows them ACTIVE (ovs-vswitchd down)](networking/ovs-vswitchd-down-on-compute.md) | neutron, ovs | 2026.1 | draft | lab run |
+| [I need to restart the Open vSwitch agent on a compute. Its instances keep their network](networking/restarting-the-ovs-agent-does-not-cut-instances.md) | neutron, ovs | 2026.1 | lab-verified | lab run |
+| [L3 agent dead, instances still reachable, router not moved](networking/router-stuck-on-dead-l3-agent.md) | neutron | 2026.1 | lab-verified | lab run |
+| [Instances of one compute answer ping, but large transfers stall](networking/tunnel-mtu-mismatch-large-packets-dropped.md) | neutron, ovs | 2026.1 | lab-verified | lab run |
+
+### Volumes
+
+| Page | Components | Releases | Status | Source |
+|---|---|---|---|---|
+| [Stale volume attachment. The volume is still in-use for an instance that was deleted or evacuated](volumes/stale-volume-attachment-after-instance-deleted-or-evacuated.md) | cinder, nova, libvirt | 2026.1 | draft | documentation |
+| [Volume stuck in attaching, reserved or detaching. The attach or detach never finishes](volumes/volume-stuck-in-attaching-or-detaching.md) | cinder, nova, libvirt | 2026.1 | draft | documentation |
+
+### Diagnostics
+
+| Page | Components | Releases | Status | Source |
+|---|---|---|---|---|
+| [The logs of one compute do not line up with the controllers. Its clock has drifted](diagnostics/compute-clock-skew.md) | nova, neutron, ntp | 2026.1 | draft | lab run |
+| [Control plane down. What still works for running instances, and what does not](diagnostics/control-plane-down-what-still-works-for-instances.md) | nova, neutron, ovn, ovs, libvirt | not recorded ([help wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=diagnostics%2Fcontrol-plane-down-what-still-works-for-instances.md&title=Release+for+diagnostics%2Fcontrol-plane-down-what-still-works-for-instances.md)) | draft | book |
+| [Every API call fails at once. Expired TLS certificates or inconsistent Keystone Fernet keys](diagnostics/expired-certificates-and-fernet-keys-break-every-api-call.md) | keystone, haproxy, rabbitmq, mariadb, memcached | not recorded ([help wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=diagnostics%2Fexpired-certificates-and-fernet-keys-break-every-api-call.md&title=Release+for+diagnostics%2Fexpired-certificates-and-fernet-keys-break-every-api-call.md)) | draft | book |
+| [VM creation fails platform-wide while instances keep running. Check the shared dependencies first](diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md) | nova, neutron, rabbitmq, mariadb, memcached, haproxy, keystone | not recorded ([help wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=diagnostics%2Fvm-creation-fails-platform-wide-check-shared-dependencies.md&title=Release+for+diagnostics%2Fvm-creation-fails-platform-wide-check-shared-dependencies.md)) | draft | book |
+| [What a VM creation traverses, and how to trace one failed boot by request id](diagnostics/what-a-vm-creation-traverses-and-tracing-by-request-id.md) | nova, placement, neutron, glance, cinder, keystone, rabbitmq | not recorded ([help wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=diagnostics%2Fwhat-a-vm-creation-traverses-and-tracing-by-request-id.md&title=Release+for+diagnostics%2Fwhat-a-vm-creation-traverses-and-tracing-by-request-id.md)) | draft | book |
+
+### Recovery
+
+| Page | Components | Releases | Status | Source |
+|---|---|---|---|---|
+| [Compute host unreachable, instances down. Fence before you evacuate](recovery/compute-host-failure-fence-before-evacuate.md) | nova, libvirt, cinder, ceph | 2026.1 | lab-verified | book, lab run |
+| [nova-compute is down and the compute refuses an SSH login, but the host is alive](recovery/nova-compute-down-host-alive-ssh-refused.md) | nova, libvirt, ssh | 2026.1 | lab-verified | lab run |
+| [nova-compute is down on a compute, but its instances are still running](recovery/nova-compute-down-instances-still-running.md) | nova, libvirt | 2026.1 | lab-verified | lab run |
+| [Reopening provisioning after a control-plane incident. Stop the APIs, recover, verify, reopen](recovery/reopening-provisioning-after-control-plane-incident.md) | nova, neutron, rabbitmq, mariadb, haproxy | not recorded ([help wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=recovery%2Freopening-provisioning-after-control-plane-incident.md&title=Release+for+recovery%2Freopening-provisioning-after-control-plane-incident.md)) | draft | book |
 
 ## Pages wanted next
 
