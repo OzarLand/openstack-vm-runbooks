@@ -10,7 +10,7 @@ environment:
   network: any
   storage: any Cinder backend
   os: any
-risk: state-changing
+risk: destructive
 confirmed_by: []
 upstream_refs:
   - https://docs.openstack.org/nova/2026.1/user/launch-instance-from-volume.html
@@ -63,7 +63,8 @@ $ openstack console log show <server-id>
 ## Impact
 
 Every new instance that boots from a volume, for one user or for the whole platform, depending on the cause.
-Running instances are not affected. No data is at risk: a failed build leaves at most an unused volume behind. The
+Running instances are not affected. No data is at risk from the failure itself: a failed build leaves at most an unused volume behind. Two steps of
+cause 5 can delete or overwrite a boot volume; they are marked 🛑. The
 risk comes from retrying blindly: each retry from an image creates another volume, which counts against the
 project's Cinder quota and fills the backend.
 
@@ -217,6 +218,9 @@ Fix what Cinder reported, then retry the build once:
   decision for whoever owns the project's quota;
 - no backend: `openstack volume service list` and the scheduler log show which backend was rejected and why (free
   space, volume type, a backend `down`);
+- a full LVM volume group (LVM backend): on the hosts of the `cinder-volume-lvm` group (or the host running
+  `cinder-volume` for LVM), `sudo vgs cinder-volumes` shows the free space left (`VFree`); `cinder-volumes` is
+  Kolla-Ansible's default `cinder_volume_group`;
 - `cinder-volume` down: see why in its log before restarting it.
 
 > ⚠️ **State-changing.** Restarts the `cinder-volume` service of this host. Volumes being created or attached
@@ -272,23 +276,70 @@ kolla-ansible reconfigure -i <inventory> --tags nova
 Read-only first: on a compute where the build failed, check that the compute reaches the storage. For an iSCSI
 backend, `iscsid` must run on the compute (`docker ps --filter name=iscsid` on Kolla-Ansible); for Ceph, the
 `nova-compute` log names the RBD error. Fix the host or its configuration (storage network, client key), then retry
-the build once. The [volume stuck in attaching](../volumes/volume-stuck-in-attaching-or-detaching.md) runbook covers
+the build once.
+
+On Kolla-Ansible, if no `iscsid` container exists at all, it is not a container to start by hand: Kolla-Ansible
+deploys `iscsid` (`enable_iscsid`) only when an iSCSI backend is enabled (`enable_cinder_backend_iscsi`, which
+follows `enable_cinder_backend_lvm`). A backend that uses iSCSI but was configured only through overrides needs
+`enable_cinder_backend_iscsi: true` in `globals.yml`, then a deploy, so that `iscsid` lands on the hosts of the
+`iscsid` group (compute, storage, ironic).
+
+> ⚠️ **State-changing.** Deploys the services that the new `globals.yml` value enables and can restart
+> containers whose configuration changes. Run it in a maintenance window; running instances are not affected by
+> the new `iscsid` containers. Undo: set the value back and deploy again (the containers stay until removed).
+
+```bash
+kolla-ansible deploy -i <inventory> --tags iscsi
+``` The [volume stuck in attaching](../volumes/volume-stuck-in-attaching-or-detaching.md) runbook covers
 `os_brick` errors in more detail.
 
 ### For cause 5
 
 Read-only: check the volume and the image (`bootable`, `volume_image_metadata`, `disk_format`, the firmware and bus
-properties). Then fix the source and boot again:
+properties).
+
+Fixing a property and rebooting does not help: Nova uses the image properties it copied into the instance at build
+time, so the running instance keeps the old ones. The fix is a new build from a corrected source:
 
 - an image with the wrong `disk_format`: upload it again with the right format (check with `qemu-img info` on the
-  file), then create a new volume from it;
-- a blank volume: create the volume from an image or a snapshot that holds an operating system.
+  file), then boot from a new volume created from it;
+- a blank volume: boot from a volume created from an image or a snapshot that holds an operating system;
+- a missing property (firmware, disk bus): set it on the volume, or on the image for every later volume, then
+  build a new instance from that volume.
 
-> ⚠️ **State-changing.** Stops the guest, then starts it again from the same volume, for example after setting a
-> missing image property on the volume with `openstack volume set --image-property`. Nothing on the volume changes.
+> ⚠️ **State-changing.** Changes the image metadata stored on the volume (or on the image); the data on the volume
+> does not change. Undo: `openstack volume unset --image-property <key> <volume-id>`.
 
 ```bash
-openstack server reboot --hard <server-id>
+openstack volume set --image-property hw_firmware_type=uefi <volume-id>      # example property
+openstack image set --property hw_firmware_type=uefi <image-id>              # for later volumes from this image
+```
+
+To build from the same volume, first free it from the failed instance. Check whether deleting the instance would
+delete the volume (the column needs compute API 2.79 or later):
+
+```bash
+openstack --os-compute-api-version 2.79 server volume list <server-id>        # read-only: "Delete On Termination"
+```
+
+> 🛑 **Destructive.** Deletes the failed instance. With "Delete On Termination" `False`, the volume is kept and
+> becomes `available`; with `True`, **the volume is deleted with the instance**, with everything on it. Check that
+> column first; if it is `True`, do not delete the instance to reuse the volume: build from a new volume instead.
+
+```bash
+openstack server delete --wait <server-id>
+openstack server create --volume <volume-id> --flavor <flavor> --network <network> <name>
+```
+
+Where the compute API is 2.93 or later (Zed and later, with Cinder supporting volume reimage, block storage API
+3.68), a volume-backed instance can also be rebuilt from an image that carries the right properties, keeping the
+instance:
+
+> 🛑 **Destructive.** Rebuild rewrites the instance's boot volume from the image: everything on that volume is
+> replaced. Only for an instance whose volume holds nothing to keep, such as one that never booted.
+
+```bash
+openstack --os-compute-api-version 2.93 server rebuild --image <image-id> <server-id>
 ```
 
 ## Verification
