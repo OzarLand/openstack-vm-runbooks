@@ -198,8 +198,24 @@ lab, for a different reason:
 sudo docker exec -u root nova_compute nova-manage volume_attachment get_connector --json > connector.json
 # On a controller, with that file copied there: give it to the nova_api container and refresh
 sudo docker cp connector.json nova_api:/tmp/connector.json
-# Not lab-verified, see above
-sudo docker exec -u nova nova_api nova-manage volume_attachment refresh <server-id> <volume-id> /tmp/connector.json
+```
+
+> 🛑 **Destructive on Kolla-Ansible 22.2.0.** With `use_queue_manager = true` (Kolla-Ansible's setting), the
+> `refresh` below timed out on a lab after it had already removed the volume's connection and its Cinder attachment.
+> The volume was left `reserved`, Nova's attachment had no connection information, and the instance started without
+> its disk; `openstack server remove volume` was refused. Repair path that worked, with the volume in no domain
+> (`virsh domblklist`): `openstack volume set --state available --detached <volume-id>` (the last resort below, with
+> its precondition), then `openstack server reboot --hard <server-id>`, which removed Nova's dangling record, then a
+> normal `openstack server add volume <server-id> <volume-id>`. For the compute's reply to arrive, the command needed
+> `use_queue_manager = false` for this one command, through a second configuration file; the full refresh was still
+> not completed on the lab. Precondition: the instance stopped and unlocked, and a time agreed with its owner, who
+> may lose the volume until the repair.
+
+```bash
+# Not lab-verified: see the warning above. The second --config-file holds
+# [oslo_messaging_rabbit] use_queue_manager = false, copied into the container like connector.json
+sudo docker exec -u nova nova_api nova-manage --config-file /etc/nova/nova.conf --config-file /tmp/nm.conf \
+  volume_attachment refresh <server-id> <volume-id> /tmp/connector.json
 ```
 
 **Any:**
@@ -268,8 +284,8 @@ Not run: the evacuation case (it needs two computes) and RBD.
 Written from the upstream documentation and client source for 2026.1: the Nova volume administration guide (hard
 reboot clean-up, `nova-manage volume_attachment`), the Block Storage API reference (attachment statuses, the HTTP 409
 protection), and the OpenStack client's `volume set` and `volume attachment` commands. Partly observed on an
-all-in-one lab (see Lab observations), not on a multinode platform. A run of the evacuation case on a multinode lab, and of the `refresh` procedure on a deployment where it
-completes, are still wanted.
+all-in-one lab (see Lab observations), not on a multinode platform. A run of the evacuation case on a multinode
+lab, and of the `refresh` procedure on a deployment where it completes, are still wanted.
 
 Per release:
 
