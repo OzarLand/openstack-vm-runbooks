@@ -8,10 +8,6 @@ Part of [OzarLand](https://github.com/OzarLand/ozarland), a collaborative knowle
 operators. Share experiences, document solutions, learn from each other. No imposed tools, no single way of
 operating OpenStack.
 
-> **Repository metadata to apply:** description "Community runbooks for diagnosing and resolving OpenStack instance
-> problems: stuck states, scheduling, boot, migration, networking, volumes. Nova, Neutron, Glance, Cinder." Topics:
-> `openstack`, `nova`, `neutron`, `cinder`, `runbooks`, `troubleshooting`, `openstack-operations`, `sre`.
-
 ## Scope
 
 Everything an operator does when an instance misbehaves, from the first symptom to the post-fix checks.
@@ -159,10 +155,14 @@ behind it; open a *Problem solved* issue if you have one.
 
 ## Contributing
 
-- **Ask a question:** open a Q&A discussion.
-- **Share a problem you solved:** open an issue with the *Problem solved* template, or a pull request with a runbook.
-- **Confirm a runbook in your environment:** comment on it or open a *Documentation proposal* issue. This is how
-  runbooks become validated.
+- **Ask a question:** [open a Q&A discussion](https://github.com/OzarLand/ozarland/discussions/new?category=q-a) in
+  `ozarland`, where all OzarLand discussions live.
+- **Share a problem you solved:** open an issue with the
+  [*Problem solved* form](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=problem-solved.yml), or a
+  pull request with a runbook.
+- **Confirm a runbook in your environment:** open a
+  [*Documentation proposal* issue](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml)
+  and choose "I confirmed an existing page in my environment". This is how runbooks become validated.
 - **Add or improve a runbook:** copy `templates/runbook.md`, open a pull request.
 
 Rules that are not optional: no secrets, hostnames, addresses or unredacted logs; flag state-changing and
