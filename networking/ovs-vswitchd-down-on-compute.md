@@ -234,6 +234,8 @@ compute. A request was sent every 0.5 s to one instance on each compute.
   what new instances on this compute do while the agent is dead.
 - [nova-compute down, instances still running](../recovery/nova-compute-down-instances-still-running.md): the
   opposite case, control plane of a compute down, data plane fine.
+- [After a compute reboot, instances stay SHUTOFF or come back without network](../recovery/after-a-compute-reboot-instances-shutoff-or-without-network.md):
+  when the switch, an interface or the MTU did not come back after a reboot.
 - Neutron, Open vSwitch self-service networks: https://docs.openstack.org/neutron/latest/admin/deploy-ovs-selfservice.html
 - Neutron, Open vSwitch agent internals: https://docs.openstack.org/neutron/latest/contributor/internals/openvswitch_agent.html
 - Source: lab reproduction by @soufian-zaouam (OpenStack 2026.1, Kolla-Ansible 22.2.0).
