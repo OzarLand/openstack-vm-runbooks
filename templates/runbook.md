@@ -86,3 +86,8 @@ openstack server show <server-id>
 ## Related
 
 <!-- Other runbooks, upstream bugs and docs, the discussion where this was investigated. -->
+
+---
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=<path-of-this-page>&title=Feedback%3A+<path-of-this-page>):
+your release, your deployment method, and what happened.

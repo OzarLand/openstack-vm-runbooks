@@ -8,10 +8,6 @@ Part of [OzarLand](https://github.com/OzarLand/ozarland), a collaborative knowle
 operators. Share experiences, document solutions, learn from each other. No imposed tools, no single way of
 operating OpenStack.
 
-> **Repository metadata to apply:** description "Community runbooks for diagnosing and resolving OpenStack instance
-> problems: stuck states, scheduling, boot, migration, networking, volumes. Nova, Neutron, Glance, Cinder." Topics:
-> `openstack`, `nova`, `neutron`, `cinder`, `runbooks`, `troubleshooting`, `openstack-operations`, `sre`.
-
 ## Scope
 
 Everything an operator does when an instance misbehaves, from the first symptom to the post-fix checks.
@@ -71,6 +67,7 @@ A page written for one deployment method is welcome; variants for other methods 
 | You see | Start with |
 |---|---|
 | Every instance on one compute lost the network, Nova still shows them ACTIVE | [ovs-vswitchd down](networking/ovs-vswitchd-down-on-compute.md), then [tunnel MTU mismatch](networking/tunnel-mtu-mismatch-large-packets-dropped.md) |
+| Instances answer ping, but large transfers stall | [Tunnel MTU mismatch](networking/tunnel-mtu-mismatch-large-packets-dropped.md) |
 | Every API call fails at once | [Expired certificates or Fernet keys](diagnostics/expired-certificates-and-fernet-keys-break-every-api-call.md) |
 | VM creation fails everywhere, running instances are fine | [Check the shared dependencies first](diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md) |
 | A new instance is ACTIVE but never got an IP address | [DHCP agents down](networking/new-instance-gets-no-ip-dhcp-agents-down.md) |
@@ -160,10 +157,14 @@ behind it; open a *Problem solved* issue if you have one.
 
 ## Contributing
 
-- **Ask a question:** open a Q&A discussion.
-- **Share a problem you solved:** open an issue with the *Problem solved* template, or a pull request with a runbook.
-- **Confirm a runbook in your environment:** comment on it or open a *Documentation proposal* issue. This is how
-  runbooks become validated.
+- **Ask a question:** [open a Q&A discussion](https://github.com/OzarLand/ozarland/discussions/new?category=q-a) in
+  `ozarland`, where all OzarLand discussions live.
+- **Share a problem you solved:** open an issue with the
+  [*Problem solved* form](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=problem-solved.yml), or a
+  pull request with a runbook.
+- **Confirm a runbook in your environment:** open a
+  [*Documentation proposal* issue](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml)
+  and choose "I confirmed an existing page in my environment". This is how runbooks become validated.
 - **Add or improve a runbook:** copy `templates/runbook.md`, open a pull request.
 
 Rules that are not optional: no secrets, hostnames, addresses or unredacted logs; flag state-changing and
