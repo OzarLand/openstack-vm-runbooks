@@ -13,6 +13,7 @@ environment:
 risk: state-changing
 confirmed_by:
   - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-22, note: "full procedure on a disposable lab, quick checks 2 and 3 and the qemu PID comparison included; a stop requested during the restart completed; stuck libvirtd and live migration not tested" }
+  - { who: "@soufian-zaouam", type: operator, release: "2024.x", deployment: "kolla-ansible, production, multinode", date: 2026-10-24, note: "behaviour observed in the owner's production operations on Kolla-Ansible 2024.x or earlier; matches the page; the page's steps were not re-run from this text" }
 upstream_refs:
   - https://docs.openstack.org/kolla-ansible/latest/reference/compute/libvirt-guide.html
   - https://docs.openstack.org/nova/latest/admin/configuration/hypervisor-kvm.html
@@ -181,6 +182,9 @@ request was sent every 0.5 s to the instance on that compute.
 
 - Observed on one lab build with the configuration above: OpenStack 2026.1, Kolla-Ansible 22.2.0 with its default
   `nova_libvirt` settings (`pid_mode: host`), Docker, Ubuntu 24.04, one instance on the restarted compute.
+- Also observed in production, on a multinode Kolla-Ansible platform on an earlier release (2024.x or earlier,
+  exact release not recorded), by @soufian-zaouam, who confirmed on 2026-10-24 that the page matches; the page's
+  steps were not re-run there.
 - Observed: the restart of the unit, no loss, same domain ID, instance `ACTIVE` and running.
 - Not run: Quick checks 2 and 3 (the lab used defaults), the PID comparison after the restart, the restart of a stuck
   libvirtd (cause 2), the `Any:` commands, a libvirt operation or a live migration during the restart.
@@ -202,4 +206,6 @@ request was sent every 0.5 s to the instance on that compute.
 ---
 
 *Provenance: written by agent:ozarland-author, from a lab reproduction by @soufian-zaouam on 2026.1.
-Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
+Reviewed in its pull request (see the page history).
+Checked by a human operator: not yet.
+Behaviour also reported from production by @soufian-zaouam (Kolla-Ansible 2024.x or earlier, steps not re-run).*
