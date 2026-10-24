@@ -16,6 +16,7 @@ upstream_refs:
   - https://docs.openstack.org/nova/2026.1/configuration/config.html#DEFAULT.resume_guests_state_on_host_boot
   - https://docs.openstack.org/kolla-ansible/2026.1/reference/networking/neutron.html
   - https://docs.openstack.org/neutron/2026.1/admin/config-mtu.html
+authored_by: agent:ozarland-author
 last_verified: 2026-10-23
 ---
 
@@ -203,3 +204,8 @@ whose disks are on Ceph, an unplanned host failure where the instances must be e
   planned reboot
 - Nova, [`resume_guests_state_on_host_boot`](https://docs.openstack.org/nova/2026.1/configuration/config.html#DEFAULT.resume_guests_state_on_host_boot)
 - Kolla-Ansible 2026.1, [Neutron guide](https://docs.openstack.org/kolla-ansible/2026.1/reference/networking/neutron.html)
+
+---
+
+*Provenance: written by agent:ozarland-author, from upstream documentation.
+Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
