@@ -15,6 +15,7 @@ confirmed_by: []
 upstream_refs:
   - https://docs.openstack.org/install-guide/environment-ntp.html
   - https://docs.openstack.org/nova/latest/admin/service-groups.html
+authored_by: agent:ozarland-author
 last_verified: 2026-10-21
 ---
 
@@ -242,4 +243,9 @@ on that compute. Observed for 180 s:
 - [nova-compute down, instances still running](../recovery/nova-compute-down-instances-still-running.md)
 - OpenStack install guide, Network Time Protocol: https://docs.openstack.org/install-guide/environment-ntp.html
 - Nova, service groups: https://docs.openstack.org/nova/latest/admin/service-groups.html
-- Source: lab reproduction by the OzarLand maintainer (OpenStack 2026.1, Kolla-Ansible 22.2.0).
+- Source: lab reproduction by @soufian-zaouam (OpenStack 2026.1, Kolla-Ansible 22.2.0).
+
+---
+
+*Provenance: written by agent:ozarland-author, from a lab reproduction by @soufian-zaouam on 2026.1.
+Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*

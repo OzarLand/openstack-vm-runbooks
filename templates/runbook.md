@@ -13,6 +13,7 @@ environment:
 risk: <read-only | state-changing | destructive>
 confirmed_by: []
 upstream_refs: []
+authored_by: <"@handle" or agent:name>      # who wrote the page
 last_verified: <YYYY-MM-DD>
 ---
 
@@ -88,6 +89,9 @@ openstack server show <server-id>
 <!-- Other runbooks, upstream bugs and docs, the discussion where this was investigated. -->
 
 ---
+
+*Provenance: written by <@handle or agent:name>, from <source: an incident, a lab run, upstream documentation>.
+Reviewed in its pull request (see the page history). Checked by a human operator: not yet / <@handle>, <YYYY-MM-DD>.*
 
 **Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=<path-of-this-page>&title=Feedback%3A+<path-of-this-page>):
 your release, your deployment method, and what happened.

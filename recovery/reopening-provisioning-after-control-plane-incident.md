@@ -16,6 +16,7 @@ upstream_refs:
   - https://www.rabbitmq.com/docs/partitions
   - https://galeracluster.com/library/documentation/crash-recovery.html
   - https://docs.openstack.org/kolla-ansible/latest/user/operating-kolla.html
+authored_by: agent:ozarland-author
 last_verified: 2026-10-18
 ---
 
@@ -183,3 +184,8 @@ node, restart one service) do not apply.
 - [VM creation fails platform-wide: check the shared dependencies first](../diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md).
 - [Stale records](../lifecycle/stale-records-stuck-instances-orphan-ports-attachments.md).
 - Source: *OpenStack, the Day After Tomorrow* (S. Zaouam), chapters 1, 10, 11 and 19.
+
+---
+
+*Provenance: written by agent:ozarland-author, from the book *OpenStack, the Day After Tomorrow*.
+Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*

@@ -16,6 +16,7 @@ upstream_refs:
   - https://docs.openstack.org/nova/latest/admin/architecture.html
   - https://docs.openstack.org/neutron/latest/admin/config-dhcp-ha.html
   - https://docs.openstack.org/neutron/latest/admin/ovn/
+authored_by: agent:ozarland-author
 last_verified: 2026-10-18
 ---
 
@@ -86,3 +87,8 @@ behaviour, not covered here.
 - [Reopening provisioning after a control-plane incident](../recovery/reopening-provisioning-after-control-plane-incident.md).
 - [VM creation fails platform-wide](vm-creation-fails-platform-wide-check-shared-dependencies.md).
 - Source: *OpenStack, the Day After Tomorrow* (S. Zaouam), chapter 1, technical note on control plane and data plane.
+
+---
+
+*Provenance: written by agent:ozarland-author, from the book *OpenStack, the Day After Tomorrow*.
+Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*

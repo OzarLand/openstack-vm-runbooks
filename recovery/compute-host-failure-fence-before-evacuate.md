@@ -16,6 +16,7 @@ confirmed_by:
 upstream_refs:
   - https://docs.openstack.org/nova/latest/admin/evacuate.html
   - https://docs.openstack.org/nova/latest/admin/node-down.html
+authored_by: agent:ozarland-author
 last_verified: 2026-10-23
 ---
 
@@ -250,4 +251,9 @@ production scale.
 - [nova-compute down, host alive, SSH refused](nova-compute-down-host-alive-ssh-refused.md): a refused login is not
   a dead host.
 - Source: *OpenStack, the Day After Tomorrow* (S. Zaouam), chapter 10, "Unplanned host failure".
-- Source: lab reproduction by the OzarLand maintainer (OpenStack 2026.1, Kolla-Ansible 22.2.0).
+- Source: lab reproduction by @soufian-zaouam (OpenStack 2026.1, Kolla-Ansible 22.2.0).
+
+---
+
+*Provenance: written by agent:ozarland-author, from the book *OpenStack, the Day After Tomorrow* and a lab reproduction by @soufian-zaouam on 2026.1.
+Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*

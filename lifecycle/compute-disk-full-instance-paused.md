@@ -17,6 +17,7 @@ upstream_refs:
   - https://docs.openstack.org/nova/latest/configuration/config.html#DEFAULT.disk_allocation_ratio
   - https://docs.openstack.org/nova/latest/configuration/config.html#DEFAULT.reserved_host_disk_mb
   - https://docs.openstack.org/python-openstackclient/latest/cli/command-objects/compute-service.html
+authored_by: agent:ozarland-author
 last_verified: 2026-10-23
 ---
 
@@ -297,4 +298,9 @@ directory of `nova_compute`:
   scheduler's view of capacity.
 - Nova configuration: [`disk_allocation_ratio`](https://docs.openstack.org/nova/latest/configuration/config.html#DEFAULT.disk_allocation_ratio),
   [`reserved_host_disk_mb`](https://docs.openstack.org/nova/latest/configuration/config.html#DEFAULT.reserved_host_disk_mb).
-- Source: lab reproduction by the OzarLand maintainer (OpenStack 2026.1, Kolla-Ansible 22.2.0).
+- Source: lab reproduction by @soufian-zaouam (OpenStack 2026.1, Kolla-Ansible 22.2.0).
+
+---
+
+*Provenance: written by agent:ozarland-author, from a lab reproduction by @soufian-zaouam on 2026.1.
+Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*

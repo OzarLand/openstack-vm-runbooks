@@ -17,6 +17,7 @@ upstream_refs:
   - https://docs.openstack.org/nova/latest/configuration/config.html#DEFAULT.vif_plugging_timeout
   - https://docs.openstack.org/nova/latest/configuration/config.html#DEFAULT.vif_plugging_is_fatal
   - https://docs.openstack.org/neutron/latest/admin/ovn/
+authored_by: agent:ozarland-author
 last_verified: 2026-10-18
 ---
 
@@ -261,4 +262,9 @@ releases. It was first written from an operator's description of the provisionin
 - [ovs-vswitchd down on a compute](../networking/ovs-vswitchd-down-on-compute.md)
 - Nova: [`vif_plugging_timeout` and `vif_plugging_is_fatal`](https://docs.openstack.org/nova/latest/configuration/config.html#DEFAULT.vif_plugging_is_fatal)
 - Source: *OpenStack, the Day After Tomorrow* (S. Zaouam), chapter 5, technical note on the provisioning path.
-- Source: lab reproduction by the OzarLand maintainer (OpenStack 2026.1, Kolla-Ansible 22.2.0).
+- Source: lab reproduction by @soufian-zaouam (OpenStack 2026.1, Kolla-Ansible 22.2.0).
+
+---
+
+*Provenance: written by agent:ozarland-author, from the book *OpenStack, the Day After Tomorrow* and a lab reproduction by @soufian-zaouam on 2026.1.
+Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*

@@ -16,6 +16,7 @@ upstream_refs:
   - https://docs.openstack.org/nova/latest/admin/cells.html
   - https://docs.openstack.org/nova/latest/cli/nova-manage.html
   - https://docs.openstack.org/osc-placement/latest/
+authored_by: agent:ozarland-author
 last_verified: 2026-10-18
 ---
 
@@ -170,3 +171,8 @@ Not covered: scheduling failures specific to Ironic bare-metal nodes.
 - [Instance stuck in BUILD waiting for vif-plugged](../lifecycle/instance-stuck-in-build-waiting-for-vif-plugged.md): the failure that happens after a host was selected.
 - [Stale records](../lifecycle/stale-records-stuck-instances-orphan-ports-attachments.md).
 - Source: *OpenStack, the Day After Tomorrow* (S. Zaouam), chapter 5.
+
+---
+
+*Provenance: written by agent:ozarland-author, from the book *OpenStack, the Day After Tomorrow*.
+Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*

@@ -16,6 +16,7 @@ confirmed_by:
 upstream_refs:
   - https://docs.openstack.org/nova/latest/admin/cpu-topologies.html
   - https://docs.openstack.org/releasenotes/nova/train.html
+authored_by: agent:ozarland-author
 last_verified: 2026-10-23
 ---
 
@@ -148,3 +149,8 @@ guidance for real-time or NFV hosts.
 
 - [Moving instances off a host for planned maintenance](moving-instances-off-a-host-for-maintenance.md).
 - Source: *OpenStack, the Day After Tomorrow* (S. Zaouam), chapter 15, "From the field" and technical note on pinned CPUs.
+
+---
+
+*Provenance: written by agent:ozarland-author, from the book *OpenStack, the Day After Tomorrow*.
+Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*

@@ -19,6 +19,7 @@ upstream_refs:
   - https://docs.openstack.org/neutron/2026.1/admin/ovn/routing.html
   - https://docs.openstack.org/kolla-ansible/2026.1/reference/networking/neutron.html
   - https://docs.openstack.org/python-openstackclient/2026.1/cli/command-objects/security-group-rule.html
+authored_by: agent:ozarland-author
 last_verified: 2026-10-22
 ---
 
@@ -257,3 +258,8 @@ Not covered: DVR, BGP-announced floating IPs, IPv6 without NAT, provider network
 - [L3 agent dead, instances still reachable, router not moved](router-stuck-on-dead-l3-agent.md)
 - Neutron 2026.1: [networking introduction](https://docs.openstack.org/neutron/2026.1/admin/intro-os-networking.html),
   [OVN routing](https://docs.openstack.org/neutron/2026.1/admin/ovn/routing.html)
+
+---
+
+*Provenance: written by agent:ozarland-author, from upstream documentation.
+Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*

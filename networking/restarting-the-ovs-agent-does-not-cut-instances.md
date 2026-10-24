@@ -17,6 +17,7 @@ upstream_refs:
   - https://docs.openstack.org/neutron/latest/contributor/internals/openvswitch_agent.html
   - https://docs.openstack.org/neutron/latest/configuration/openvswitch-agent.html
   - https://docs.openstack.org/kolla-ansible/latest/reference/networking/neutron.html
+authored_by: agent:ozarland-author
 last_verified: 2026-10-22
 ---
 
@@ -201,4 +202,9 @@ sent every 0.5 s to one instance on each compute.
 - [Moving instances off a host for maintenance](../migration/moving-instances-off-a-host-for-maintenance.md)
 - Neutron, Open vSwitch agent internals: https://docs.openstack.org/neutron/latest/contributor/internals/openvswitch_agent.html
 - Neutron, `openvswitch_agent.ini` options (`drop_flows_on_start`): https://docs.openstack.org/neutron/latest/configuration/openvswitch-agent.html
-- Source: lab reproduction by the OzarLand maintainer (OpenStack 2026.1, Kolla-Ansible 22.2.0).
+- Source: lab reproduction by @soufian-zaouam (OpenStack 2026.1, Kolla-Ansible 22.2.0).
+
+---
+
+*Provenance: written by agent:ozarland-author, from a lab reproduction by @soufian-zaouam on 2026.1.
+Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*

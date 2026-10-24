@@ -15,6 +15,7 @@ confirmed_by: []
 upstream_refs:
   - https://docs.openstack.org/keystone/latest/admin/fernet-token-faq.html
   - https://docs.openstack.org/kolla-ansible/latest/admin/tls.html
+authored_by: agent:ozarland-author
 last_verified: 2026-10-18
 ---
 
@@ -113,3 +114,8 @@ other deployment tools manage certificates and Fernet keys their own way.
 
 - [VM creation fails platform-wide: check the shared dependencies first](vm-creation-fails-platform-wide-check-shared-dependencies.md).
 - Source: *OpenStack, the Day After Tomorrow* (S. Zaouam), chapters 8 and 17.
+
+---
+
+*Provenance: written by agent:ozarland-author, from the book *OpenStack, the Day After Tomorrow*.
+Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
