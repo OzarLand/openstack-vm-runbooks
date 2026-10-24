@@ -20,7 +20,7 @@ upstream_refs:
   - https://docs.openstack.org/python-openstackclient/2026.1/cli/command-objects/volume-attachment.html
   - https://bugs.launchpad.net/nova/+bug/2004555
 authored_by: agent:ozarland-author
-last_verified: 2026-10-21
+last_verified: 2026-10-24
 ---
 
 # Stale volume attachment. The volume is still in-use for an instance that was deleted or evacuated
@@ -55,8 +55,10 @@ With admin credentials:
 ```bash
 # 1. Cinder: the volume and every attachment record for it (3.27 or later)
 openstack volume show <volume-id> -c status -c attachments
-openstack --os-volume-api-version 3.27 volume attachment list --all-projects --volume-id <volume-id>
+cinder --os-volume-api-version 3.27 attachment-list --all-tenants 1 --volume-id <volume-id>
 openstack --os-volume-api-version 3.27 volume attachment show <attachment-id>   # Properties: the connector, with the host
+#    Not "openstack volume attachment list --volume-id": with python-openstackclient 9.0.0 the filter is ignored
+#    and every attachment of the cloud is listed. Check the Volume ID column before you delete anything.
 
 # 2. Nova: does the instance exist, where does it run, and which attachment does it use?
 openstack server show <server-id> -c status -c OS-EXT-SRV-ATTR:host -c OS-EXT-SRV-ATTR:instance_name
@@ -69,8 +71,8 @@ openstack server event list <server-id>
 **Kolla-Ansible:** on the host named by the stale attachment's connector, and on the instance's current host:
 
 ```bash
-docker exec nova_libvirt virsh list --all
-docker exec nova_libvirt virsh domblklist <instance-name>
+sudo docker exec nova_libvirt virsh list --all
+sudo docker exec nova_libvirt virsh domblklist <instance-name>
 ```
 
 **Any:** the same `virsh` commands on those hosts.
@@ -88,13 +90,25 @@ Classify each attachment record of the volume:
 `nova-manage volume_attachment show <server-id> <volume-id> --json` also prints the attachment ID that Nova's
 database holds for the pair, including the connection information the API does not show.
 
-**Kolla-Ansible:** `docker exec nova_api nova-manage volume_attachment show <server-id> <volume-id> --json` on a
-controller.
+**Kolla-Ansible:** `sudo docker exec nova_api nova-manage volume_attachment show <server-id> <volume-id> --json` on
+a controller. For an instance that was deleted it answers `No volume Block Device Mapping with id <volume-id>`.
 
 **Any:** run it where `nova-manage` has access to the Nova database.
 
 For the deletion case, the `nova-api` and `nova-compute` logs at the time of the deletion usually show why Nova could
 not tell Cinder: Cinder unreachable, or the compute down while the instance was deleted.
+
+What Nova 2026.1 did on a lab, which narrows down when this happens:
+
+- `cinder-volume` down during a normal deletion: the instance stayed `deleting` (7 minutes in the longest run), and
+  the deletion and the detach finished once `cinder-volume` was back. No stale attachment.
+- The compute down during the deletion: `nova-api` deleted the instance from its database (`instance's host <host>
+  is down, deleting from database`), and Cinder released the volume once it could. No stale attachment either, but
+  **the guest kept running on the host** with the volume open until `nova-compute` came back and destroyed it
+  (`Destroying instance with name label '<instance-name>' which is marked as DELETED but still present on host`),
+  while Cinder already showed the volume `available`. The destroyed domain stayed defined, and the host kept an
+  iSCSI session to the volume. Check `virsh list --all` and the storage sessions on the instance's last host
+  before you trust an `available` status after such a deletion.
 
 ## Possible causes
 
@@ -164,14 +178,28 @@ since Xena:
 openstack server stop <server-id>
 ```
 
-**Kolla-Ansible:**
+**Kolla-Ansible:** not working as written on Kolla-Ansible 22.2.0 (see Lab observations). Each line below failed on a
+lab, for a different reason:
+
+- `docker exec nova_compute nova-manage volume_attachment get_connector --json` fails as the container's default user
+  (`FailedToDropPrivileges: privsep helper command exited non-zero`); it works with `sudo docker exec -u root`.
+- `docker exec nova_api nova-manage volume_attachment refresh …` runs as root and fails with `[Errno 13] Permission
+  denied: '/dev/shm/<host>_nova-api_qmanager'` (the host's `fs.protected_regular`).
+- Run as the `nova` user, the refresh times out waiting for the compute's reply (Kolla-Ansible sets
+  `use_queue_manager = true`). **It has then already removed the volume's connection and attachment**: the volume is
+  left `reserved` with an attachment that has no connection information, and the instance starts without the
+  volume. Repairing that took the last resort below, a hard reboot and a new attach; see the
+  [volume stuck in attaching, reserved or detaching](volume-stuck-in-attaching-or-detaching.md) runbook.
+- With `use_queue_manager = false` for this command only (a second `--config-file`), the compute's reply arrived.
+  The full refresh was not completed on the lab.
 
 ```bash
 # On the compute that hosts the instance: its connector
-docker exec nova_compute nova-manage volume_attachment get_connector --json > connector.json
+sudo docker exec -u root nova_compute nova-manage volume_attachment get_connector --json > connector.json
 # On a controller, with that file copied there: give it to the nova_api container and refresh
-docker cp connector.json nova_api:/tmp/connector.json
-docker exec nova_api nova-manage volume_attachment refresh <server-id> <volume-id> /tmp/connector.json
+sudo docker cp connector.json nova_api:/tmp/connector.json
+# Not lab-verified, see above
+sudo docker exec -u nova nova_api nova-manage volume_attachment refresh <server-id> <volume-id> /tmp/connector.json
 ```
 
 **Any:**
@@ -204,19 +232,44 @@ openstack volume set --state available --detached <volume-id>
 openstack volume show <volume-id> -c status -c attachments
 # deleted instance: available, no attachment
 # evacuated instance: in-use, one attachment, to the instance on its current host
-openstack --os-volume-api-version 3.27 volume attachment list --all-projects --volume-id <volume-id>
+cinder --os-volume-api-version 3.27 attachment-list --all-tenants 1 --volume-id <volume-id>
 openstack --os-compute-api-version 2.89 server volume list <server-id>
 ```
 
 For an evacuated instance, `virsh domblklist <instance-name>` on its current host lists the volume, and the
 instance's guest sees its disk.
 
+## Lab observations
+
+On a lab: OpenStack 2026.1, Kolla-Ansible 22.2.0, all-in-one (one compute), Cinder LVM over iSCSI,
+python-openstackclient 9.0.0.
+
+- **Deletion case.** Real outages did not leave a stale attachment (see Diagnosis). The symptom was produced by
+  creating a Cinder attachment that Nova did not know (`volume attachment create --connect` with the host's
+  connector, then `volume attachment complete`) and deleting the instance:
+  - the volume stayed `in-use`, attached to the deleted server;
+  - `server show` answered `No Server found`;
+  - `cinder attachment-list` showed one `attached` record;
+  - `volume attachment delete` made the volume `available`, with no attachment and no iSCSI session left.
+- **409 protection.** A `volume attachment delete` of an attachment Nova used was refused:
+  `409 … ConflictNovaUsingAttachment`.
+- **Hard reboot.** With Cinder's attachment gone and Nova still listing the volume, a hard reboot removed Nova's record:
+  `Removing stale volume attachment '<attachment-id>' from instance for volume '<volume-id>'`.
+- **Last resort.** `volume set --state available --detached` worked as written. Cinder refused
+  `volume set --state in-use` on a volume with no attachment.
+- **`nova-manage volume_attachment show`.** Worked as written for an existing instance; its `attachment_id` was the one
+  `server volume list` showed.
+- **`get_connector` and `refresh`.** Failed as written on Kolla-Ansible; see the resolution section.
+
+Not run: the evacuation case (it needs two computes) and RBD.
+
 ## Validity and limits
 
-Written from the upstream documentation and client source for 2026.1, not observed on a platform yet: the Nova
-volume administration guide (hard reboot clean-up, `nova-manage volume_attachment`), the Block Storage API reference
-(attachment statuses, the HTTP 409 protection), and the OpenStack client's `volume set` and `volume attachment`
-commands. A lab run or an operator's confirmation is wanted, in particular of the evacuation case.
+Written from the upstream documentation and client source for 2026.1: the Nova volume administration guide (hard
+reboot clean-up, `nova-manage volume_attachment`), the Block Storage API reference (attachment statuses, the HTTP 409
+protection), and the OpenStack client's `volume set` and `volume attachment` commands. Partly observed on an
+all-in-one lab (see Lab observations), not on a multinode platform. A run of the evacuation case on a multinode lab, and of the `refresh` procedure on a deployment where it
+completes, are still wanted.
 
 Per release:
 
