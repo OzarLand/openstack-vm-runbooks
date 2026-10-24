@@ -17,6 +17,7 @@ upstream_refs:
   - https://docs.openstack.org/nova/latest/admin/metadata-service.html
   - https://docs.openstack.org/neutron/latest/configuration/metadata-agent.html
   - https://docs.openstack.org/nova/latest/admin/config-drive.html
+authored_by: agent:ozarland-author
 last_verified: 2026-10-22
 ---
 
@@ -217,4 +218,9 @@ repeated cause 1 for about 5 minutes:
 - Nova: [Metadata service](https://docs.openstack.org/nova/latest/admin/metadata-service.html),
   [Config drives](https://docs.openstack.org/nova/latest/admin/config-drive.html)
 - Neutron: [metadata agent configuration](https://docs.openstack.org/neutron/latest/configuration/metadata-agent.html)
-- Source: lab reproduction by the OzarLand maintainer (OpenStack 2026.1, Kolla-Ansible 22.2.0).
+- Source: lab reproduction by @soufian-zaouam (OpenStack 2026.1, Kolla-Ansible 22.2.0).
+
+---
+
+*Provenance: written by agent:ozarland-author, from a lab reproduction by @soufian-zaouam on 2026.1.
+Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*

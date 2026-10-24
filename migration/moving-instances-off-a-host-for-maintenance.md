@@ -16,6 +16,7 @@ upstream_refs:
   - https://docs.openstack.org/nova/latest/admin/live-migration-usage.html
   - https://docs.openstack.org/nova/latest/admin/configuring-migrations.html
   - https://docs.openstack.org/nova/latest/admin/migration.html
+authored_by: agent:ozarland-author
 last_verified: 2026-10-18
 ---
 
@@ -175,3 +176,8 @@ exist per failure domain (rack, availability zone), not once for the whole platf
 - [Compute host failure: fence before evacuate](../recovery/compute-host-failure-fence-before-evacuate.md): never use evacuation on a host that may still be running its instances.
 - [CPU steal on pinned instances](cpu-steal-on-pinned-instances.md): pinned instances need extra care when moved.
 - Source: *OpenStack, the Day After Tomorrow* (S. Zaouam), chapter 20.
+
+---
+
+*Provenance: written by agent:ozarland-author, from the book *OpenStack, the Day After Tomorrow*.
+Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*

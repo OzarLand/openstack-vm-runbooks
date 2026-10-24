@@ -16,6 +16,7 @@ upstream_refs:
   - https://galeracluster.com/library/documentation/monitoring-cluster.html
   - https://www.rabbitmq.com/docs/partitions
   - https://docs.openstack.org/oslo.messaging/latest/admin/rabbit.html
+authored_by: agent:ozarland-author
 last_verified: 2026-10-18
 ---
 
@@ -163,3 +164,8 @@ agent RPC on RabbitMQ (OVN uses its own databases), so the "agents stale" sympto
 - [What a VM creation traverses, and tracing it by request id](what-a-vm-creation-traverses-and-tracing-by-request-id.md).
 - [Reopening provisioning after a control-plane incident](../recovery/reopening-provisioning-after-control-plane-incident.md).
 - Source: *OpenStack, the Day After Tomorrow* (S. Zaouam), chapters 1, 8, 10, 11, 17 and 19.
+
+---
+
+*Provenance: written by agent:ozarland-author, from the book *OpenStack, the Day After Tomorrow*.
+Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*

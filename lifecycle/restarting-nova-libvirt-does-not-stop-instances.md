@@ -16,6 +16,7 @@ confirmed_by:
 upstream_refs:
   - https://docs.openstack.org/kolla-ansible/latest/reference/compute/libvirt-guide.html
   - https://docs.openstack.org/nova/latest/admin/configuration/hypervisor-kvm.html
+authored_by: agent:ozarland-author
 last_verified: 2026-10-22
 ---
 
@@ -196,4 +197,9 @@ request was sent every 0.5 s to the instance on that compute.
   the precondition does not hold.
 - Kolla-Ansible, libvirt guide: https://docs.openstack.org/kolla-ansible/latest/reference/compute/libvirt-guide.html
 - Nova, KVM hypervisor: https://docs.openstack.org/nova/latest/admin/configuration/hypervisor-kvm.html
-- Source: lab reproduction by the OzarLand maintainer (OpenStack 2026.1, Kolla-Ansible 22.2.0).
+- Source: lab reproduction by @soufian-zaouam (OpenStack 2026.1, Kolla-Ansible 22.2.0).
+
+---
+
+*Provenance: written by agent:ozarland-author, from a lab reproduction by @soufian-zaouam on 2026.1.
+Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*

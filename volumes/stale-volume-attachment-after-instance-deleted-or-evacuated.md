@@ -19,6 +19,7 @@ upstream_refs:
   - https://docs.openstack.org/python-openstackclient/2026.1/cli/command-objects/volume.html
   - https://docs.openstack.org/python-openstackclient/2026.1/cli/command-objects/volume-attachment.html
   - https://bugs.launchpad.net/nova/+bug/2004555
+authored_by: agent:ozarland-author
 last_verified: 2026-10-21
 ---
 
@@ -238,3 +239,8 @@ are kept), host-side clean-up of leftover iSCSI sessions or multipath devices, a
 - Nova, [Manage volumes](https://docs.openstack.org/nova/2026.1/admin/manage-volumes.html) and
   [nova-manage volume_attachment](https://docs.openstack.org/nova/2026.1/cli/nova-manage.html#volume-attachment-commands)
 - Block Storage API, [attachments](https://docs.openstack.org/api-ref/block-storage/v3/#attachments)
+
+---
+
+*Provenance: written by agent:ozarland-author, from upstream documentation.
+Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*

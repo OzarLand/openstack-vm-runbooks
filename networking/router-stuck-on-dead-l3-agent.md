@@ -17,6 +17,7 @@ upstream_refs:
   - https://docs.openstack.org/neutron/latest/admin/deploy-ovs-ha-vrrp.html
   - https://docs.openstack.org/neutron/latest/configuration/neutron.html
   - https://docs.openstack.org/kolla-ansible/latest/reference/networking/neutron.html
+authored_by: agent:ozarland-author
 last_verified: 2026-10-23
 ---
 
@@ -194,4 +195,9 @@ outage or when the agent started again.
 - Neutron: [L3 HA with VRRP](https://docs.openstack.org/neutron/latest/admin/deploy-ovs-ha-vrrp.html),
   [configuration reference](https://docs.openstack.org/neutron/latest/configuration/neutron.html)
   (`allow_automatic_l3agent_failover`)
-- Source: lab reproduction by the OzarLand maintainer (OpenStack 2026.1, Kolla-Ansible 22.2.0).
+- Source: lab reproduction by @soufian-zaouam (OpenStack 2026.1, Kolla-Ansible 22.2.0).
+
+---
+
+*Provenance: written by agent:ozarland-author, from a lab reproduction by @soufian-zaouam on 2026.1.
+Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*

@@ -6,7 +6,7 @@ openstack_releases: ["2026.1"]
 components: [neutron, ovs]
 deployment_methods: [kolla-ansible]
 environment:
-  topology: multinode, 3 controllers, 2 computes
+  topology: multinode, 1 controller and 2 computes (lab confirmation); 3 controllers and 2 computes (first lab runs)
   network: ml2/ovs (VXLAN)
   storage: none (no Cinder on the lab)
   os: ubuntu-24.04 (noble), docker
@@ -17,6 +17,7 @@ upstream_refs:
   - https://docs.openstack.org/neutron/latest/admin/config-mtu.html
   - https://docs.openstack.org/kolla-ansible/latest/reference/networking/neutron.html
   - https://docs.openstack.org/kolla-ansible/latest/admin/advanced-configuration.html
+authored_by: agent:ozarland-author
 last_verified: 2026-10-23
 ---
 
@@ -240,10 +241,14 @@ compute-1 by 100 bytes, as a network change nobody told Neutron about would.
 
 - Observed on lab builds with the configuration above: OpenStack 2026.1, Kolla-Ansible 22.2.0, ML2/OVS with VXLAN
   over an IPv4 underlay, Docker, Ubuntu Noble, 3 controllers and 2 computes.
+- Confirmed on a lab with 1 controller and 2 computes (same release and network), on 2026-10-23: cause 1
+  reproduced on one compute, fixed with `ip link set` and made persistent with netplan. The host-to-host DF ping from
+  the other host did not detect the lowered MTU.
 - Observed: the symptom, the signature (one compute, smaller tunnel MTU, largest DF ping lost, small ones fine,
   nothing in the logs), and the fix by restoring the interface MTU with `ip link set`.
-- Not run: making the MTU persistent with netplan, the `global_physnet_mtu` change and `openstack network set --mtu`,
-  the host-to-host underlay ping. Causes 2, 3 and 4 were not reproduced.
+- Not run on the first lab builds: making the MTU persistent with netplan and the host-to-host underlay ping (both
+  run at the lab confirmation), the `global_physnet_mtu` change and `openstack network set --mtu`. Causes 2, 3 and 4
+  were not reproduced.
 - Not tested: OVN (Geneve has a different overhead), an IPv6 underlay, VLAN or flat networks, other releases, other
   deployment tools, production scale, jumbo frames.
 - An MTU set with `ip link` is lost at reboot, and may be overwritten by the host's network manager on a DHCP renewal.
@@ -256,4 +261,9 @@ compute-1 by 100 bytes, as a network change nobody told Neutron about would.
 - Neutron: [MTU considerations](https://docs.openstack.org/neutron/latest/admin/config-mtu.html)
 - Kolla-Ansible: [Neutron networking](https://docs.openstack.org/kolla-ansible/latest/reference/networking/neutron.html),
   [service configuration overrides](https://docs.openstack.org/kolla-ansible/latest/admin/advanced-configuration.html)
-- Source: lab reproduction by the OzarLand maintainer (OpenStack 2026.1, Kolla-Ansible 22.2.0).
+- Source: lab reproduction by @soufian-zaouam (OpenStack 2026.1, Kolla-Ansible 22.2.0).
+
+---
+
+*Provenance: written by agent:ozarland-author, from a lab reproduction by @soufian-zaouam on 2026.1.
+Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*

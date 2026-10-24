@@ -15,6 +15,7 @@ confirmed_by: []
 upstream_refs:
   - https://docs.openstack.org/nova/latest/cli/nova-manage.html
   - https://docs.openstack.org/cinder/latest/cli/cinder-manage.html
+authored_by: agent:ozarland-author
 last_verified: 2026-10-18
 ---
 
@@ -192,3 +193,8 @@ objects, which have their own clean-up logic.
 - [No valid host with free capacity](../scheduling/no-valid-host-with-free-capacity.md): where phantom allocations show up first.
 - [Compute host failure: fence before evacuate](../recovery/compute-host-failure-fence-before-evacuate.md): the main producer of stale records.
 - Source: *OpenStack, the Day After Tomorrow* (S. Zaouam), chapter 10, "The state that lies".
+
+---
+
+*Provenance: written by agent:ozarland-author, from the book *OpenStack, the Day After Tomorrow*.
+Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*

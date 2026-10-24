@@ -17,6 +17,7 @@ upstream_refs:
   - https://docs.openstack.org/nova/latest/admin/evacuate.html
   - https://docs.openstack.org/nova/latest/admin/node-down.html
   - https://docs.openstack.org/python-openstackclient/latest/cli/command-objects/compute-service.html
+authored_by: agent:ozarland-author
 last_verified: 2026-10-23
 ---
 
@@ -248,4 +249,9 @@ monitoring user only; the user running the procedure kept its access.
 - [Control plane down: what still works for instances](../diagnostics/control-plane-down-what-still-works-for-instances.md)
 - Nova: [Evacuate instances](https://docs.openstack.org/nova/latest/admin/evacuate.html).
 - OpenSSH: `sshd_config(5)` (`DenyUsers`, `AllowUsers`, `Include`).
-- Source: lab reproduction by the OzarLand maintainer (OpenStack 2026.1, Kolla-Ansible 22.2.0).
+- Source: lab reproduction by @soufian-zaouam (OpenStack 2026.1, Kolla-Ansible 22.2.0).
+
+---
+
+*Provenance: written by agent:ozarland-author, from a lab reproduction by @soufian-zaouam on 2026.1.
+Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*

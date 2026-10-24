@@ -15,6 +15,7 @@ confirmed_by: []
 upstream_refs:
   - https://docs.openstack.org/nova/latest/admin/architecture.html
   - https://docs.openstack.org/nova/latest/admin/cells.html
+authored_by: agent:ozarland-author
 last_verified: 2026-10-18
 ---
 
@@ -114,3 +115,8 @@ release and on `oslo.log` configuration.
 
 - [VM creation fails platform-wide: check the shared dependencies first](vm-creation-fails-platform-wide-check-shared-dependencies.md).
 - Source: *OpenStack, the Day After Tomorrow* (S. Zaouam), chapters 5, 8 and 9.
+
+---
+
+*Provenance: written by agent:ozarland-author, from the book *OpenStack, the Day After Tomorrow*.
+Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
