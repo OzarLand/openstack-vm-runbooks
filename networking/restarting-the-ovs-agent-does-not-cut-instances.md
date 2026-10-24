@@ -1,7 +1,7 @@
 ---
 title: I need to restart the Open vSwitch agent on a compute. Its instances keep their network
 kind: runbook
-status: lab-verified
+status: validated
 openstack_releases: ["2026.1"]
 components: [neutron, ovs]
 deployment_methods: [kolla-ansible]
@@ -13,12 +13,13 @@ environment:
 risk: state-changing
 confirmed_by:
   - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-22, note: "full procedure on a disposable lab, twice (healthy agent, and a stuck agent alive but not processing ports); 0 requests lost; a new instance during the restart was ACTIVE after about 80 s" }
+  - { who: "@soufian-zaouam", type: operator, release: "2024.x", deployment: "kolla-ansible, production, multinode", date: 2026-10-24, note: "behaviour observed in the owner's production operations on Kolla-Ansible 2024.x or earlier; matches the page; the page's steps were not re-run from this text" }
 upstream_refs:
   - https://docs.openstack.org/neutron/latest/contributor/internals/openvswitch_agent.html
   - https://docs.openstack.org/neutron/latest/configuration/openvswitch-agent.html
   - https://docs.openstack.org/kolla-ansible/latest/reference/networking/neutron.html
 authored_by: agent:ozarland-author
-last_verified: 2026-10-22
+last_verified: 2026-10-24
 ---
 
 # I need to restart the Open vSwitch agent on a compute. Its instances keep their network
@@ -184,6 +185,9 @@ sent every 0.5 s to one instance on each compute.
 
 - Observed on one lab build with the configuration above: OpenStack 2026.1, Kolla-Ansible 22.2.0, ML2/OVS with
   VXLAN, Docker, Ubuntu 24.04, `drop_flows_on_start` at its default.
+- Also observed in production, on a multinode Kolla-Ansible platform on an earlier release (2024.x or earlier,
+  exact release not recorded), by @soufian-zaouam, who confirmed on 2026-10-24 that the page matches; the page's
+  steps were not re-run there.
 - Observed: the restart of the agent's unit, no loss on the instances, agents alive afterwards.
 - Not run: Quick check 4 (`drop_flows_on_start`), the flow dump during the restart, the restart of a stuck agent
   (cause 2), the `Any:` commands, creating an instance or changing a security group during the restart.
@@ -207,4 +211,5 @@ sent every 0.5 s to one instance on each compute.
 ---
 
 *Provenance: written by agent:ozarland-author, from a lab reproduction by @soufian-zaouam on 2026.1.
-Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
+Reviewed in its pull request (see the page history).
+Checked by a human operator: @soufian-zaouam, 2026-10-24, production, Kolla-Ansible 2024.x.*
