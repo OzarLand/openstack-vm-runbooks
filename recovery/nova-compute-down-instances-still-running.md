@@ -1,7 +1,7 @@
 ---
 title: nova-compute is down on a compute, but its instances are still running
 kind: runbook
-status: validated
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [nova, libvirt]
 deployment_methods: [kolla-ansible]
@@ -20,7 +20,7 @@ upstream_refs:
   - https://docs.openstack.org/nova/latest/configuration/config.html#DEFAULT.service_down_time
   - https://docs.openstack.org/python-openstackclient/latest/cli/command-objects/compute-service.html
 authored_by: agent:ozarland-author
-last_verified: 2026-10-24
+last_verified: 2026-10-22
 ---
 
 # nova-compute is down on a compute, but its instances are still running
@@ -307,4 +307,5 @@ nova_compute Exited (137)
 
 *Provenance: written by agent:ozarland-author, from a lab reproduction by @soufian-zaouam on 2026.1.
 Reviewed in its pull request (see the page history).
-Checked by a human operator: @soufian-zaouam, 2026-10-24, production, Kolla-Ansible 2024.x.*
+Checked by a human operator: not yet.
+Behaviour also reported from production by @soufian-zaouam (Kolla-Ansible 2024.x or earlier, steps not re-run).*
