@@ -165,7 +165,9 @@ inventory again.
 ```bash
 kolla-ansible reconfigure -i <inventory> --tags nova
 openstack resource provider inventory list <rp-uuid>      # the new reserved value or ratio, about a minute later
-``` Changing a ratio directly in Placement is overridden by the compute on its next update unless the
+```
+
+Changing a ratio directly in Placement is overridden by the compute on its next update unless the
 `initial_*_allocation_ratio` logic applies; prefer the Nova configuration.
 
 ### Heal stale allocations
