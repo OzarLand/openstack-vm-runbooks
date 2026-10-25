@@ -1,8 +1,8 @@
 ---
 title: Moving instances off a compute host for planned maintenance (patching, reboot, hardware)
 kind: runbook
-status: draft
-openstack_releases: [unrecorded]
+status: lab-verified
+openstack_releases: ["2026.1"]
 components: [nova, libvirt, qemu]
 deployment_methods: [any]
 environment:
@@ -11,13 +11,14 @@ environment:
   storage: shared or local; determines live migration mode
   os: any
 risk: destructive
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 1 controller and 2 computes", date: 2026-10-25, note: "steps 1, 2 (live block migration), 4 and Verification run while draining a compute; step 3 (cold migration) not run" }
 upstream_refs:
   - https://docs.openstack.org/nova/latest/admin/live-migration-usage.html
   - https://docs.openstack.org/nova/latest/admin/configuring-migrations.html
   - https://docs.openstack.org/nova/latest/admin/migration.html
 authored_by: agent:ozarland-author
-last_verified: 2026-10-18
+last_verified: 2026-10-25
 ---
 
 # Moving instances off a compute host for planned maintenance
@@ -52,8 +53,9 @@ done
 # On the host: virsh dumpxml <instance-name> | grep -E 'hostdev|mdev'   -> passthrough or vGPU present
 
 # 3. Capacity: where could they go?
-openstack hypervisor list --long          # vCPUs and memory used/total per host
 openstack allocation candidate list --resource VCPU=<largest flavor vcpus> --resource MEMORY_MB=<largest flavor ram>
+#    needs the osc-placement plugin. "openstack hypervisor list --long" no longer shows vCPUs and memory with recent
+#    clients (python-openstackclient 9.0.0 on a lab): use "openstack resource provider usage show <rp-uuid>" instead
 
 # 4. Version compatibility between source and destination
 #    on each host: virsh version ; qemu-system-x86_64 --version ; the CPU model in nova.conf [libvirt] cpu_mode/cpu_models
@@ -105,7 +107,8 @@ openstack compute service set --disable --disable-reason "maintenance <ticket> <
 ### Step 2: live-migrate what can be live-migrated
 
 > ⚠️ **State-changing, production impact.** The instance pauses briefly at switchover; network and storage carry
-> the memory (and disk, for block migration) copy. Migrate a few at once, not the whole host, and watch the
+> the memory (and disk, for block migration) copy. On a lab, a ping lost between 1.8 and 8.6 s at the
+> switch-over, and once the instance stayed unreachable for a few minutes after it (see Lab observations). Migrate a few at once, not the whole host, and watch the
 > destination. Memory-heavy instances may never converge: set a timeout and be ready to abort.
 
 ```bash
@@ -144,6 +147,11 @@ openstack server stop <server-id>   # patch the host ... openstack server start 
 > ⚠️ **State-changing.** Re-enabling makes the host a destination again, which is exactly what the next host in the
 > sequence needs.
 
+After the reboot, wait until the host's `nova-compute` is `up` with a new `Updated At` in
+`openstack compute service list --long`: for about a minute after the reboot it still shows `up`, from its last
+heartbeat. On a lab, enabling a host still rebooting printed `Failed to set service status to enabled` (the API timed
+out talking to the compute), although the change took effect.
+
 ```bash
 openstack compute service set --enable <host> nova-compute
 ```
@@ -162,6 +170,23 @@ ps -o pid,lstart,cmd -C qemu-system-x86_64 | grep <instance-name>
 Check with the owner that the application is healthy after a cold migration or restart. For the campaign as a
 whole: every host rebooted, every instance either migrated after its host was patched or restarted.
 
+## Lab observations
+
+On a lab: OpenStack 2026.1, Kolla-Ansible 22.2.0, 1 controller and 2 computes (nested KVM, local instance disks,
+libvirt 10.0.0 and QEMU 8.2.2 on both), ML2/OVS, CirrOS instances, python-openstackclient 9.0.0.
+
+| Step | Observed |
+|---|---|
+| Step 1, `--disable` | `Status disabled`, `State up`; a new instance went to the other compute |
+| Quick checks 1, 2, 4 | As written; check 3 needed the changes above |
+| Step 2, `openstack server migrate --live-migration --block-migration <server-id>` (and `--host <destination>`) | Each instance `ACTIVE` on the other compute after 32 to 34 s; `server migration list --server` showed `running` for a moment after, then `completed` |
+| Connectivity during a live migration (ping every 0.2 s, five migrations) | Gaps of 1.8, 2.8, 3.1 and 8.6 s at the switch-over. Once, replies stopped at the switch-over and SSH failed for a few minutes; the instance had not restarted and answered again within about 5 minutes; the cause was not found |
+| Step 4, reboot of the drained host, then `--enable` | See the note in step 4 |
+| Verification | As written; on the destination, `ps -o pid,lstart,cmd -C qemu-system-x86_64` showed the instance's QEMU process started at the switch-over |
+
+Not run: step 3 (cold migration, `resize confirm`), `migration abort` and `force complete`, instances with
+passthrough devices, a version difference between hosts.
+
 ## Validity and limits
 
 Derived from an operator's patching campaign on a platform of up to several hundred hosts, where spare capacity
@@ -169,7 +194,8 @@ did not allow live-migrating everything and the owning teams supplied the critic
 Release not recorded. Command names for cold-migration confirmation changed across python-openstackclient
 versions. Live migration constraints (PCI, SR-IOV, vGPU, CPU model, version direction) are release-dependent:
 check the Nova documentation of your release. Capacity rule of thumb from the same source: spare capacity must
-exist per failure domain (rack, availability zone), not once for the whole platform.
+exist per failure domain (rack, availability zone), not once for the whole platform. Steps 1, 2 and 4 and the
+verification were observed on a small lab on 2026.1 (see Lab observations).
 
 ## Related
 
