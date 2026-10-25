@@ -106,10 +106,11 @@ openstack compute service set --disable --disable-reason "maintenance <ticket> <
 
 ### Step 2: live-migrate what can be live-migrated
 
-> ⚠️ **State-changing, production impact.** The instance pauses briefly at switchover; network and storage carry
-> the memory (and disk, for block migration) copy. On a lab, a ping lost between 1.8 and 8.6 s at the
-> switch-over, and once the instance stayed unreachable for a few minutes after it (see Lab observations). Migrate a few at once, not the whole host, and watch the
-> destination. Memory-heavy instances may never converge: set a timeout and be ready to abort.
+> ⚠️ **State-changing, production impact.** The instance pauses briefly at switchover; network and storage carry the
+> memory (and disk, for block migration) copy. On a lab, a ping lost between 1.8 and 8.6 s at the switch-over, and
+> once the instance stayed unreachable for a few minutes after it (see Lab observations). Migrate a few at once, not
+> the whole host, and watch the destination. Memory-heavy instances may never converge: set a timeout and be ready
+> to abort.
 
 ```bash
 # Let the scheduler pick a destination
