@@ -1,8 +1,8 @@
 ---
 title: No valid host was found, although capacity exists
 kind: runbook
-status: draft
-openstack_releases: [unrecorded]
+status: lab-verified
+openstack_releases: ["2026.1"]
 components: [nova, placement]
 deployment_methods: [any]
 environment:
@@ -11,13 +11,14 @@ environment:
   storage: any
   os: any
 risk: state-changing
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, all-in-one", date: 2026-10-24, note: "four causes reproduced and repaired: unmapped host, Placement reserved memory, disabled service, a filter (anti-affinity); stale allocations and traits not run" }
 upstream_refs:
   - https://docs.openstack.org/nova/latest/admin/cells.html
   - https://docs.openstack.org/nova/latest/cli/nova-manage.html
   - https://docs.openstack.org/osc-placement/latest/
 authored_by: agent:ozarland-author
-last_verified: 2026-10-18
+last_verified: 2026-10-24
 ---
 
 # No valid host was found, although capacity exists
@@ -34,8 +35,16 @@ status | ERROR
 fault  | {'code': 500, 'message': 'No valid host was found. There are not enough hosts available.', ...}
 ```
 
-`OS-EXT-SRV-ATTR:host` is empty: no host was ever selected. Meanwhile `openstack hypervisor list` shows hosts with
-room.
+`OS-EXT-SRV-ATTR:host` is empty: no host was ever selected. Meanwhile Placement shows hosts with room
+(`openstack resource provider usage show <rp-uuid>` against its inventory; `openstack hypervisor list` no longer
+shows capacity with recent compute API microversions).
+
+The message depends on where the request stopped (observed on a lab):
+
+- `No valid host was found. There are not enough hosts available.`: a filter rejected every host.
+- `No valid host was found. `: Placement returned no candidate.
+- `Host '<host>' is not mapped to any cell`: the scheduler chose a host that is not mapped to a cell. This one
+  names the host instead of saying "No valid host".
 
 ## Impact
 
@@ -54,12 +63,18 @@ nova-manage cell_v2 list_hosts
 
 # 3. Does Placement have candidates for the flavor's resources? (needs the osc-placement plugin)
 openstack allocation candidate list --resource VCPU=<vcpus> --resource MEMORY_MB=<ram> --resource DISK_GB=<disk>
+#    Nova leaves out disabled computes through the COMPUTE_STATUS_DISABLED trait; this command does not. To see
+#    the candidates as Nova does:
+openstack --os-placement-api-version 1.22 allocation candidate list --resource VCPU=<vcpus> \
+  --resource MEMORY_MB=<ram> --resource DISK_GB=<disk> --forbidden COMPUTE_STATUS_DISABLED
 
 # 4. What did the scheduler say?
 #    nova-scheduler.log for the request id of the failed boot (openstack server event list <server-id>)
 ```
 
-**Kolla-Ansible:** `nova-manage` runs inside the `nova_api` container (`docker exec -it nova_api nova-manage ...`).
+**Kolla-Ansible:** `nova-manage` runs inside the `nova_api` container: `sudo docker exec nova_api nova-manage ...`.
+Without `-it`: it is not needed, and `-it` fails outside an interactive terminal (`cannot attach stdin to a
+TTY-enabled container because stdin is not a terminal`).
 
 ## Diagnosis
 
@@ -74,7 +89,9 @@ Host '<host>' is not mapped to any cell
 
 The scheduler picked the host (it exists in Placement) but the conductor could not find which cell database holds
 it. This happens when `nova-manage cell_v2 discover_hosts` was not run after adding the host and
-`[scheduler] discover_hosts_in_cells_interval` is at its default of `-1` (disabled).
+`[scheduler] discover_hosts_in_cells_interval` is at its default of `-1` (disabled). Kolla-Ansible 22.2.0 writes
+`discover_hosts_in_cells_interval = -1` in the scheduler's `nova.conf`, and maps new computes itself when it deploys
+them. A host added or re-created outside Kolla-Ansible needs `discover_hosts`.
 
 ### Placement has no candidates
 
@@ -94,14 +111,19 @@ trait or a resource class (PCPU, a custom class) the hosts do not expose.
 ### Filters rejected every candidate
 
 The scheduler log line `Filter <Name> returned 0 hosts` names the filter. Common ones: `AggregateInstanceExtraSpecsFilter`
-(flavor extra specs versus aggregate metadata), `AvailabilityZoneFilter` (the requested zone has no enabled host),
-`NUMATopologyFilter` (pinned or hugepage flavor with no matching host), `ComputeFilter` (service disabled or down),
+(flavor extra specs versus aggregate metadata), `ServerGroupAntiAffinityFilter` (an anti-affinity group already
+has a member on every candidate), `AvailabilityZoneFilter` (the requested zone has no enabled host),
+`NUMATopologyFilter` (pinned or hugepage flavor with no matching host), `ComputeFilter` (service down),
 `ImagePropertiesFilter` (image requires a property the hosts lack).
 
 ### Service disabled or down
 
 Step 1 shows `disabled` (someone disabled it, read the reason) or `down` (the service stopped reporting: host
 problem, or the service lost its message bus connection).
+
+A disabled compute does not reach the filters: Nova sets the `COMPUTE_STATUS_DISABLED` trait on its resource
+provider and asks Placement to leave it out. The scheduler log then says `Got no allocation candidates from the
+Placement API`, while quick check 3 without `--forbidden COMPUTE_STATUS_DISABLED` still lists the host.
 
 ## Possible causes
 
@@ -133,7 +155,19 @@ mapped automatically. Verify how your deployment tool handles this before changi
 
 Set `cpu_allocation_ratio`, `ram_allocation_ratio`, `disk_allocation_ratio` and `reserved_host_*` in the
 `[DEFAULT]` section of `nova.conf` on the compute host, restart `nova-compute`, and check the
-inventory again. Changing a ratio directly in Placement is overridden by the compute on its next update unless the
+inventory again.
+
+**Kolla-Ansible:** put them in `/etc/kolla/config/nova/nova-compute.conf` (or `/etc/kolla/config/nova.conf`), then:
+
+> ⚠️ **State-changing.** `reconfigure` recreates the `nova_compute` containers whose configuration changed; running
+> instances are not affected.
+
+```bash
+kolla-ansible reconfigure -i <inventory> --tags nova
+openstack resource provider inventory list <rp-uuid>      # the new reserved value or ratio, about a minute later
+```
+
+Changing a ratio directly in Placement is overridden by the compute on its next update unless the
 `initial_*_allocation_ratio` logic applies; prefer the Nova configuration.
 
 ### Heal stale allocations
@@ -159,9 +193,29 @@ openstack server show sched-test -c status -c OS-EXT-SRV-ATTR:host
 openstack server delete sched-test
 ```
 
+## Lab observations
+
+On a lab: OpenStack 2026.1, Kolla-Ansible 22.2.0, all-in-one (one compute), ML2/OVS, Docker, Ubuntu 24.04,
+osc-placement 4.8.0. Each cause was produced on purpose, then repaired:
+
+| Cause produced | Fault | Quick checks | Repair |
+|---|---|---|---|
+| Host mapping deleted (`nova-manage cell_v2 delete_host`, the host's instances shelved first) | `Host '<host>' is not mapped to any cell`, no host | 1: `enabled`, `up`. 2: `list_hosts` empty. 3: one candidate. 4: `HostMappingNotFound` in the conductor log | `discover_hosts --verbose`: `Creating host mapping for compute host '<host>'`; a test instance `ACTIVE` |
+| `reserved_host_memory_mb = 15000` on a 16 GB compute | No candidate in Placement (see note) | 3: empty; `inventory list`: `MEMORY_MB` reserved 15000; `usage show`: 1024 used. Scheduler log: `Got no allocation candidates from the Placement API` | Override removed, `reconfigure`: reserved back to 512, one candidate |
+| Compute service disabled | `No valid host was found. ` | 1: `disabled`. 3: **one candidate** without `--forbidden`, none with it. Scheduler log: `Got no allocation candidates from the Placement API` | `compute service set --enable`; a test instance `ACTIVE` |
+| A second member of an anti-affinity group, one host | `No valid host was found. There are not enough hosts available.` | Scheduler log: `Filter ServerGroupAntiAffinityFilter returned 0 hosts`, and the filter results | Members deleted |
+
+Note: during the reserved-memory test, the test instance ended with `MessagingTimeout`, not with "No valid host".
+The scheduler answered 28 s after the conductor had stopped waiting, and its log shows the
+`Got no allocation candidates` answer for that request. Why it answered late was not established: `reconfigure` had
+not restarted it.
+
 ## Validity and limits
 
-Derived from an operator's account of "capacity exists but nothing lands on it"; release not recorded. Cells v2
+Derived from an operator's account of "capacity exists but nothing lands on it"; release not recorded. Observed on
+one all-in-one lab on 2026.1 (see Lab observations): the unmapped host, a reserved value in the inventory, a
+disabled service and a filter, with their repairs. Not run: stale allocations and `heal_allocations`, a resource
+class or trait no host has, a `down` service, and anything that needs several computes. Cells v2
 and Placement have been mandatory since Ocata (15.0), so the mapping mechanism applies to every current release.
 The `osc-placement` plugin is required for the `openstack resource provider` and `allocation candidate` commands.
 Not covered: scheduling failures specific to Ironic bare-metal nodes.

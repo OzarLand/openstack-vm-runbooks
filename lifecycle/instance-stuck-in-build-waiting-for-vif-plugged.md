@@ -1,7 +1,7 @@
 ---
 title: Instance stuck in BUILD, then ERROR after vif_plugging_timeout
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [nova, neutron, ovn, ovs]
 deployment_methods: [any]
@@ -11,14 +11,15 @@ environment:
   storage: any
   os: any
 risk: state-changing
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, all-in-one", date: 2026-10-24, note: "symptom reproduced by pausing the Open vSwitch agent; quick checks, systemctl restart of the paused agent, clean-up and the verification test boot run; OVN and the other causes not run" }
 upstream_refs:
   - https://docs.openstack.org/nova/latest/admin/architecture.html
   - https://docs.openstack.org/nova/latest/configuration/config.html#DEFAULT.vif_plugging_timeout
   - https://docs.openstack.org/nova/latest/configuration/config.html#DEFAULT.vif_plugging_is_fatal
   - https://docs.openstack.org/neutron/latest/admin/ovn/
 authored_by: agent:ozarland-author
-last_verified: 2026-10-18
+last_verified: 2026-10-24
 ---
 
 # Instance stuck in BUILD, then ERROR after vif_plugging_timeout
@@ -59,7 +60,8 @@ no host (observed on a lab). The build is not retried on another host.
 ## Impact
 
 New instances fail on one host, a set of hosts, or everywhere, depending on the cause. Running instances are not
-affected. Each failed build leaves an `ERROR` instance that holds quota and a Placement allocation until deleted.
+affected. Each failed build leaves an `ERROR` instance that counts in the project's quota until deleted. Its
+Placement allocation is held while it waits, then removed when the build is aborted (observed on a lab).
 
 ## Quick checks
 
@@ -110,16 +112,26 @@ Search `neutron-server.log` for the port UUID. Look for the binding attempt and 
 ### Agent or OVN controller (compute host)
 
 **ML2/OVS:** `openstack network agent list --host <host>` must show `Open vSwitch agent` alive. An agent whose
-process is frozen stops reporting and shows not alive, while its container still looks up:
+process is frozen stops reporting and shows not alive, while its container still looks up.
+
+When the agent stopped reporting matters. Neutron binds the port when the build starts. If the agent was alive then,
+the binding succeeds (`binding_vif_type` `ovs`), the port stays `DOWN`, and the build waits for
+`vif_plugging_timeout`: this runbook. If the agent was already reported dead, the binding fails at once:
+`Failed to bind port` in `neutron-server.log`, `PortBindingFailed` in `nova-compute.log`. Nova then tries another
+host, and when none is left the fault is `Exceeded maximum number of retries. Exhausted all hosts available for
+retrying build failures`, within seconds, not after five minutes. On a lab, an agent paused 70 s before the request
+gave the second case; one paused right before it gave the first.
 
 ```bash
 # On the compute (Kolla-Ansible)
-docker ps -a --filter name=neutron_openvswitch_agent --format '{{.Names}} {{.Status}}'
+sudo docker ps -a --filter name=neutron_openvswitch_agent --format '{{.Names}} {{.Status}}'
 #    "Up ... (Paused)" means the container is paused; "Exited" means it stopped
 ```
 
 On the host,
-`ovs-vsctl show` should list the tap device of the port under `br-int`; `neutron-openvswitch-agent.log` shows the
+`ovs-vsctl show` should list the port under `br-int`: as `qvo<port-id-prefix>` with the iptables hybrid firewall
+driver (the one in the lab's `openvswitch_agent.ini`; the `tap` device then sits on a `qbr` Linux bridge), as
+`tap<port-id-prefix>` with the `openvswitch` firewall driver; `neutron-openvswitch-agent.log` shows the
 port being processed. An agent that is alive but has a stale or stuck RPC connection (after a RabbitMQ incident, for
 example) processes nothing: look for `AMQP server unreachable` or long gaps in the log.
 
@@ -145,7 +157,7 @@ or stale bus. See [VM creation fails platform-wide: check the shared dependencie
 
 | Cause | How to tell |
 |---|---|
-| Agent or OVN controller down or not reporting on the host | `network agent list` shows it dead, or `ovn-sbctl show` has no chassis for the host |
+| Agent or OVN controller stopped processing after the port was bound | `network agent list` shows it dead now, but the port is bound (`binding_vif_type` not `binding_failed`) and `DOWN`; or `ovn-sbctl show` has no chassis for the host. An agent already dead when the build started gives `binding_failed` instead (see Diagnosis) |
 | Bridge mappings or physical network mismatch on the host | `binding_vif_type = binding_failed`; `neutron-server.log` says no mechanism driver bound the port; only networks of one type fail |
 | Agents alive but RPC stale after a bus incident | Agents report alive (heartbeat is on a separate connection) but process nothing; recovers on restart |
 | Neutron cannot notify Nova | Port is `ACTIVE`, `neutron-server.log` shows notification errors; every host affected |
@@ -159,9 +171,11 @@ or stale bus. See [VM creation fails platform-wide: check the shared dependencie
 > and, on some versions and configurations, existing flows; restarting `ovn-controller` is usually transparent
 > but re-syncs every port on the host. Do it on one host first.
 
-**Kolla-Ansible:** `docker restart neutron_openvswitch_agent` or `docker restart ovn_controller` on the host, or
-through the systemd unit Kolla-Ansible creates for the container:
-`systemctl restart kolla-neutron_openvswitch_agent-container.service`.
+**Kolla-Ansible:** `sudo docker restart neutron_openvswitch_agent` or `sudo docker restart ovn_controller` on the
+host, or through the systemd unit Kolla-Ansible creates for the container:
+`sudo systemctl restart kolla-neutron_openvswitch_agent-container.service`. On a paused agent, the unit restart
+worked on a lab: it took about 60 s, because the paused container ignores the stop and is killed (`Exited (137)`),
+then the agent was alive again.
 **Any:** `systemctl restart neutron-openvswitch-agent` or `systemctl restart ovn-controller`.
 
 If `docker ps` shows the agent container `(Paused)`, resume it instead of restarting it:
@@ -171,7 +185,7 @@ If `docker ps` shows the agent container `(Paused)`, resume it instead of restar
 
 ```bash
 # On the compute (Kolla-Ansible)
-docker unpause neutron_openvswitch_agent
+sudo docker unpause neutron_openvswitch_agent
 ```
 
 Builds that already failed are not retried: clean them up as below.
@@ -238,6 +252,20 @@ compute-1, then requesting a test instance on that compute.
 - An earlier attempt, on a lab that had run many other failures overnight, gave a fault after 134 s without this
   signature. Its message was not read; it is not counted.
 
+Run again on an all-in-one lab (one VM: controller, network and compute), OpenStack 2026.1, Kolla-Ansible 22.2.0,
+ML2/OVS, iptables hybrid firewall:
+
+| Agent paused | Port | Result |
+|---|---|---|
+| 70 s before the request, agent already `XXX` | `binding_failed`, port removed | `ERROR` after **20 s**: `Exceeded maximum number of retries…`; `Failed to bind port` in `neutron-server.log`, `PortBindingFailed` in `nova-compute.log` |
+| Right before the request | Bound (`ovs`, `binding_host_id` set), `DOWN` | `BUILD`/`spawning` with a host and a Placement allocation, then `ERROR` after **324 s**: `Build of instance … aborted: Failed to allocate the network(s), not rescheduling`; `Timeout waiting for ['network-vif-plugged-<port-id>']`, `InstanceEventTimeout`, `VirtualInterfaceCreateException` in `nova-compute.log`; host empty; no allocation left |
+
+- A running instance kept answering ping through both (130 of 130 during the first).
+- `sudo systemctl restart kolla-neutron_openvswitch_agent-container.service` on the paused agent: 62 s, the container
+  killed (`Exited (137)`) and started again, the agent alive 20 s later.
+- `openstack server delete` removed both `ERROR` instances. The verification test boot with
+  `--availability-zone nova:<compute-host>` reached `ACTIVE` in 16 s with its port `ACTIVE`.
+
 ## Validity and limits
 
 The mechanism (Nova waiting for `network-vif-plugged`, bounded by `vif_plugging_timeout`) is stable across recent
@@ -245,10 +273,12 @@ releases. It was first written from an operator's description of the provisionin
 
 - Observed on one lab build: OpenStack 2026.1, Kolla-Ansible 22.2.0, ML2/OVS (VXLAN), Docker, Ubuntu Noble,
   3 controllers and 2 computes. Cause observed: the Open vSwitch agent of one compute frozen.
+- Also observed on an all-in-one lab (see Lab observations): the same fault chain, the quick checks, the binding
+  failure of an agent already dead, `systemctl restart` of the paused agent, and the test boot of Verification.
 - Observed steps: the symptom and fault chain, the agent shown not alive, resuming the agent (`docker unpause`), and
   deleting the failed instance.
-- Not run on the lab: `docker restart` or `systemctl restart` of the agent, every OVN step, the bridge-mapping,
-  stale-RPC, Nova-notification and slow-host causes, disabling the compute service, the test boot of Verification.
+- Not run on a lab: `docker restart` of the agent, every OVN step, the bridge-mapping, stale-RPC, Nova-notification
+  and slow-host causes, disabling the compute service.
 - OVN commands assume the Neutron OVN driver; ML2/OVS commands assume the OVS agent. Not tested with Linux Bridge or
   SR-IOV ports, where binding failures have additional causes, nor on other releases, other deployment tools or at
   production scale.
