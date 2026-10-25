@@ -63,10 +63,10 @@ $ openstack console log show <server-id>
 ## Impact
 
 Every new instance that boots from a volume, for one user or for the whole platform, depending on the cause.
-Running instances are not affected. No data is at risk from the failure itself: a failed build leaves at most an unused volume behind. Two steps of
-cause 5 can delete or overwrite a boot volume; they are marked 🛑. The
-risk comes from retrying blindly: each retry from an image creates another volume, which counts against the
-project's Cinder quota and fills the backend.
+Running instances are not affected. No data is at risk from the failure itself: a failed build leaves at most an
+unused volume behind. Two steps of cause 5 can delete or overwrite a boot volume; they are marked 🛑. The risk
+comes from retrying blindly: each retry from an image creates another volume, which counts against the project's
+Cinder quota and fills the backend.
 
 ## Quick checks
 
@@ -290,8 +290,10 @@ follows `enable_cinder_backend_lvm`). A backend that uses iSCSI but was configur
 
 ```bash
 kolla-ansible deploy -i <inventory> --tags iscsi
-``` The [volume stuck in attaching](../volumes/volume-stuck-in-attaching-or-detaching.md) runbook covers
-`os_brick` errors in more detail.
+```
+
+The [volume stuck in attaching](../volumes/volume-stuck-in-attaching-or-detaching.md) runbook covers `os_brick`
+errors in more detail.
 
 ### For cause 5
 
