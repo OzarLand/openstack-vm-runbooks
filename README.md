@@ -98,7 +98,7 @@ lab), **documentation** (upstream documentation and source), **production incide
 | Page | Components | Releases | Status | Source |
 |---|---|---|---|---|
 | [Instance fails to boot from volume. ERROR at build, or ACTIVE with no bootable disk](scheduling/instance-fails-to-boot-from-volume.md) | nova, cinder, glance, libvirt | 2026.1 | draft | documentation |
-| [No valid host was found, although capacity exists](scheduling/no-valid-host-with-free-capacity.md) | nova, placement | not recorded ([help wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=scheduling%2Fno-valid-host-with-free-capacity.md&title=Release+for+scheduling%2Fno-valid-host-with-free-capacity.md)) | draft | book |
+| [No valid host was found, although capacity exists](scheduling/no-valid-host-with-free-capacity.md) | nova, placement | not recorded ([help wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=scheduling%2Fno-valid-host-with-free-capacity.md&title=Release+for+scheduling%2Fno-valid-host-with-free-capacity.md)) | lab-verified | book |
 
 ### Migration
 
