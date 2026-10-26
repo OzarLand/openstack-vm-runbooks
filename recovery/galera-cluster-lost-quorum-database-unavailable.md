@@ -62,14 +62,14 @@ Read-only. On **every** MariaDB node:
 sudo docker ps -a --filter name=mariadb --format '{{.Names}} {{.Status}}'
 
 # 2. If it is up: the node's view of the cluster (database_password from passwords.yml)
-sudo docker exec -it mariadb mysql -uroot -p -e "SHOW STATUS WHERE Variable_name IN
+sudo docker exec -it mariadb mariadb -uroot -p -e "SHOW STATUS WHERE Variable_name IN
   ('wsrep_cluster_status','wsrep_cluster_size','wsrep_local_state_comment','wsrep_ready','wsrep_last_committed')"
 
 # 3. The last lines of its log
 sudo tail -n 50 /var/log/kolla/mariadb/mariadb.log
 ```
 
-**Any:** the same `SHOW STATUS` query with the `mysql` client on each node, and the MariaDB error log.
+**Any:** the same `SHOW STATUS` query with the `mariadb` (or `mysql`) client on each node, and the MariaDB error log.
 
 | What the nodes show | Case |
 |---|---|
@@ -125,8 +125,10 @@ own: a node that was not stopped last has `safe_to_bootstrap: 0`, and none knows
 
 ## Resolution
 
-Before any state-changing step, if at least one node still answers queries, take a backup
-(`kolla-ansible mariadb-backup -i <inventory>`, see the backup and restore guide), and stop new requests at the APIs
+Before any state-changing step, take a backup. In case A, the cluster still has a Primary component, and
+`kolla-ansible mariadb-backup -i <inventory>` works (see the backup and restore guide). In cases B and C it does not:
+`mariadb-backup` needs a node in a Primary component, so copy each node's `mariadb` Docker volume instead, with its
+container stopped. Then stop new requests at the APIs
 if your procedure allows it ([reopening provisioning](reopening-provisioning-after-control-plane-incident.md)).
 
 ### For cause 1: let the failed node rejoin
@@ -139,7 +141,7 @@ copies what it missed.
 
 ```bash
 sudo docker start mariadb
-sudo docker exec -it mariadb mysql -uroot -p -e "SHOW STATUS LIKE 'wsrep_local_state_comment'"   # Joining, then Synced
+sudo docker exec -it mariadb mariadb -uroot -p -e "SHOW STATUS LIKE 'wsrep_local_state_comment'"   # Joining, then Synced
 ```
 
 Do not run `mariadb-recovery` for this case: it stops the healthy nodes too.
@@ -157,6 +159,14 @@ Primary again: compare `wsrep_last_committed` on the running nodes, then on the 
 > it creates two clusters that write different data. Precondition: the other side is down or cut off for sure, and
 > this node has the highest `wsrep_last_committed` of all reachable nodes. Cannot be undone.
 
+**Kolla-Ansible:**
+
+```bash
+sudo docker exec -it mariadb mariadb -uroot -p -e "SET GLOBAL wsrep_provider_options='pc.bootstrap=YES'"
+```
+
+**Any:**
+
 ```sql
 SET GLOBAL wsrep_provider_options='pc.bootstrap=YES';
 ```
@@ -169,15 +179,24 @@ Precondition: every controller is up, with its network and the `mariadb` Docker 
 alone: the recovery reads the seqno from them.
 
 > 🛑 **Destructive.** Stops MariaDB on every MariaDB host, then rebuilds the cluster from the host with the highest
-> seqno. If a host's seqno cannot be read (its log has no `Recovered position` line), the playbook cannot compare it,
-> and transactions only that host had may be lost. All database clients are cut off while it runs. Cannot be undone;
+> seqno. If a host's seqno cannot be read (its log has no `Recovered position` line), the run may fail and leave
+> MariaDB stopped everywhere: read every host's `/var/log/kolla/mariadb/mariadb.log` before running it again. All
+> database clients are cut off while it runs. Cannot be undone;
 > keep a backup of each host's `mariadb` volume if you can (stopped container, copy of the volume directory).
 
 ```bash
 kolla-ansible mariadb-recovery -i <inventory>
 ```
 
-To choose the host yourself, after reading each host's `grastate.dat` (`seqno:`) and recovered position:
+To choose the bootstrap host yourself (the backup and restore guide uses this form after a restore):
+
+> 🛑 **Destructive.** With `mariadb_recover_inventory_name`, the playbook skips the stop, the `--wsrep-recover` run
+> and the seqno comparison, and bootstraps the cluster from the host you name. If that host is not the most advanced,
+> the transactions only the other hosts had are lost when they join it and copy from it. Precondition: every `mariadb`
+> container is stopped, and you know this host is the most advanced: its `seqno:` in
+> `<volumes path>/mariadb/_data/grastate.dat` (`/var/lib/docker/volumes/mariadb/_data/grastate.dat` by default) is the
+> highest of all hosts. After a crash or a power loss, `grastate.dat` usually says `seqno: -1`: then you cannot tell,
+> and the automatic form above is the one to use. Cannot be undone.
 
 ```bash
 kolla-ansible mariadb-recovery -i <inventory> -e mariadb_recover_inventory_name=<host>
@@ -191,7 +210,7 @@ kolla-ansible mariadb-recovery -i <inventory> -e mariadb_recover_inventory_name=
 
 ```bash
 # on every node: Primary, Synced, ON, and the same size (the number of nodes)
-sudo docker exec -it mariadb mysql -uroot -p -e "SHOW STATUS WHERE Variable_name IN
+sudo docker exec -it mariadb mariadb -uroot -p -e "SHOW STATUS WHERE Variable_name IN
   ('wsrep_cluster_status','wsrep_local_state_comment','wsrep_ready','wsrep_cluster_size')"
 sudo docker ps --filter name=mariadb --format '{{.Names}} {{.Status}}'        # healthy
 
