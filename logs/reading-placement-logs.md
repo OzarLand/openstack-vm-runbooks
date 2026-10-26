@@ -136,6 +136,7 @@ grep "<placement-req-id>" /var/log/kolla/placement/placement-api.log
 
 ## Related
 
+- [Placement allocations out of sync: audit and heal](../scheduling/placement-allocations-out-of-sync-audit-and-heal.md) (the fix)
 - [No valid host with free capacity](../scheduling/no-valid-host-with-free-capacity.md)
 - [Stale records, phantom allocations](../lifecycle/stale-records-stuck-instances-orphan-ports-attachments.md)
 - [Where the OpenStack logs are, and how to read one log line](where-openstack-logs-are-and-how-to-read-a-line.md)
