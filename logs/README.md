@@ -13,13 +13,14 @@ These pages explain how to read; the fixes are in the runbooks of the other fold
 | Page | Covers | Releases | Status |
 |---|---|---|---|
 | [Where the OpenStack logs are, and how to read one log line](where-openstack-logs-are-and-how-to-read-a-line.md) | Kolla-Ansible and package installs, the oslo.log line format, request ids, levels, debug on and off | 2026.1 | draft |
+| [Reading the Nova logs. What normal looks like, and what the common lines mean](reading-nova-logs.md) | nova-api, nova-scheduler, nova-conductor, nova-compute: start-up, periodic lines, common error lines and what to read next | 2026.1 | draft |
 
 ## Planned
 
 1. Tracing one request across services: request ids, global request ids, instance, port and volume ids; grep and
    journalctl recipes; time correlation and clock skew.
-2. Per service, what normal looks like and what the common error lines mean: Nova, Placement, Neutron and its
-   agents, OVN, Keystone, Glance, Cinder, Heat, Octavia.
+2. Per service, what normal looks like and what the common error lines mean: Placement, Neutron and its agents,
+   OVN, Keystone, Glance, Cinder, Heat, Octavia.
 3. Infrastructure logs: RabbitMQ, MariaDB/Galera, HAProxy, keepalived, memcached.
 4. Hypervisor and system logs: libvirt and QEMU, Open vSwitch, the kernel, systemd and the journal, the container
    engine, chrony, iSCSI and multipath, Ceph clients.
