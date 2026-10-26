@@ -114,6 +114,9 @@ sudo tail -n 100 /var/log/kolla/rabbitmq/rabbit@<hostname>.log
   (Kolla-Ansible RabbitMQ guide).
 - **nova-compute** reports its state through `nova-conductor` over RPC. When the bus fails, its reports stop, and
   Nova marks it `down` after `service_down_time` (60 s by default), while the compute and its instances are fine.
+  `nova/servicegroup/drivers/db.py` logs `Lost connection to nova-conductor for reporting service status.` once when
+  the reports start failing, and `Recovered from being unable to report status.` when they work again: the second
+  line on every compute is a good sign that the bus is back.
 
 ## Possible causes
 
