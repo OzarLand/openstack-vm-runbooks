@@ -135,7 +135,9 @@ compute built the instance. Do not merge and sort the lines of different hosts u
 
 **Any:** the same loop over SSH, or your central log store. With Kolla-Ansible's central logging
 (`enable_central_logging: true`), fluentd parses `oslo.log` lines into fields, including `request_id` and
-`global_request_id` (its `00-global.conf.j2` parser), so you can search them as fields in OpenSearch.
+`global_request_id` (its `00-global.conf.j2` parser), so you can search them as fields in OpenSearch. The parser
+strips the `req-` prefix (`(?:None|req-)(?<request_id>\S+)`): the fields hold the bare UUID, so search for the UUID
+without `req-`.
 
 ### Following the network: the port id
 
@@ -172,11 +174,15 @@ If the instance waited for `network-vif-plugged` and gave up, the
 ```bash
 # Nova's side, on the compute
 grep "<server-id>" /var/log/kolla/nova/nova-compute.log
-# libvirt's side: the daemon log names the domain
+# libvirt's side: the daemon log names the domain (warnings and errors only, see below)
 grep "<instance-name>" /var/log/kolla/libvirt/libvirtd.log
-# QEMU's own log of the instance, inside the libvirt container
-docker exec nova_libvirt tail -50 /var/log/libvirt/qemu/<instance-name>.log
+# QEMU's own log of the instance, inside the libvirt container (as root; podman exec on Podman deployments)
+sudo docker exec nova_libvirt tail -50 /var/log/libvirt/qemu/<instance-name>.log
 ```
+
+Kolla-Ansible runs libvirtd with `log_level = 3` (`libvirtd.conf.j2`), so `libvirtd.log` holds only warnings and
+errors, unless `nova_libvirt_logging_debug` is true (then `log_level = 1`, debug). A healthy domain may not appear in
+it at all.
 
 ### Following storage: the volume id
 
