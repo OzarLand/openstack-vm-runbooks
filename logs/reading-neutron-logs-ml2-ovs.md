@@ -75,10 +75,11 @@ server considers an agent dead when no report arrived for `agent_down_time` seco
 | Line (message text) | Level | Log | What it means | Next |
 |---|---|---|---|---|
 | `Agent healthcheck: found <n> dead agents out of <total>:` followed by a table of type, last heartbeat, host | WARNING | periodic workers (or the single server log) | Those agents' heartbeats stopped. The agent process may be down, or alive but unable to reach RabbitMQ, or the RPC server may not be consuming. | the agent's own log on that host; RabbitMQ |
-| `<agent type> agent <agent-id> is not active` | WARNING | server | The server needed this agent (for example, to bind a port on its host) and found it dead. | same |
+| `<agent type> agent <agent-id> is not active` | WARNING | server | Logged by the L3 scheduler (`get_enabled_agent_on_host`, called from `L3Scheduler.auto_schedule_routers`) when the L3 agent of a host asks for routers but is considered dead. Port binding does not log it. The DHCP scheduler logs its own form, `DHCP agent <agent-id> is not active`. | the agent's log on that host |
+| `OVS is down, not reporting state to server` | ERROR | OVS agent | The agent sees `ovs-vswitchd` as dead and **stops sending heartbeats** on purpose, so the server soon marks the OVS agent dead. A common cause of a dead OVS agent whose process is running. | [ovs-vswitchd down](../networking/ovs-vswitchd-down-on-compute.md) |
 | `Heartbeat received from <type> agent on host <host>, uuid <uuid> after <delta>, sent at <timestamp>` | INFO | RPC server | Logged only when the agent sets `log_agent_heartbeats = true`. The `after <delta>` is the gap since the previous heartbeat: a delta near `agent_down_time` shows a heartbeat that barely made it. | turn it on for one agent while investigating flapping |
 | `Failed reporting state!` with a traceback | ERROR | the agent | The agent could not send its heartbeat, usually a `MessagingTimeout` or a RabbitMQ connection error in the traceback. | RabbitMQ; the RPC server |
-| `Agent has just been revived. Doing a full sync.` | INFO | OVS agent (`Agent has just been revived.` in the L3 and DHCP agents) | The server told the agent it was considered dead and is now alive again. The agent resynchronises all its state. Repeating every few minutes: the agent flaps between dead and alive. | heartbeat gaps; RabbitMQ; CPU or memory pressure on the host |
+| `Agent has just been revived. Doing a full sync.` | INFO | OVS and L3 agents (the DHCP agent logs `Agent has just been revived. Scheduling full sync`) | The server told the agent it was considered dead and is now alive again. The agent resynchronises all its state. Repeating every few minutes: the agent flaps between dead and alive. | heartbeat gaps; RabbitMQ; CPU or memory pressure on the host |
 
 Sources: `neutron/db/agents_db.py`, `neutron/db/agentschedulers_db.py`, `ovs_neutron_agent.py`,
 `neutron/agent/l3/agent.py`, `neutron/agent/dhcp/agent.py`.
@@ -103,8 +104,8 @@ When the agent reports the port up, the server sends `network-vif-plugged` to No
 | Line (message text) | Level | What it means |
 |---|---|---|
 | `Sending events: [...]` | DEBUG | The batch of events sent to Nova's external events API. |
-| `Nova event matching [<nova-request-id>] response: {...}` | INFO | Nova accepted the event (code 200). The bracketed id is **Nova's request id** for the external events call: grep it in `nova-api.log` to find the `Creating event network-vif-plugged:<port-id> …` line. |
-| `Nova event matching [<nova-request-id>]: {...} returned with failed status` | WARNING | Nova answered with a non-200 code for this event (for example 404 when the instance is gone). |
+| `Nova event matching ['<nova-request-id>'] response: {...}` | INFO | Nova accepted the event (code 200). The bracketed value is the list of **Nova's request ids** for the external events call: grep the bare `req-…` id in `nova-api.log` to find the `Creating event network-vif-plugged:<port-id> …` line. |
+| `Nova event matching ['<nova-request-id>']: {...} returned with failed status` | WARNING | Nova answered with a non-200 code for this event (for example 404 when the instance is gone). |
 | `Failed to notify nova on events: [...]` with a traceback | ERROR | Nova could not be reached: the Keystone credentials of the `[nova]` section, or the Nova API down. |
 | `Error response returned from nova: <response>` | ERROR | Nova answered with an error for the batch. |
 | `Nova returned NotFound for event: [...]` | DEBUG | The instance no longer exists on Nova's side. |
@@ -136,9 +137,13 @@ For each port it wires: `Port <port-id> updated. Details: {...}`, then
 | `OVS is restarted. OVSNeutronAgent will reset bridges and recover ports.` | WARNING | OVS came back after a restart (the agent's canary flow was missing); the agent rebuilds its flows. A short connectivity gap for this host's instances is expected around this line. | `ovs-vswitchd.log` at the same time |
 | `Agent out of sync with plugin!` | INFO | The previous iteration failed or the server asked for a resync; the agent re-reads its ports from the server. Occasional: normal. Every iteration: something fails each time. | the `ERROR` just before it |
 | `rpc_loop doing a full sync.` | INFO | A full resynchronisation (after start, revival or error). | — |
-| `Port <port> was not found on the integration bridge and will therefore not be processed` | INFO | The server knows the port but the tap device is not on `br-int` on this host (yet). Normal briefly during a boot; lasting: the instance never plugged its interface. | `ovs-vsctl list-ports br-int`; libvirt on the compute |
+| `Port <port> was not found on the integration bridge and will therefore not be processed` | INFO | The agent had seen the port on `br-int`, but it **disappeared** before the agent processed it (deleted, migrated, unplugged): "The port disappeared and cannot be processed" in the source. It does not mean that a new port was never plugged. | usually nothing; the port's later events |
 
 Sources: `ovs_neutron_agent.py`; `polling_interval` default in the OVS agent options.
+
+A tap that was **never plugged** on `br-int` produces no agent line at all: the sign is the *absence* of
+`Port <port-id> updated` in the agent log of the port's `binding_host_id`. Check `ovs-vsctl list-ports br-int` and
+libvirt on that compute.
 
 Restarting the agent is covered by [restarting the OVS agent does not cut instances](../networking/restarting-the-ovs-agent-does-not-cut-instances.md).
 
