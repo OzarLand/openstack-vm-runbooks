@@ -10,7 +10,7 @@ environment:
   network: any
   storage: any
   os: any
-risk: state-changing
+risk: destructive
 confirmed_by: []
 upstream_refs:
   - https://docs.openstack.org/nova/2026.1/reference/vm-states.html
@@ -35,6 +35,9 @@ $ openstack server show <server-id> -c status -c OS-EXT-STS:task_state -c OS-EXT
 or it ends in `ERROR` with a fault from the delete. Running `openstack server delete` again returns without error
 and changes nothing: while its compute is up, Nova's API logs `Instance is already in deleting state, ignoring this
 request` (`nova/compute/api.py`).
+
+If `[DEFAULT] reclaim_instance_interval` is set on the platform (default 0, off), a delete is a soft delete: the
+instance goes to `SOFT_DELETED`, not `deleting`, and is reclaimed later. That case is not covered here.
 
 ## Impact
 
@@ -120,15 +123,16 @@ request to a compute that will never answer.
 
 ### Cause 5: the instance is protected
 
-Not stuck, refused: a locked instance (`locked` `True`) returns `Instance <id> is locked`; an instance with
-`disable_terminate` set is not deleted, and the API only logs `instance termination disabled`.
+Not stuck, refused: for a non-admin, a locked instance (`locked` `True`) returns `Instance <id> is locked` (HTTP 409);
+an admin's delete goes through a lock (`check_instance_lock` in `nova/compute/api.py` skips admins). An instance with
+`disable_terminate` set is not deleted, for anyone, and the API only logs `instance termination disabled`.
 
 ## Resolution
 
 ### For cause 1: restart `nova-compute`, which resumes the delete
 
 Fix the message bus first if it is the cause
-([RabbitMQ](https://github.com/OzarLand/openstack-vm-runbooks/blob/main/recovery/rabbitmq-partition-or-alarm-rpc-timeouts.md)).
+([shared dependencies](../diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md)).
 At start-up, `nova-compute` resumes every delete left in `deleting` on its host (`_init_instance`).
 
 > ⚠️ **State-changing.** Restarts `nova-compute` on that compute; running instances are not affected, operations in
@@ -149,15 +153,19 @@ instances ([maintenance](../migration/moving-instances-off-a-host-for-maintenanc
 
 An instance in `ERROR` with no task state accepts a new delete, which runs every step again:
 
-> ⚠️ **State-changing.** Deletes the instance: its guest, local disks, ports and allocations. Volumes are detached,
-> not deleted, unless they were created with `delete_on_termination`. Cannot be undone.
+> 🛑 **Destructive.** Deletes the instance: its guest, its local disks, its ports and their addresses, its
+> allocations, and the volumes created with `delete_on_termination` (other volumes are detached and kept). What is
+> lost: the data on the local disks and on those volumes. Precondition: the owner confirms the instance's data is not
+> needed or is backed up (a snapshot of its volumes, a copy of its data). Cannot be undone.
 
 ```bash
 openstack server delete <server-id>
 ```
 
-If the instance stays in `deleting` with its compute up and the guest already gone, clear the task state, then
-delete again:
+If the instance stays in `deleting` with its compute up and the guest already gone, restart `nova-compute` first
+(cause 1): a new delete goes back to the same compute, and resetting the state while that compute may still be
+working on the first delete runs two deletes at once. If it still stays in `deleting` after the restart, clear the
+task state, then delete again (the 🛑 above applies):
 
 > ⚠️ **State-changing.** Sets the instance to `ERROR` with no task state in the database only. Undo: none needed, the
 > next step deletes it.
@@ -181,12 +189,30 @@ has the guest defined, and its `nova-compute` finds an instance it no longer kno
 ```bash
 openstack --os-compute-api-version 2.11 compute service set --disable --disable-reason "<why>" --down \
   <compute> nova-compute
+```
+
+> 🛑 **Destructive.** A local delete removes the instance from Nova and Neutron and Cinder without touching the host:
+> its ports and addresses are freed and its volume attachments cleaned up even if the guest still runs there. If the
+> host is not really fenced, a running guest can lose its network and keep writing to volumes that Cinder now
+> considers free. What is lost: as for any delete, the local disks (when the host is cleaned up) and the volumes
+> created with `delete_on_termination`. Precondition: the host is confirmed powered off or cut off from the network
+> and the storage; the owner confirms the data is not needed or backed up. Cannot be undone.
+
+```bash
 openstack server delete <server-id>
 ```
 
+When the host comes back, its `nova-compute` finds the guest of a deleted instance. With the default
+`[DEFAULT] running_deleted_instance_action = reap`, every `running_deleted_instance_poll_interval` (1800 s by default)
+it logs `Destroying instance with name label '<name>' which is marked as DELETED but still present on host.` and
+destroys it. Check afterwards that no guest and no leftover disk of that instance remain on the host
+(`virsh list --all`, the instances directory).
+
 ### For cause 5: unlock or allow termination
 
-The owner, or an admin, unlocks the instance (`openstack server unlock <server-id>`) and deletes it again.
+The owner, or an admin, unlocks the instance (`openstack server unlock <server-id>`) and deletes it again (the 🛑 of
+cause 3 applies). There is no API or CLI command to clear `disable_terminate`; changing it in the database would be a
+destructive step of its own, needing a database backup and its own review, and is not covered here.
 
 ## Verification
 
