@@ -42,6 +42,7 @@ migration/        live and cold migration, evacuation, resize across hosts
 networking/       instance connectivity, DHCP, metadata, floating IPs, security groups, port binding
 volumes/          attach, detach, stale attachments, boot volumes
 diagnostics/      how to read Nova, Neutron, Cinder, Glance, Placement, libvirt logs and states
+logs/             where the logs are and how to read them: services, infrastructure, hypervisor (see logs/README.md)
 recovery/         after a compute, storage or control plane incident; post-incident checks
 templates/        runbook template
 ```
