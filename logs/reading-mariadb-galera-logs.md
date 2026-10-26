@@ -180,6 +180,7 @@ away and HAProxy failing over; read the HAProxy log and the database node logs a
 
 ## Related
 
+- [Galera cluster lost quorum or stopped on every node](../recovery/galera-cluster-lost-quorum-database-unavailable.md) (the recovery)
 - [Where the OpenStack logs are, and how to read one log line](where-openstack-logs-are-and-how-to-read-a-line.md)
 - [VM creation fails platform-wide: check the shared dependencies first](../diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md)
 - [Reopening provisioning after a control-plane incident](../recovery/reopening-provisioning-after-control-plane-incident.md)
