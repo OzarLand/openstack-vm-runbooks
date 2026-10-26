@@ -1,8 +1,8 @@
 ---
 title: Control plane down. What still works for running instances, and what does not
 kind: diagnostic
-status: draft
-openstack_releases: [unrecorded]
+status: lab-verified
+openstack_releases: ["2026.1"]
 components: [nova, neutron, ovn, ovs, libvirt]
 deployment_methods: [any]
 environment:
@@ -11,13 +11,14 @@ environment:
   storage: any
   os: any
 risk: read-only
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-26, note: "full procedure on a disposable lab, ML2/OVS only: control plane stopped 8 min; 0 pings lost, lease renewed, metadata lost, rebooted CirrOS without sshd until return; OVN and L3 HA not tested" }
 upstream_refs:
   - https://docs.openstack.org/nova/latest/admin/architecture.html
   - https://docs.openstack.org/neutron/latest/admin/config-dhcp-ha.html
   - https://docs.openstack.org/neutron/latest/admin/ovn/
 authored_by: agent:ozarland-author
-last_verified: 2026-10-18
+last_verified: 2026-10-26
 ---
 
 # Control plane down. What still works for running instances, and what does not
@@ -56,6 +57,9 @@ an outage. Verify them for your own platform before an incident; they depend on 
 2. **The exact behaviour depends on the backend and the deployment.** Verify on a lab or during a recovery
    exercise: stop the APIs and the bus, then check that an instance keeps its connectivity, renews its lease, and
    that a router failover still works. Write the result down for your platform.
+   **Kolla-Ansible 2026.1:** each container is wrapped in a systemd unit `kolla-<container>-container.service` with
+   `Restart=always`, so a plain `docker stop` is undone about a minute later. Stop the unit instead
+   (`systemctl stop kolla-<container>-container.service`) and start it again the same way.
 
 ## How to check on a live platform, read-only
 
@@ -64,16 +68,31 @@ an outage. Verify them for your own platform before an incident; they depend on 
 ping -c 3 <instance-address>
 
 # Lease state inside the instance (console or existing session)
-ip -4 addr; cat /var/lib/dhcp/dhclient*.leases 2>/dev/null | tail -5     # or networkctl / nmcli
+ip -4 addr     # valid_lft resets to the lease time after a renewal
+cat /var/lib/dhcp/dhclient*.leases 2>/dev/null | tail -5     # dhclient; or networkctl / nmcli; CirrOS uses dhcpcd
 
 # ML2/OVS: dnsmasq still serving on the network node
-ps -ef | grep -F "dnsmasq --no-hosts" | grep -F "<network-id>"
+pgrep -af dnsmasq | grep -F "<network-id>"     # the command line is not always "dnsmasq --no-hosts" (Kolla: "dnsmasq -k --no-hosts")
 # OVN: controller still up on the compute, ports still bound
 ovs-vsctl show | head; ovn-sbctl show 2>/dev/null       # sbctl needs the southbound DB, which may be up independently
 
 # L3 HA: which node is master for the router
 ip netns exec qrouter-<router-id> ip addr | grep -F "<router-external-address>"
 ```
+
+## Lab observations
+
+Kolla-Ansible 2026.1 all-in-one, ML2/OVS, legacy (non-HA) router. The APIs, conductor, scheduler, Keystone,
+Glance, Placement, Heat, Horizon, RabbitMQ, MariaDB and memcached were stopped for about 8 minutes; Neutron agents,
+`nova-compute`, libvirt and Open vSwitch were left running.
+
+- A running instance answered 1 ping per second on its fixed and floating addresses with no loss for the whole stop.
+- A forced lease renewal inside the instance was answered by dnsmasq (`DHCPREQUEST` / `DHCPACK`) during the stop.
+- A metadata request from the running instance got no answer (timeout). An instance rebooted during the stop got its
+  address by DHCP but failed every metadata request; CirrOS waits about 50 s per try, and did not start `sshd` until
+  metadata answered, about a minute after the control plane was started again (8 minutes after its boot).
+- When RabbitMQ and `neutron-server` came back, the DHCP agent logged `Agent has just been revived. Scheduling full
+  sync` and restarted dnsmasq; no lease was lost.
 
 ## Validity and limits
 
