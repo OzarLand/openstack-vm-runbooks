@@ -13,15 +13,14 @@ These pages explain how to read; the fixes are in the runbooks of the other fold
 | Page | Covers | Releases | Status |
 |---|---|---|---|
 | [Where the OpenStack logs are, and how to read one log line](where-openstack-logs-are-and-how-to-read-a-line.md) | Kolla-Ansible and package installs, the oslo.log line format, request ids, levels, debug on and off | 2026.1 | draft |
+| [Following one request, instance, port or volume through the logs of every service and host](tracing-one-request-across-services-and-hosts.md) | Which id links which hop, grep and journalctl recipes across hosts, the port-id chain of network-vif-plugged, time zones and clock offset | 2026.1 | draft |
 | [Reading the Placement logs, and the Placement lines in Nova's logs](reading-placement-logs.md) | The request line, 409s and their warnings (over capacity, unit constraints, retries), the report client's lines with Placement request ids | 2026.1 | draft |
 
 ## Planned
 
-1. Tracing one request across services: request ids, global request ids, instance, port and volume ids; grep and
-   journalctl recipes; time correlation and clock skew.
-2. Per service, what normal looks like and what the common error lines mean: Nova, Placement, Neutron and its
+1. Per service, what normal looks like and what the common error lines mean: Nova, Placement, Neutron and its
    agents, OVN, Keystone, Glance, Cinder, Heat, Octavia.
-3. Infrastructure logs: RabbitMQ, MariaDB/Galera, HAProxy, keepalived, memcached.
-4. Hypervisor and system logs: libvirt and QEMU, Open vSwitch, the kernel, systemd and the journal, the container
+2. Infrastructure logs: RabbitMQ, MariaDB/Galera, HAProxy, keepalived, memcached.
+3. Hypervisor and system logs: libvirt and QEMU, Open vSwitch, the kernel, systemd and the journal, the container
    engine, chrony, iSCSI and multipath, Ceph clients.
-5. A dictionary of frequent error messages: what each means, its usual causes, and the next log to read.
+4. A dictionary of frequent error messages: what each means, its usual causes, and the next log to read.
