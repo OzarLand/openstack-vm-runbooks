@@ -224,6 +224,7 @@ How the shared dependencies fail together: [VM creation fails platform-wide](../
 
 ## Related
 
+- [RPC timeouts caused by RabbitMQ: partition, alarm, missing node](../recovery/rabbitmq-partition-or-alarm-rpc-timeouts.md) (the fix)
 - [Where the OpenStack logs are, and how to read one log line](where-openstack-logs-are-and-how-to-read-a-line.md)
 - [VM creation fails platform-wide: check the shared dependencies first](../diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md)
 - [Reopening provisioning after a control-plane incident](../recovery/reopening-provisioning-after-control-plane-incident.md)
