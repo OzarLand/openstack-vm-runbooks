@@ -84,7 +84,7 @@ Why moving an instance off the host fails or stalls, and how to tell:
 | Cause | How to tell |
 |---|---|
 | No destination with enough CPU, memory or disk | `No valid host` on the migration; `allocation candidate list` empty for the flavor |
-| Destination CPU model incompatible | Live migration pre-check error mentioning CPU compatibility; source and destination `cpu_mode`/`cpu_models` differ |
+| Destination CPU model incompatible | Source and destination `cpu_mode`/`cpu_models` differ. **Any:** with Nova's default, the pre-check refuses the move with `CPU doesn't have compatibility`. **Kolla-Ansible:** it writes `[workarounds] skip_cpu_compare_on_dest = true` (release note `skip-cpu-compare-on-dest`, 2025.1 and 2026.1), so Nova skips that comparison and libvirt checks the CPU on the destination while migrating: the migration fails after it starts, the instance stays on the source, and the source's `nova-compute` log has libvirt's error |
 | Destination runs an older libvirt/QEMU than the source | Pre-check refuses the move; happens once a patching campaign has started |
 | Memory changes faster than it is copied | Migration stays `running` with remaining memory not decreasing; no auto-converge or post-copy |
 | Passthrough device, SR-IOV direct port, vGPU | `hostdev` or `mdev` in the domain XML; Nova refuses or the move fails late |
