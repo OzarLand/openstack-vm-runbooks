@@ -42,6 +42,7 @@ migration/        live and cold migration, evacuation, resize across hosts
 networking/       instance connectivity, DHCP, metadata, floating IPs, security groups, port binding
 volumes/          attach, detach, stale attachments, boot volumes
 diagnostics/      how to read Nova, Neutron, Cinder, Glance, Placement, libvirt logs and states
+logs/             where the logs are and how to read them: services, infrastructure, hypervisor (see logs/README.md)
 recovery/         after a compute, storage or control plane incident; post-incident checks
 templates/        runbook template
 ```
@@ -69,6 +70,7 @@ A page written for one deployment method is welcome; variants for other methods 
 | Every instance on one compute lost the network, Nova still shows them ACTIVE | [ovs-vswitchd down](networking/ovs-vswitchd-down-on-compute.md), then [tunnel MTU mismatch](networking/tunnel-mtu-mismatch-large-packets-dropped.md) |
 | Instances answer ping, but large transfers stall | [Tunnel MTU mismatch](networking/tunnel-mtu-mismatch-large-packets-dropped.md) |
 | Every API call fails at once | [Expired certificates or Fernet keys](diagnostics/expired-certificates-and-fernet-keys-break-every-api-call.md) |
+| Every API fails, the logs show database errors (`WSREP has not yet prepared node`) | [Galera lost quorum](recovery/galera-cluster-lost-quorum-database-unavailable.md) |
 | VM creation fails everywhere, running instances are fine | [Check the shared dependencies first](diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md) |
 | A new instance is ACTIVE but never got an IP address | [DHCP agents down](networking/new-instance-gets-no-ip-dhcp-agents-down.md) |
 | A new instance has an address but no SSH key, default hostname | [Metadata agents down](networking/new-instance-boots-without-metadata.md) |
@@ -142,12 +144,20 @@ lab), **documentation** (upstream documentation and source), **production incide
 | [VM creation fails platform-wide while instances keep running. Check the shared dependencies first](diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md) | nova, neutron, rabbitmq, mariadb, memcached, haproxy, keystone | not recorded ([help wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=diagnostics%2Fvm-creation-fails-platform-wide-check-shared-dependencies.md&title=Release+for+diagnostics%2Fvm-creation-fails-platform-wide-check-shared-dependencies.md)) | draft | book |
 | [What a VM creation traverses, and how to trace one failed boot by request id](diagnostics/what-a-vm-creation-traverses-and-tracing-by-request-id.md) | nova, placement, neutron, glance, cinder, keystone, rabbitmq | not recorded ([help wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=diagnostics%2Fwhat-a-vm-creation-traverses-and-tracing-by-request-id.md&title=Release+for+diagnostics%2Fwhat-a-vm-creation-traverses-and-tracing-by-request-id.md)) | draft | book |
 
+### Logs
+
+| Page | Components | Releases | Status | Source |
+|---|---|---|---|---|
+| [Where the OpenStack logs are, and how to read one log line](logs/where-openstack-logs-are-and-how-to-read-a-line.md) | nova, neutron, placement, keystone, glance, cinder, rabbitmq, mariadb, haproxy, ovs, ovn, libvirt | 2026.1 | draft | documentation |
+| [Following one request, instance, port or volume through the logs of every service and host](logs/tracing-one-request-across-services-and-hosts.md) | nova, neutron, placement, cinder, glance, ovs, libvirt | 2026.1 | draft | documentation |
+
 ### Recovery
 
 | Page | Components | Releases | Status | Source |
 |---|---|---|---|---|
 | [After a compute reboot, instances stay SHUTOFF or come back without network](recovery/after-a-compute-reboot-instances-shutoff-or-without-network.md) | nova, neutron, ovs, libvirt | 2026.1 | lab-verified | documentation |
 | [Compute host unreachable, instances down. Fence before you evacuate](recovery/compute-host-failure-fence-before-evacuate.md) | nova, libvirt, cinder, ceph | 2026.1 | lab-verified | book, lab run |
+| [Every API fails on database errors. The Galera cluster lost quorum, or stopped on every node](recovery/galera-cluster-lost-quorum-database-unavailable.md) | mariadb, galera, kolla-ansible, nova, neutron, keystone | 2026.1 | draft | documentation |
 | [nova-compute is down and the compute refuses an SSH login, but the host is alive](recovery/nova-compute-down-host-alive-ssh-refused.md) | nova, libvirt, ssh | 2026.1 | lab-verified | lab run |
 | [nova-compute is down on a compute, but its instances are still running](recovery/nova-compute-down-instances-still-running.md) | nova, libvirt | 2026.1 | lab-verified | lab run |
 | [Reopening provisioning after a control-plane incident. Stop the APIs, recover, verify, reopen](recovery/reopening-provisioning-after-control-plane-incident.md) | nova, neutron, rabbitmq, mariadb, haproxy | not recorded ([help wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=recovery%2Freopening-provisioning-after-control-plane-incident.md&title=Release+for+recovery%2Freopening-provisioning-after-control-plane-incident.md)) | draft | book |
