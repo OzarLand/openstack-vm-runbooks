@@ -10,7 +10,7 @@ environment:
   network: any
   storage: local instance disks or shared storage
   os: any
-risk: state-changing
+risk: destructive
 confirmed_by: []
 upstream_refs:
   - https://docs.openstack.org/nova/2026.1/user/resize.html
@@ -93,7 +93,7 @@ that many seconds. Kolla-Ansible 2026.1 does not set it, and sets `allow_resize_
 
 | Step | Usual errors (fault or compute log) | State after |
 |---|---|---|
-| `prep_resize` | No valid host, resources claim failed, anti-affinity | `ACTIVE` again (or `SHUTOFF`), migration `error` |
+| Scheduling and `prep_resize` | No valid host (from the conductor), resources claim failed, anti-affinity | `ACTIVE` again (or `SHUTOFF`), migration `error` |
 | Disk copy | `Unable to resize disk down.`, `not able to execute ssh command`, `Migration is not supported for LVM backed instances` | Rolled back to the previous state: these errors are raised as `InstanceFaultRollback` |
 | Disk copy, other errors | copy interrupted, disk full on the destination | `ERROR`, `host` still the **source** |
 | `finish_resize` | the guest fails to start on the destination (libvirt, volume, network) | `ERROR`, `host` the **destination**, flavor set back to the old one |
@@ -107,13 +107,14 @@ Messages of `nova/compute/manager.py` (2026.1), in the `nova-compute` log of the
 
 | Message | Where | Meaning |
 |---|---|---|
-| `Migrating` | source | The disk copy starts (`_resize_instance`) |
+| `Migrating` | destination | Claim done on the destination, the resize is handed to the source (`_prep_resize`) |
 | `Setting instance back to <state> after: <error>` | source or destination | A rollback error (`InstanceFaultRollback`): the instance is back in its previous state, `<error>` says why |
 | `Setting instance vm_state to ERROR` followed by a traceback | source or destination | Any other error: the instance is in `ERROR`; the traceback is the cause |
 | `Instance found in migrating state during startup. Resetting task_state` | source | `nova-compute` restarted during the copy and reverted the instance (`_init_instance`) |
 | `Failed to revert crashed migration` | source | That revert failed: recover by hand (below) |
 | `Found <n> unconfirmed migrations older than <s> seconds`, then `Automatically confirming migration <id> for instance <uuid>` | destination | `resize_confirm_window` at work |
 | `Setting migration <id> to error: In states <vm_state>/<task_state>, not RESIZED/None` | destination | The automatic confirm skipped an instance that was not in `VERIFY_RESIZE` |
+| `Deleting allocations for old flavor on source node <source> after finish_resize failure. You may be able to recover the instance by hard rebooting it.` | destination | `finish_resize` failed; Nova's own hint is the hard reboot of *For causes 3 and 4* |
 | `Confirming resize on source host.` / `Reverting resize on destination host.` | source / destination | A confirm or revert running |
 
 ## Possible causes
@@ -146,15 +147,22 @@ shrink disks, except a root disk booted from volume.
 
 ### For cause 1: confirm or revert
 
-Ask the owner first: the confirm deletes the old copy for good.
+Both choices belong to the instance's owner, and neither can be undone.
 
-> ⚠️ **State-changing.** `confirm` deletes the instance's previous copy on the source compute and frees its
-> resources; the revert is no longer possible. `revert` destroys the resized guest and restarts the previous one on
-> the source, with the previous flavor: changes made inside the guest since the resize are lost if they were on its
-> local disk.
+> 🛑 **Destructive.** `confirm` deletes the instance's previous copy (disks and definition) on the source compute and
+> frees its resources: going back to the previous flavor or host is no longer possible. Precondition: the owner has
+> checked the resized instance and agrees. Cannot be undone.
 
 ```bash
 openstack server resize confirm <server-id>      # or: openstack server migration confirm <server-id>
+```
+
+> 🛑 **Destructive.** `revert` destroys the resized guest and restarts the previous copy on the source, with the
+> previous flavor: everything the guest wrote to its local disks since the resize is lost (data on volumes is kept).
+> Precondition: the owner agrees; if the data written since the resize matters, snapshot the resized instance first
+> (`openstack server image create`). Cannot be undone.
+
+```bash
 openstack server resize revert <server-id>       # or: openstack server migration revert <server-id>
 ```
 
@@ -190,9 +198,10 @@ Fix what the error names: the `nova_ssh` containers and keys (cause 3), or the d
 with the runbooks of [boot from volume](../scheduling/instance-fails-to-boot-from-volume.md),
 [port binding](instance-stuck-in-build-waiting-for-vif-plugged.md), [disk full](compute-disk-full-instance-paused.md)).
 
-Then recover the instance where Nova says it is (`host`): the python-openstackclient help for `server set --state`
-says that a hard reboot is the right first step for an instance in `ERROR`, and that resetting the state after a
-failed move operation can leave an instance unusable.
+Then recover the instance where Nova says it is (`host`). The python-openstackclient help for `server set --state`
+warns: "If the server is in an error state then this is almost never the correct command to run and you should
+prefer hard reboot where possible. In particular, if the server is in an error state due to a move operation,
+setting the state can result in instances that are no longer usable."
 
 > ⚠️ **State-changing.** Recreates the guest on the compute in the instance's `host` field, from the disks there,
 > with the flavor Nova records. Precondition: the instance's disks are on that compute (local disks), or on shared
@@ -212,8 +221,10 @@ openstack server set --state active <server-id>
 openstack server reboot --hard <server-id>
 ```
 
-The source compute keeps the previous copy as `<instances-path>/<server-id>_resize` after a failed resize. Leave it
-until the instance runs and its owner has checked it; it is the only copy if the recovery goes wrong.
+When the failure came after the disk copy (in `finish_resize`), the source compute keeps the previous copy as
+`<instances-path>/<server-id>_resize`. Leave it until the instance runs and its owner has checked it; it is the only
+copy if the recovery goes wrong. When the copy itself failed, the libvirt driver renamed the directory back and
+removed the partial copy on the destination: the instance's disks are on the source only.
 
 ### For cause 5: choose a flavor with a disk at least as large
 
