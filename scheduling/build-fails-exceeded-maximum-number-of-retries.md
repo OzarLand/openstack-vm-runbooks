@@ -53,8 +53,10 @@ openstack server show <server-id> -c status -c fault -c created
 
 # 2. The instance's actions: each compute that tried left an event, with its own error
 openstack server event list <server-id>
-openstack server event show <server-id> <request-id>
-#    look for the compute_... events, their host and result Error, and the traceback (admin only)
+openstack --os-compute-api-version 2.84 server event show <server-id> <request-id>
+#    look for the compute_... events, their host and result Error.
+#    The per-compute traceback is shown to admins only (default policy). From compute API 2.84 each failed event
+#    also has a details field with the fault message; with an older microversion a non-admin sees no error text.
 
 # 3. Are the computes and the agents they need up?
 openstack compute service list --service nova-compute
