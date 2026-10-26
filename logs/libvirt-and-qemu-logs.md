@@ -164,17 +164,18 @@ For the monolithic `libvirtd` on a package install, use `-c libvirtd:///system` 
 `/var/log/libvirt/libvirtd-debug.log`.
 
 **Undo:** set back exactly the two values you noted, with the same `daemon-log-outputs "<noted outputs>"` and
-`daemon-log-filters "<noted filters>"` commands. Do not use the empty string to restore: an empty output list falls
-back to the host's default output, which can differ from what was configured (for example a different journald
-level). The `daemon-timeout --timeout 0` setting has no undo command to read back; it ends with the next restart of the
+`daemon-log-filters "<noted filters>"` commands. For the filters, an empty noted value is restored with
+`daemon-log-filters ""`; this is the case on Kolla-Ansible, whose `libvirtd.conf.j2` sets no `log_filters`. For the
+outputs, never restore with the empty string: an empty output list falls back to the host's default output, which can
+differ from what was configured (for example a different journald level). The `daemon-timeout --timeout 0` setting has no undo command to read back; it ends with the next restart of the
 daemon, after which the configured timeout applies again. Delete the debug file when you no longer need it.
 
 **Persistent methods.** Both rewrite the configuration and then restart the libvirt daemon.
 
 > ⚠️ **State-changing.** Restarts the libvirt daemon of the compute. While it restarts, libvirt operations on this
-> compute (start, stop, new instances, migrations) wait. Precondition: no migration runs to or from the compute
-> (`openstack server migration list --host <compute> --status running` returns nothing, on a controller with admin
-> credentials), and on Kolla-Ansible `nova_libvirt` runs in the host's PID and cgroup namespaces (quick check 3 of
+> compute (start, stop, new instances, migrations) wait. Precondition: no migration is in progress to or from the
+> compute: `openstack server migration list --host <compute>`, on a controller with admin credentials, shows none in
+> `queued`, `preparing`, `running` or `post-migrating` (filtering on `--status running` alone misses the others), and on Kolla-Ansible `nova_libvirt` runs in the host's PID and cgroup namespaces (quick check 3 of
 > [restarting nova_libvirt](../lifecycle/restarting-nova-libvirt-does-not-stop-instances.md) prints `host host`);
 > otherwise every instance of the compute can stop or a migration can fail. Undo: revert the setting and restart again,
 > under the same precondition.
@@ -196,8 +197,10 @@ checked here.
 libvirt opens this file for every QEMU process it starts and appends both its own lines and QEMU's stderr. Kolla-Ansible
 sets `stdio_handler = "logd"` in
 [`qemu.conf.j2`](https://github.com/openstack/kolla-ansible/blob/stable/2026.1/ansible/roles/nova-cell/templates/qemu.conf.j2),
-which is also libvirt's default: the `virtlogd` daemon writes and rotates the file, so a running instance's log survives
-a restart of `libvirtd`.
+which is also libvirt's default: the `virtlogd` daemon writes and rotates the file, so a running instance's log
+survives a restart of `libvirtd` alone. On Kolla-Ansible, `virtlogd` runs in the same `nova_libvirt` container
+(`kolla_nova_libvirt_start.sh`), so restarting the container restarts `virtlogd` too; what that does to the log of a
+running instance was not checked.
 
 ```bash
 # Any (package install), on the compute
@@ -214,7 +217,7 @@ file, and the source's file ends with the migration.
 **Kolla-Ansible:** no volume is mounted at `/var/log/libvirt` in `nova_libvirt` (see `nova_libvirt_default_volumes` in
 the nova-cell [defaults](https://github.com/openstack/kolla-ansible/blob/stable/2026.1/ansible/roles/nova-cell/defaults/main.yml)).
 The instance logs live in the container's own layer and are **lost when `nova_libvirt` is recreated**, for example on an
-upgrade or a redeploy. Copy the file out (`docker cp`) before such an operation if you still need it.
+upgrade or a redeploy. Copy the file out (`docker cp`, or `podman cp`) before such an operation if you still need it.
 
 ### The lines libvirt writes, and what they mean
 
