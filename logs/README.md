@@ -13,6 +13,7 @@ These pages explain how to read; the fixes are in the runbooks of the other fold
 | Page | Covers | Releases | Status |
 |---|---|---|---|
 | [Where the OpenStack logs are, and how to read one log line](where-openstack-logs-are-and-how-to-read-a-line.md) | Kolla-Ansible and package installs, the oslo.log line format, request ids, levels, debug on and off | 2026.1 | draft |
+| [Reading the Placement logs, and the Placement lines in Nova's logs](reading-placement-logs.md) | The request line, 409s and their warnings (over capacity, unit constraints, retries), the report client's lines with Placement request ids | 2026.1 | draft |
 
 ## Planned
 
