@@ -106,10 +106,13 @@ When another VRRP cluster uses the same virtual router ID on the same layer 2 se
 - 503 on one service: that API is down (no new instance if Nova or Neutron, no attach if Cinder).
 - One backend DOWN: no error, less capacity on the remaining backends.
 - VIP flapping: short outages at each move, connections through the VIP reset, including the services' own
-  connections to MariaDB and RabbitMQ when they go through the internal VIP.
+  database connections, which go through the internal VIP to ProxySQL. RabbitMQ is not affected: services connect
+  to the RabbitMQ nodes directly. Metadata requests (cloud-init at boot) go through the internal VIP too, and fail
+  during the outage.
 - VIP on two nodes: clients reach whichever node answered their ARP last; behaviour is erratic until one node
   drops the address.
-- In every case, running instances are not affected: their data path does not go through HAProxy.
+- In every case, running instances keep running and keep their network: their data path does not go through
+  HAProxy. Only instances booting at that moment can miss their metadata.
 
 ## Quick checks
 
@@ -119,18 +122,22 @@ Read-only. Run on each node of the `loadbalancer` group.
 # 1. Which node holds the VIP? It must be exactly one.
 ip -brief address show dev <api-interface> | grep -w <internal-vip>
 
-# 2. Are the haproxy and keepalived containers running?
-sudo docker ps --filter name=haproxy --filter name=keepalived --format '{{.Names}} {{.Status}}'
+# 2. Are the haproxy, proxysql and keepalived containers running?
+sudo docker ps --filter name=haproxy --filter name=proxysql --filter name=keepalived --format '{{.Names}} {{.Status}}'
 
 # 3. State of every backend server, from HAProxy's stats socket (shared with the keepalived container,
 #    which already has socat for its check script). Columns: proxy, server, status, seconds since last change,
 #    last check status, last check HTTP code, last check text.
 sudo docker exec keepalived bash -c 'echo "show stat" | socat unix-connect:/var/lib/kolla/haproxy/haproxy.sock stdio' \
-  | cut -d, -f1,2,18,24,37,38,57 | grep -v -e FRONTEND | column -s, -t
+  | cut -d, -f1,2,18,24,37,38,57 | grep -v -e FRONTEND | sed -e 's/,,/,-,/g' -e 's/,,/,-,/g' -e 's/,$/,-/' | column -s, -t
 #    expected for a healthy service: <service>_back <controller> UP ... L7OK 200
 #    a DOWN server shows L4CON (connection refused), L4TOUT, L7TOUT (no answer to the HTTP check) or L7STS (wrong code)
 
-# 4. The last HAProxy and keepalived events
+# 4. Which API answers 503, and when: every request is logged (option httplog). A 503 that HAProxy produced
+#    itself, with no server left, shows <NOSRV> as the server and termination flags starting with SC.
+sudo grep -h -e "<NOSRV>" -e " 503 " /var/log/kolla/haproxy/haproxy_latest* | tail -20
+
+# 5. The last HAProxy and keepalived events
 sudo grep -h -e "is DOWN" -e "is UP" -e "no server available" /var/log/kolla/haproxy/haproxy_latest* | tail -20
 sudo docker logs --since 2h keepalived 2>&1 | grep -E "Entering|FAULT|VRRP_Script|now returning|invalid passwd|not present in advert" | tail -20
 ```
@@ -158,17 +165,34 @@ So a server is DOWN when its container does not listen (`Layer4 connection probl
 HTTP check within 10 s (`Layer7 timeout`: all workers busy, stuck on the database), or answers something other than
 200 (`Layer7 wrong status`). When every server of a backend is DOWN, HAProxy answers 503 itself.
 
-HAProxy here logs connections in its default format (`Connect from ... to ... (<frontend>/HTTP)`), not one line per
-request with its status: Kolla-Ansible sets no `option httplog`. The health-check lines above are what tells the
-story.
+Every frontend also gets `option httplog` (HTTP services) or `option tcplog` (TCP services) from
+`haproxy_frontend_http_extra` and `haproxy_frontend_tcp_extra` in the `haproxy-config` role defaults, so every
+request is logged with its frontend (`<service>_front`), backend and server, timers, status code and termination
+flags. A 503 that HAProxy answered itself because no server was left has `<NOSRV>` as the server name (HAProxy
+configuration manual, section 8.2.3); a 503 from the service itself names a real server.
 
 ### How keepalived moves the VIP
 
 The `vrrp_instance` in `keepalived.conf` has every node in `state BACKUP` with `nopreempt`, priorities 1, 2, 3 by
 the node's position in the `loadbalancer` group, advertisements every second (`advert_int 1`), and
-`track_script check_alive`. `check_alive.sh` runs `echo "show info" | socat unix-connect:/var/lib/kolla/haproxy/haproxy.sock stdio`
-every 2 s; after 2 failures (`fall 2`) the instance goes to FAULT and releases the VIP, and it needs 10 successes
-(`rise 10`) to leave FAULT. A backup takes the VIP when it stops receiving the master's advertisements (`Receive
+`track_script check_alive`. `/check_alive.sh`, from the Kolla `keepalived` image, runs every script in `/checks` every 2 s
+and fails if any of them fails. Kolla-Ansible puts two there by default:
+
+- `check_alive_haproxy.sh`: `echo "show info" | socat unix-connect:/var/lib/kolla/haproxy/haproxy.sock stdio`;
+- `check_alive_proxysql.sh`: `SELECT 1` on ProxySQL's admin socket (ProxySQL is enabled by default in 2026.1,
+  `enable_proxysql: "{{ enable_mariadb }}"`).
+
+After 2 failures (`fall 2`) the instance goes to FAULT and releases the VIP, and it needs 10 successes (`rise 10`)
+to leave FAULT. So a stuck ProxySQL moves the VIP as surely as a stuck HAProxy. Keepalived's log says only
+`VRRP_Script(check_alive) failed`; to know which check failed, run each by hand on that node:
+
+```bash
+sudo docker exec keepalived /checks/check_alive_haproxy.sh; echo $?
+sudo docker exec keepalived /checks/check_alive_proxysql.sh; echo $?
+# 0 is healthy, 1 is the failing daemon. /check_alive.sh itself prints "Keepalived check script <path> failed." for each.
+```
+
+A backup takes the VIP when it stops receiving the master's advertisements (`Receive
 advertisement timeout`). With `nopreempt`, the VIP does not move back when the old master recovers.
 
 Advertisements go by multicast by default (`keepalived_traffic_mode: "multicast"`), IP protocol 112, or by unicast
@@ -182,9 +206,9 @@ to the other nodes when `keepalived_traffic_mode: "unicast"`.
 | 503, servers DOWN with `L7TOUT` or `L7STS` | Cause 2: the service runs but cannot answer its health check |
 | One server DOWN, the others UP | Cause 3: one controller's container or network |
 | No 503 but connection refused or timeout on the VIP; VIP on no node | Cause 4: HAProxy down on every load balancer node, every keepalived in FAULT |
-| VIP moves every few minutes, `VRRP_Script(check_alive) failed` | Cause 5: HAProxy failing or restarting on the master |
+| VIP moves every few minutes, `VRRP_Script(check_alive) failed` | Cause 5: HAProxy or ProxySQL failing or restarting on the master |
 | VIP moves, `Receive advertisement timeout` without script failures | Cause 6: advertisements lost between the nodes |
-| VIP on two nodes at once | Cause 6, or cause 7: another VRRP cluster with the same virtual router ID |
+| VIP on two nodes at once | Cause 6; more rarely cause 7, another VRRP cluster with the same virtual router ID and the same password |
 
 ### Cause 1: the service is down on every controller
 
@@ -210,10 +234,13 @@ The `haproxy` container is stopped or restarting everywhere (a configuration err
 reconfigure`, a certificate file missing). Each keepalived's `check_alive` fails, every instance goes to FAULT, and
 no node holds the VIP. Clients get connection refused or a timeout, not a 503.
 
-### Cause 5: HAProxy unstable on the master
+### Cause 5: HAProxy or ProxySQL unstable on the master
 
-`check_alive` fails on the master because the HAProxy socket does not answer: the `haproxy` container restarts in a
-loop, or is overloaded. Keepalived goes to FAULT, the VIP moves, and may come back later.
+`check_alive` fails on the master because one of its checks fails: the HAProxy socket does not answer (the `haproxy`
+container restarts in a loop, or is overloaded), or ProxySQL's admin socket does not answer (the `proxysql`
+container is stuck or restarting). Keepalived goes to FAULT, the VIP moves, and may come back later. Run the two
+checks by hand (*Diagnosis*) before restarting anything: restarting a healthy HAProxy on the master cuts every API
+connection and moves the VIP again.
 
 ### Cause 6: VRRP advertisements lost
 
@@ -224,9 +251,12 @@ network itself flapping. Each backup that times out takes the VIP: it flaps, or 
 ### Cause 7: virtual router ID collision
 
 Another keepalived cluster (another OpenStack, a database cluster) on the same layer 2 segment uses the same
-`virtual_router_id` (Kolla-Ansible default `keepalived_virtual_router_id: "51"`). Keepalived logs `received an
-invalid passwd` or `ip address associated with VRID 51 not present in advert` with the other cluster's address. The
-Kolla-Ansible multinode guide says this ID must be unique on the layer 2 network.
+`virtual_router_id` (Kolla-Ansible default `keepalived_virtual_router_id: "51"`). If its password differs, keepalived
+drops its advertisements and logs `received an invalid passwd from <other-node-address>!`; the VIP is not split, but
+the log fills and a change on either side can make it worse. If the passwords match, keepalived accepts the other
+cluster's advertisements, logs `ip address associated with VRID 51 not present in advert`, and elections between
+the two clusters can leave the VIP on two nodes or on none. The Kolla-Ansible multinode guide says this ID must be
+unique on the layer 2 network.
 
 ## Resolution
 
@@ -253,17 +283,23 @@ The backend is DOWN because the service cannot answer. Fix what it waits on: see
 and, for Keystone, [expired certificates or Fernet keys](../diagnostics/expired-certificates-and-fernet-keys-break-every-api-call.md).
 Restarting the service while its database is unreachable only loses the requests in flight.
 
-### For causes 4 and 5: bring HAProxy back on the load balancer nodes
+### For causes 4 and 5: bring HAProxy or ProxySQL back on the load balancer nodes
 
-Read why it stops: `sudo docker logs --tail 50 haproxy` shows configuration errors (`[ALERT]` lines with the file
-and line) and missing certificate files.
+Restart only the daemon whose check fails (*Diagnosis*). Read why it stops first: `sudo docker logs --tail 50 haproxy`
+shows configuration errors (`[ALERT]` lines with the file and line) and missing certificate files;
+`sudo docker logs --tail 50 proxysql` and `/var/log/kolla/proxysql/` show ProxySQL's.
 
-> ⚠️ **State-changing.** Restarts HAProxy on one node. If this node holds the VIP, every API connection through it
-> is cut, and keepalived may move the VIP while HAProxy is down. Precondition: the configuration error is fixed.
-> Do one node at a time. Undo: none needed.
+If the rendered configuration is wrong (a change in `/etc/kolla/`, a missing certificate), fix it on the deploy host
+and run `kolla-ansible reconfigure -i <inventory> -t loadbalancer`, which renders the files and restarts the
+containers itself. A plain restart is for a transient failure, when the configuration on the node is already right:
+
+> ⚠️ **State-changing.** Restarts HAProxy (or ProxySQL) on one node. If this node holds the VIP, every API connection
+> (or every database connection) through it is cut, and keepalived may move the VIP while the daemon is down.
+> Precondition: its check fails on this node and the configuration on the node is correct. Do one node at a time.
+> Undo: none needed.
 
 ```bash
-sudo docker restart haproxy
+sudo docker restart haproxy      # or: sudo docker restart proxysql
 ```
 
 On a node in FAULT, keepalived leaves FAULT after 10 successful checks (`rise 10`, about 20 s): `VRRP_Script(check_alive)
@@ -295,9 +331,11 @@ keepalived_traffic_mode: "unicast"        # cause 6, if multicast cannot be fixe
 keepalived_virtual_router_id: "<unused-id>"   # cause 7, 0 to 255, unique on the layer 2 segment
 ```
 
-> ⚠️ **State-changing.** Rewrites `keepalived.conf` and restarts keepalived on every load balancer node. The VIP may
-> move during the run: plan a short API interruption. Precondition: every node has the same settings. Undo: put the
-> old values back and run the same command.
+> ⚠️ **State-changing.** Rewrites `keepalived.conf` and restarts keepalived on every load balancer node. With a new
+> virtual router ID or traffic mode, the backups restart before the master, so for a moment nodes with the new
+> settings do not hear the master with the old ones and take the VIP: it is briefly on two nodes, then settles on
+> one. Plan a short API interruption. Precondition: every node has the same settings. Undo: put the old values back
+> and run the same command.
 
 ```bash
 kolla-ansible reconfigure -i <inventory> -t loadbalancer
@@ -326,8 +364,10 @@ openstack server list --limit 1
 ## Validity and limits
 
 - Written from Kolla-Ansible 2026.1: the `loadbalancer` role (`keepalived.conf.j2`, `check_alive_haproxy.sh.j2`,
-  `haproxy_main.cfg.j2`, `keepalived.json.j2`, defaults), the `haproxy-config` role
-  (`haproxy_single_service_split.cfg.j2`, `haproxy_health_check`), the health checks in the `keystone`, `nova`,
+  `check_alive_proxysql.sh.j2`, `haproxy_main.cfg.j2`, `keepalived.json.j2`, `tasks/config.yml`, defaults), the
+  `haproxy-config` role (`haproxy_single_service_split.cfg.j2`, `haproxy_health_check`,
+  `haproxy_frontend_http_extra`), `group_vars/all/proxysql.yml`, the Kolla 2026.1 `keepalived` image
+  (`docker/keepalived/check_alive.sh`), the health checks in the `keystone`, `nova`,
   `neutron`, `glance`, `cinder` and `placement` role defaults, the `fluentd` role defaults for the HAProxy log, and
   the HAProxy and multinode guides. HAProxy messages from the HAProxy 2.8 source (`src/server.c`, `src/check.c`,
   `src/backend.c`, `src/http.c`) and its configuration and management manuals. Keepalived messages from the
@@ -338,8 +378,11 @@ openstack server list --limit 1
   management guide.
 - Kolla-Ansible only. Other deployment tools use other check paths, check intervals and VRRP settings; the
   diagnosis applies, the commands and file paths do not.
-- Not covered: the external VIP on a separate interface (`track_interface`), ProxySQL in front of MariaDB, HAProxy
-  with `haproxy_single_external_frontend`, and Let's Encrypt.
+- The commands use `docker`. With `kolla_container_engine: podman`, replace `sudo docker` with `sudo podman`; the
+  container names and paths are the same.
+- Not covered: the external VIP on a separate interface (`track_interface`), ProxySQL's own failures beyond its
+  keepalived check (its backends, its query rules), HAProxy with `haproxy_single_external_frontend`, and Let's
+  Encrypt.
 
 ## Related
 
