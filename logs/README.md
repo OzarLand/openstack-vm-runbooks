@@ -13,6 +13,7 @@ These pages explain how to read; the fixes are in the runbooks of the other fold
 | Page | Covers | Releases | Status |
 |---|---|---|---|
 | [Where the OpenStack logs are, and how to read one log line](where-openstack-logs-are-and-how-to-read-a-line.md) | Kolla-Ansible and package installs, the oslo.log line format, request ids, levels, debug on and off | 2026.1 | draft |
+| [Reading the HAProxy, keepalived and memcached logs](reading-haproxy-keepalived-memcached-logs.md) | Backend DOWN and UP lines, 503s and termination states in request lines, VRRP state changes and the check_alive script, memcached counters | 2026.1 | draft |
 
 ## Planned
 
