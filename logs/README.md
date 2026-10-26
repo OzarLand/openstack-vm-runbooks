@@ -13,6 +13,7 @@ These pages explain how to read; the fixes are in the runbooks of the other fold
 | Page | Covers | Releases | Status |
 |---|---|---|---|
 | [Where the OpenStack logs are, and how to read one log line](where-openstack-logs-are-and-how-to-read-a-line.md) | Kolla-Ansible and package installs, the oslo.log line format, request ids, levels, debug on and off | 2026.1 | draft |
+| [Reading the MariaDB and Galera logs, and the oslo.db lines that go with them](reading-mariadb-galera-logs.md) | Error log format, WSREP state changes, quorum and membership, IST and SST, client errors, oslo.db exceptions | 2026.1 | draft |
 
 ## Planned
 
