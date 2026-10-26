@@ -42,6 +42,7 @@ migration/        live and cold migration, evacuation, resize across hosts
 networking/       instance connectivity, DHCP, metadata, floating IPs, security groups, port binding
 volumes/          attach, detach, stale attachments, boot volumes
 diagnostics/      how to read Nova, Neutron, Cinder, Glance, Placement, libvirt logs and states
+logs/             where the logs are and how to read them: services, infrastructure, hypervisor (see logs/README.md)
 recovery/         after a compute, storage or control plane incident; post-incident checks
 templates/        runbook template
 ```
@@ -139,6 +140,12 @@ lab), **documentation** (upstream documentation and source), **production incide
 | [Every API call fails at once. Expired TLS certificates or inconsistent Keystone Fernet keys](diagnostics/expired-certificates-and-fernet-keys-break-every-api-call.md) | keystone, haproxy, rabbitmq, mariadb, memcached | not recorded ([help wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=diagnostics%2Fexpired-certificates-and-fernet-keys-break-every-api-call.md&title=Release+for+diagnostics%2Fexpired-certificates-and-fernet-keys-break-every-api-call.md)) | draft | book |
 | [VM creation fails platform-wide while instances keep running. Check the shared dependencies first](diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md) | nova, neutron, rabbitmq, mariadb, memcached, haproxy, keystone | not recorded ([help wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=diagnostics%2Fvm-creation-fails-platform-wide-check-shared-dependencies.md&title=Release+for+diagnostics%2Fvm-creation-fails-platform-wide-check-shared-dependencies.md)) | draft | book |
 | [What a VM creation traverses, and how to trace one failed boot by request id](diagnostics/what-a-vm-creation-traverses-and-tracing-by-request-id.md) | nova, placement, neutron, glance, cinder, keystone, rabbitmq | not recorded ([help wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=diagnostics%2Fwhat-a-vm-creation-traverses-and-tracing-by-request-id.md&title=Release+for+diagnostics%2Fwhat-a-vm-creation-traverses-and-tracing-by-request-id.md)) | draft | book |
+
+### Logs
+
+| Page | Components | Releases | Status | Source |
+|---|---|---|---|---|
+| [Where the OpenStack logs are, and how to read one log line](logs/where-openstack-logs-are-and-how-to-read-a-line.md) | nova, neutron, placement, keystone, glance, cinder, rabbitmq, mariadb, haproxy, ovs, ovn, libvirt | 2026.1 | draft | documentation |
 
 ### Recovery
 
