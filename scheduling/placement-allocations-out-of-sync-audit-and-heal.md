@@ -135,18 +135,24 @@ Compare check 2 and check 3:
 
 | What you find | What it is |
 |---|---|
-| A consumer on the provider that is not an instance on that host, and `audit` lists it | Orphaned allocation: the instance or the migration no longer exists |
-| An instance listed on another host, whose allocation is still on this provider too (check 4 shows two providers) | Leftover source allocation after an evacuation or a failed move |
+| A consumer on the provider that is not an instance at all (`openstack server show <consumer-uuid>` finds nothing), and `audit` lists it | Orphaned allocation: the instance or the migration no longer exists |
+| An instance listed on another host, whose allocation is still on this provider too (check 4 shows two providers, no move in progress); `audit` lists it on this provider as well | Leftover source allocation after an evacuation or a failed move |
 | An instance on this host with no allocation at all (check 4 empty), and `heal_allocations --dry-run` proposes to create it | Missing allocation |
-| An instance with `task_state` set (migrating, resizing) holding allocations on two providers | Normal while the move runs: one allocation is the instance's, the other the migration's. Do not touch it |
+| An instance with `task_state` set (migrating, resizing, rebuilding for an evacuation) holding allocations on two providers | Normal while the move runs: the migration's UUID holds the source allocation, the instance's UUID the destination one. `audit` lists the destination one as orphaned: do not touch it |
 
 ### What `audit` and `heal_allocations` look at
 
 - `nova-manage placement audit` walks every resource provider (or one, with `--resource_provider <rp-uuid>`). For
   each consumer whose allocation holds a Nova resource class (`VCPU`, `PCPU`, `MEMORY_MB`, `DISK_GB`, `VGPU`,
-  bandwidth classes), it checks whether the consumer is an instance on that compute node or an active migration.
-  If neither, it reports the allocation as orphaned. Return codes: 0 nothing found, 3 orphans found, 4 orphans found
-  and deleted, 1 error, 127 invalid input.
+  bandwidth classes), it checks whether the consumer is one of the instances whose host and node are that compute
+  node, or one of the in-progress migrations from or to that node (`_get_instances_and_current_migrations`). If
+  neither, it reports the allocation as orphaned. So it reports, on a given provider:
+  - allocations of instances that no longer exist (cause 1);
+  - the leftover allocation of an instance that now runs on another compute (cause 2);
+  - during a cold migration, a resize or an evacuation, the allocation that the *instance* UUID holds on the
+    destination while the instance's host is still the source. This one is not orphaned.
+
+  Return codes: 0 nothing found, 3 orphans found, 4 orphans found and deleted, 1 error, 127 invalid input.
 - `nova-manage placement heal_allocations` walks the instances of every cell except cell0. It creates the
   allocation of an instance that has none, from its flavor, on its compute node, and fills in a missing project or
   user on an existing allocation and port resource requests (unless `--skip-port-allocations`). It skips
@@ -154,7 +160,8 @@ Compare check 2 and check 3:
   instances not on a host. It does not move or remove an allocation that sits on the wrong provider. Return codes:
   0 allocations created, 4 nothing to do, 1 `--max-count` reached with more to process, 2 compute node not found,
   3 Placement create or update failed, 5 to 7 Neutron port errors, 8 instance with vGPU or Cyborg resources (not
-  supported), 127 invalid input.
+  supported), 127 invalid input. Like every `nova-manage` command, both return 255 on an unexpected error, with the
+  traceback after `An error has occurred:`.
 
 ### Why Nova did not clean it up itself
 
@@ -173,8 +180,11 @@ If the source compute never comes back, nobody removes them.
 
 ### Cause 1: allocations of instances that no longer exist
 
-The instance was deleted while its compute was down (a local delete), or archived with `nova-manage db
-archive_deleted_rows`, or the allocation was created by another tool. `audit` reports it; the compute log repeats
+The allocation outlived its instance. A delete while the compute is down (a local delete) normally removes the
+allocations itself (`_local_delete` in `nova/compute/api.py`), so it is a cause only when that call failed, for
+example with Placement unreachable at that moment (`Allocation delete failed during local delete cleanup.` in the
+`nova-api` log). Other ways: the instance was archived with `nova-manage db archive_deleted_rows` before its
+allocation was removed, or the allocation was created by another tool. `audit` reports it; the compute log repeats
 `has allocations against this compute host but is not found in the database`.
 
 ### Cause 2: source allocations left after an evacuation or a failed move
@@ -182,7 +192,7 @@ archive_deleted_rows`, or the allocation was created by another tool. `audit` re
 The instance runs on another compute, and check 4 shows allocations on both the old and the new provider, with no
 move in progress. Typical after an evacuation from a compute that never restarted, or after a resize or migration
 that failed and was reset by hand. The old compute logs `has been moved to another host` if its `nova-compute` runs.
-`audit` does not report it, because the consumer is an existing instance.
+`audit` reports it on the old provider, because the instance is not on that node.
 
 ### Cause 3: instances without allocations
 
@@ -191,24 +201,44 @@ the compute is lower than what runs on it. `heal_allocations --dry-run` lists th
 
 ## Resolution
 
-Before any change, save what Placement holds now, so you can set it back by hand:
+Before any change, save what Placement holds now, so you can set it back by hand. For each consumer you are going
+to change (each consumer `audit` lists, each instance you heal), save its whole allocation, with every provider,
+the project and the user, which `allocation set` needs:
 
 ```bash
 openstack resource provider show --allocations <rp-uuid> -f json > allocations-<rp-uuid>.json
-openstack --os-placement-api-version 1.12 resource provider allocation show <server-id> -f json > allocation-<server-id>.json
+openstack --os-placement-api-version 1.12 resource provider allocation show <consumer-uuid> -f json > allocation-<consumer-uuid>.json
+```
+
+Then check that no move is running anywhere, since `audit` takes the destination allocation of an instance being
+moved for an orphan:
+
+```bash
+# every migration in a final state: confirmed, reverted, error, failed, completed, cancelled or done
+openstack server migration list
+# no instance with a task state
+openstack server list --all-projects --long -c ID -c "Task State" -f value | awk '$2 != "None"'
 ```
 
 ### For cause 1: delete the orphaned allocations
 
-Run `audit` without `--delete` first, and check each consumer it lists: `openstack server show <consumer-uuid>`
-must return "No server with a name or ID", and `openstack server migration list` must not show it as a migration.
+Run `audit` without `--delete` first, and sort each consumer it lists:
 
-> 🛑 **Destructive.** Deletes the allocations of every consumer `audit` reports, on every provider (or on one with
-> `--resource_provider`). What can be lost: the allocation of a migration that `audit` failed to match, which is
-> then not restored by `heal_allocations`. Who is affected: the scheduler sees the freed capacity at once.
-> Precondition: no migration, resize or evacuation in progress (`openstack server migration list --status
-> running`), and the saved JSON above. Undo: recreate an allocation by hand with
-> `openstack resource provider allocation set` from the saved JSON.
+- `openstack server show <consumer-uuid>` finds no server, and `openstack server migration list` does not show it:
+  cause 1, delete;
+- it is an instance running on another compute, with no task state: cause 2, the leftover on this provider can be
+  deleted the same way (below) or with `allocation unset`;
+- it is an instance or a migration in a move: leave it, and do not run `--delete` on this provider until the move
+  has ended.
+
+> 🛑 **Destructive.** For each consumer `audit` reports on the audited provider, removes its allocation on that
+> provider: only that provider's part when the consumer also has allocations elsewhere, the whole allocation when
+> this provider is its only one. Without `--resource_provider` it does this on every provider. What can be lost: the
+> destination allocation of an instance being moved (the destination is then overcommitted, and the instance has no
+> allocation once the move ends), and a migration's allocation that `audit` failed to match; `heal_allocations`
+> restores neither. Who is affected: the scheduler sees the freed capacity at once. Precondition: every migration in
+> a final state and no instance with a task state (the checks above), and the saved JSON of each listed consumer.
+> Undo: recreate the allocation by hand with `openstack resource provider allocation set` from the saved JSON.
 
 **Kolla-Ansible:**
 
@@ -219,7 +249,7 @@ sudo docker exec nova_api nova-manage placement audit --verbose --delete --resou
 **Any:** `nova-manage placement audit --verbose --delete --resource_provider <rp-uuid>`.
 
 Expected: `Deleted allocations for consumer UUID <consumer-uuid> on Resource Provider <rp-uuid>: {...}` and return
-code 4.
+code 4. Always pass `--resource_provider`: it keeps the change to the provider you checked.
 
 ### For cause 2: remove only the stale provider from the instance's allocation
 
@@ -233,7 +263,9 @@ The instance keeps its allocation on the compute where it runs; only the part on
 openstack --os-placement-api-version 1.12 resource provider allocation unset --provider <old-rp-uuid> <server-id>
 ```
 
-`allocation unset` needs osc-placement 1.8.0 or later. Do not use `openstack resource provider allocation delete`
+`allocation unset` needs osc-placement 1.8.0 or later. `nova-manage placement audit --delete --resource_provider
+<old-rp-uuid>` does the same for every leftover on that provider (it removes only that provider's part of a
+consumer that also has allocations elsewhere), with the same 🛑 preconditions as for cause 1. Do not use `openstack resource provider allocation delete`
 here: it removes the instance's allocations on every provider, including the one it runs on.
 
 If the old compute is decommissioned for good, its provider can be deleted once it holds no allocation:
@@ -262,7 +294,18 @@ code 8): their allocations are nested and must be set by hand.
 
 ### When one instance's allocations are wrong in a way neither tool fixes
 
-The upstream procedure is to delete all its allocations and heal it.
+First try `heal_allocations --force`: for one instance with no task state, it replaces its allocations with the
+ones computed from its flavor on its compute node, without deleting them first.
+
+> ⚠️ **State-changing.** Replaces the instance's allocations with flavor-based ones on its compute node.
+> Precondition: no task state on the instance, and its allocation saved as JSON above. Undo: `openstack resource
+> provider allocation set` from the saved JSON.
+
+```bash
+sudo docker exec nova_api nova-manage placement heal_allocations --verbose --instance <server-id> --force
+```
+
+If that is not enough, the upstream procedure is to delete all its allocations and heal it.
 
 > 🛑 **Destructive.** Deletes every allocation of the consumer, on every provider. What can be lost: a migration
 > allocation if the instance is in a move (the move then fails or overcommits its destination), nested allocations
@@ -281,8 +324,10 @@ sudo docker exec nova_api nova-manage placement heal_allocations --verbose --ins
 # No orphan left (return code 0, no output)
 sudo docker exec nova_api nova-manage placement audit --verbose; echo $?
 
-# Nothing left to heal (return code 4)
-sudo docker exec nova_api nova-manage placement heal_allocations --dry-run; echo $?
+# Nothing left to heal: no "[dry-run] Create" or "[dry-run] Update" line
+#   (the return code is 4 with --dry-run whatever it finds, so it proves nothing)
+sudo docker exec nova_api nova-manage placement heal_allocations --dry-run --verbose | grep -e "\[dry-run\] Create" -e "\[dry-run\] Update"
+# expected: no output
 
 # The compute's usage matches the flavors of its instances
 openstack resource provider usage show <rp-uuid>
