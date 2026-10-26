@@ -107,8 +107,9 @@ sudo tail -n 100 /var/log/kolla/rabbitmq/rabbit@<hostname>.log
   every second, and resume when they see the majority again. Clients connected to them reconnect elsewhere. The guide
   warns that it does not protect against a node that was suspended (a frozen VM, a long pause) and then resumed.
 - **Alarms:** when a node's memory goes above its watermark, or its free disk below its limit, RabbitMQ blocks every
-  publishing connection **on every node** of the cluster until the alarm clears (RabbitMQ alarms guide). Consumers
-  keep working; publishers, that is every RPC caller, hang.
+  publishing connection **on every node** of the cluster until the alarm clears (RabbitMQ alarms guide). Connections
+  that only consume keep working, but a connection that also publishes is blocked: RPC callers, and RPC servers when
+  they publish their replies. In practice, RPC stops.
 - **Streams** for fanout keep messages until the retention policy deletes them (Kolla-Ansible's defaults: 500 MB
   segments, kept 1800 s once full). Many ready messages in a `stream` queue are expected, not a backlog
   (Kolla-Ansible RabbitMQ guide).
@@ -165,18 +166,24 @@ With quorum queues, Khepri, or `pause_minority`, the minority side catches up or
 is back. Check `cluster_status` on every node.
 
 If a partition is still listed after the network is fixed (Mnesia, or a node that was suspended), the RabbitMQ
-partitions guide says to choose the side you trust, restart the nodes of the other side, then restart the trusted
-side to clear the warning.
+partitions guide says to choose the side you trust, "stop all nodes in the other partitions, then start them all up
+again", so that they restore their state from the trusted side, then restart the trusted side's nodes to clear the
+warning.
 
-> 🛑 **Destructive.** Changes made on the restarted side during the partition (queues, bindings, messages there) are
+> 🛑 **Destructive.** Changes made on the untrusted side during the partition (queues, bindings, messages there) are
 > lost: those nodes take their state from the trusted side. Clients on those nodes are disconnected and reconnect.
-> Precondition: the network between all RabbitMQ nodes works again; you know which side the services used (the
-> one where their queues have consumers). Restart one node at a time.
+> Precondition: the network between all RabbitMQ nodes works again; you know which side the services used (the one
+> where their queues have consumers); a copy of the definitions taken from a trusted node
+> (`sudo docker exec rabbitmq rabbitmqctl export_definitions /var/lib/rabbitmq/definitions-backup.json`). Stop
+> **every** untrusted node before starting any of them: restarting them one at a time can bring a node back next to a
+> peer of its own side instead of the trusted side. Cannot be undone.
 
 ```bash
-# on each node of the side you do not trust, one at a time
-sudo docker restart rabbitmq
-# then on each node of the trusted side, one at a time
+# 1. on every node of the side you do not trust: stop (all of them first)
+sudo docker stop rabbitmq
+# 2. then on every node of that side: start
+sudo docker start rabbitmq
+# 3. then on each node of the trusted side, one at a time
 sudo docker restart rabbitmq
 ```
 
@@ -206,19 +213,27 @@ Kolla-Ansible's `rabbitmq-reset-state` stops the RabbitMQ application on each no
 `reset` with Khepri), starts it and waits for every node to join. The RabbitMQ guide of Kolla-Ansible uses it with
 every OpenStack service stopped first, then redeployed.
 
-> 🛑 **Destructive.** Every queue, exchange and message of the cluster is deleted; the services recreate their
-> queues when they start. Requests in flight are lost, and the resources they concerned stay in transitional states.
-> Every service is down from the stop to the deploy. Precondition: causes 1 to 4 ruled out; a maintenance window.
-> Cannot be undone.
+> 🛑 **Destructive.** Every queue, exchange and message of the cluster is deleted, and `rabbitmqctl reset` also wipes
+> users, vhosts, permissions and policies; the services recreate their queues when they start. Requests in flight are
+> lost, and the resources they concerned stay in transitional states. Every service in `<service-tags>` is stopped
+> from the stop to the deploy, on every host where it runs: APIs refuse requests, and with the Neutron agents stopped,
+> instances get no DHCP answers or metadata until they are back. The `nova` tag also covers the computes'
+> `nova_compute`, `nova_ssh` and `nova_libvirt`: keep `nova_libvirt` running with `skip_stop_containers` (below);
+> running instances keep running in any case
+> ([restarting nova_libvirt](../lifecycle/restarting-nova-libvirt-does-not-stop-instances.md)).
+> Precondition: causes 1 to 4 ruled out; a maintenance window; `globals.yml` and `/etc/kolla/config` unchanged since
+> the last deploy, or reviewed (`genconfig` picks up any drift, and `deploy` applies it). Cannot be undone.
 
 ```bash
 kolla-ansible genconfig -i <inventory>
-kolla-ansible stop -i <inventory> --tags <service-tags> --yes-i-really-really-mean-it
+kolla-ansible stop -i <inventory> --tags <service-tags> --yes-i-really-really-mean-it \
+  -e '{"skip_stop_containers": ["nova_libvirt"]}'
 kolla-ansible rabbitmq-reset-state -i <inventory>
 kolla-ansible deploy -i <inventory> --tags <service-tags>
 ```
 
-`<service-tags>`: the services that use RabbitMQ, for example `nova,neutron,cinder,glance,heat`.
+`<service-tags>`: the services that use RabbitMQ, for example `nova,neutron,cinder,glance,heat`. After the deploy,
+check that the users and vhosts are back (`rabbitmqctl list_users`, `rabbitmqctl list_vhosts`).
 
 ## Verification
 
@@ -244,8 +259,8 @@ Then a test build, and the clean-up of what stayed stuck:
   alarms, metadata store and quorum queue guides. Not run on a lab.
 - RabbitMQ 4.3 removes Mnesia and partition handling strategies; on a later Kolla-Ansible release, read that
   release's RabbitMQ version first.
-- Not covered: TLS problems between services and RabbitMQ, credentials (see the password rotation pattern of
-  kolla-ansible-deployment-patterns), RabbitMQ upgrades, and notification queues filled by a missing consumer
+- Not covered: TLS problems between services and RabbitMQ, credentials (see
+  [rotating the secrets in passwords.yml](https://github.com/OzarLand/kolla-ansible-deployment-patterns/blob/main/configuration/rotating-secrets-in-passwords-yml.md)), RabbitMQ upgrades, and notification queues filled by a missing consumer
   (Ceilometer, Designate).
 
 ## Related
