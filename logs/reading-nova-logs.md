@@ -105,11 +105,11 @@ at `WARNING` or above is worth reading.
 | `Failed to build and run instance` followed by a traceback | ERROR | The build failed on this compute for a reason not handled specifically. The traceback's last line is the cause. Nova may retry on another compute: the fault then reads `Build of instance <uuid> was re-scheduled: <reason>` here, and the next compute logs its own attempt. | [Exceeded maximum number of retries](../scheduling/build-fails-exceeded-maximum-number-of-retries.md) |
 | `Instance failed to spawn` followed by a traceback | ERROR | The failure happened inside the build's resource setup or the hypervisor spawn. Read the traceback: a libvirt error, a disk or image problem, a timeout. | the traceback's last line; libvirt's log on the compute |
 | `Failed to allocate network(s)` with a traceback, then the fault `Build of instance <uuid> aborted: Failed to allocate the network(s), not rescheduling.` | ERROR | The network part of the build failed, often the wait for `network-vif-plugged`. Aborted, **not retried** on another compute. | [Waiting for vif_plugged](../lifecycle/instance-stuck-in-build-waiting-for-vif-plugged.md) |
-| `Timeout waiting for [('network-vif-plugged', '<port-id>')] for instance with vm_state <state> and task_state <state>. Event states are: <...>` | WARNING | Nova waited `vif_plugging_timeout` seconds for Neutron's event and none came. The lab-verified runbook shows this line in full. | [Waiting for vif_plugged](../lifecycle/instance-stuck-in-build-waiting-for-vif-plugged.md); follow the port id in `neutron-server.log` and the agent log of the compute |
+| `Timeout waiting for ['network-vif-plugged-<port-id>'] for instance with vm_state <state> and task_state <state>. Event states are: <...>` | WARNING | Nova waited `vif_plugging_timeout` seconds for Neutron's event and none came. In 2026.1 the list holds the event keys built by `InstanceExternalEvent.make_key` (`<name>-<tag>`); the vif_plugged runbook quotes an older tuple form. `grep "Timeout waiting for"` matches both. | [Waiting for vif_plugged](../lifecycle/instance-stuck-in-build-waiting-for-vif-plugged.md); follow the port id in `neutron-server.log` and the agent log of the compute |
 | `Build of instance <uuid> aborted: Failure prepping block device.` | ERROR (fault) | The boot volume or block device mapping could not be prepared. Not retried. | [Boot from volume fails](../scheduling/instance-fails-to-boot-from-volume.md) |
 | `Build of instance <uuid> aborted: <reason>` with a flavor or image reason (for example `FlavorDiskTooSmall`, `ImageNotActive`) | ERROR (fault) | The request cannot work on any compute; Nova does not retry it. | fix the flavor or image |
 | `Insufficient compute resources: <reason>.` | (exception text) | The claim failed on this compute: its own view of capacity disagreed with the scheduler's. Retried on an alternate. | Placement and the resource tracker; [No valid host](../scheduling/no-valid-host-with-free-capacity.md) |
-| `Connection to libvirt lost: <reason>`, then `Connection event '0' reason 'Connection to libvirt lost: <reason>'` | INFO | nova-compute lost its connection to libvirtd. The libvirt driver **disables the compute service** with a reason starting with `AUTO: ` (`_set_host_enabled` in `driver.py`), and re-enables it when the connection comes back. | `openstack compute service list --long` (Disabled Reason); libvirt's log; [restarting nova_libvirt](../lifecycle/restarting-nova-libvirt-does-not-stop-instances.md) |
+| `Connection event '0' reason 'Connection to libvirt lost: <reason>'` (or `… 'Failed to connect to libvirt: <error>'` at start) | INFO | nova-compute lost its connection to libvirtd. The libvirt driver **disables the compute service** with a reason starting with `AUTO: ` (`_set_host_enabled` in `driver.py`), and re-enables it when the connection comes back. | `openstack compute service list --long` (Disabled Reason); libvirt's log; [restarting nova_libvirt](../lifecycle/restarting-nova-libvirt-does-not-stop-instances.md) |
 | `Connection to libvirt failed: <error>` with a traceback | ERROR | nova-compute could not open a connection to libvirtd at all. | Is libvirtd (`nova_libvirt` on Kolla-Ansible) running? |
 | `Error updating resources for node <node>.` with a traceback | ERROR | The periodic resource update failed: Placement unreachable, a database or RPC error, or a driver error. The compute's inventory in Placement is not refreshed while this lasts. | the traceback; Placement's log |
 | `Lost connection to nova-conductor for reporting service status.` | WARNING | The service heartbeat (sent through the conductor over RabbitMQ) timed out. Logged once; `Recovered from being unable to report status.` (`INFO`) when it works again. Long enough, and the service shows `down`. | RabbitMQ; nova-conductor; [nova-compute down](../recovery/nova-compute-down-instances-still-running.md) |
@@ -124,7 +124,7 @@ Sources: `nova/compute/manager.py`, `nova/compute/claims.py`, `nova/compute/reso
 ```bash
 grep -nE ' (ERROR|CRITICAL) ' /var/log/kolla/nova/nova-compute.log | tail -20
 grep -n "<server-id>" /var/log/kolla/nova/nova-compute.log
-grep -nE "Connection to libvirt|Lost connection to nova-conductor|Error updating resources" /var/log/kolla/nova/nova-compute.log | tail
+grep -nE "Connection event|Connection to libvirt|Lost connection to nova-conductor|Error updating resources" /var/log/kolla/nova/nova-compute.log | tail
 ```
 
 **Any:** the same `grep` on `/var/log/nova/nova-compute.log`, or `journalctl -u <unit>` piped to `grep`.
@@ -194,10 +194,10 @@ Sources: `nova/api/openstack/wsgi.py`; `oslo_messaging/_drivers/amqpdriver.py` f
 ## Validity and limits
 
 - Every message on this page is the message text from Nova 2026.1 (and `oslo.messaging` 2026.1 for
-  `MessagingTimeout`), read in the source files listed above. **None was captured on a lab for this page**, except
-  the `Timeout waiting for ...` and `Build of instance ... aborted` lines, which the lab-verified
-  [vif_plugged runbook](../lifecycle/instance-stuck-in-build-waiting-for-vif-plugged.md) shows. A lab request asks
-  for real samples of the others.
+  `MessagingTimeout`), read in the source files listed above. **None was captured on a lab for this page.** The
+  lab-verified [vif_plugged runbook](../lifecycle/instance-stuck-in-build-waiting-for-vif-plugged.md) shows the
+  `Build of instance … aborted` fault; its `Timeout waiting for …` line uses a tuple form that differs from the 2026.1
+  source. A lab request (#59) asks for real samples.
 - Level and exact wording can change between releases; a message text quoted here is for 2026.1.
 - Only the libvirt driver is covered.
 - "What normal looks like" lists the lines that the source logs at `INFO` or `DEBUG`; how many of them appear on
