@@ -81,8 +81,8 @@ The API (`nova/compute/api.py`, `_delete`) chooses between two paths:
   (`Instance destroyed successfully.`), deallocates the network, detaches the volumes, deletes the Placement
   allocation, then removes the instance from the database.
 - **The compute is down** (or the instance has no host, or is shelved offloaded): a **local delete**. The API logs
-  `instance's host <compute> is down, deleting from database`, deallocates the ports, cleans up the volume
-  attachments and the allocation itself, and marks the instance deleted. Nothing is done on the compute: if it comes
+  `instance's host <compute> is down, deleting from database`, deallocates the ports, deletes the volume
+  attachments, **deletes the volumes created with `delete_on_termination`**, removes the allocation itself, and marks the instance deleted. Nothing is done on the compute: if it comes
   back, the guest may still be defined there.
 
 `task_state` `deleting` with the compute up means the API sent the request and the compute did not finish it.
@@ -149,6 +149,12 @@ storage that is gone for good often cannot be killed; then the host needs a rebo
 instances ([maintenance](../migration/moving-instances-off-a-host-for-maintenance.md)). Once the guest is gone from
 `virsh list --all`, delete again (cause 3).
 
+> ⚠️ **State-changing.** Rebooting the host stops every instance on it; move them first. When `nova-compute` starts
+> again, it resumes the delete left in `deleting` (cause 1). Undo: none needed.
+
+Do not shortcut with `virsh undefine`, by removing the instance's disks by hand, or by editing the database: Nova,
+Neutron, Cinder and Placement would keep records that no longer match the host.
+
 ### For cause 3: delete again
 
 An instance in `ERROR` with no task state accepts a new delete, which runs every step again:
@@ -164,11 +170,13 @@ openstack server delete <server-id>
 
 If the instance stays in `deleting` with its compute up and the guest already gone, restart `nova-compute` first
 (cause 1): a new delete goes back to the same compute, and resetting the state while that compute may still be
-working on the first delete runs two deletes at once. If it still stays in `deleting` after the restart, clear the
+working on the first delete runs two deletes at once. Check the compute log: a `Terminating instance` line for the
+server ID with no `Instance destroyed successfully.` after it means the compute is still on it. If it still stays in `deleting` after the restart, clear the
 task state, then delete again (the 🛑 above applies):
 
-> ⚠️ **State-changing.** Sets the instance to `ERROR` with no task state in the database only. Undo: none needed, the
-> next step deletes it.
+> ⚠️ **State-changing.** `server set --state error` sets the instance to `ERROR` with no task state, in the database
+> only. Undo: `openstack server set --state active <server-id>`. The `delete` that follows is irreversible: the 🛑 of
+> the previous step applies to it.
 
 ```bash
 openstack server set --state error <server-id>
@@ -182,23 +190,21 @@ the API does a local delete. If the host may come back, fence it first
 ([fence before you evacuate](../recovery/compute-host-failure-fence-before-evacuate.md)): a host that returns still
 has the guest defined, and its `nova-compute` finds an instance it no longer knows.
 
-> ⚠️ **State-changing.** Disables the compute for scheduling and marks it down, so that the API does a local delete.
-> Precondition: the host is powered off or cut off. Undo: `openstack --os-compute-api-version 2.11 compute service set --up
-> --enable <compute> nova-compute` once it is repaired.
+> 🛑 **Destructive.** Forcing the service down affects **every instance on that compute**: any delete of them becomes
+> a local delete, and they can be evacuated, by an operator or by auto-evacuation tooling. The local delete then
+> removes the instance from Nova, Neutron and Cinder without touching the host: its ports and addresses are freed, its
+> volume attachments deleted, its `delete_on_termination` volumes deleted and its allocation removed. If the host is
+> not really fenced, the guest keeps running while its addresses and volumes are released and reused: duplicate IP
+> addresses, two writers on one volume. What is lost: the instance record, the `delete_on_termination` volumes, the
+> local disks; a guest is left on the host until it is reaped (below). Precondition: the host is powered off or cut
+> off from the network and the storage, checked out of band (BMC, switch port), not only through Nova; the owner
+> agrees; a snapshot of each `delete_on_termination` volume whose data matters. Undo: `openstack
+> --os-compute-api-version 2.11 compute service set --up --enable <compute> nova-compute` restores the service, not the
+> deleted instance.
 
 ```bash
 openstack --os-compute-api-version 2.11 compute service set --disable --disable-reason "<why>" --down \
   <compute> nova-compute
-```
-
-> 🛑 **Destructive.** A local delete removes the instance from Nova and Neutron and Cinder without touching the host:
-> its ports and addresses are freed and its volume attachments cleaned up even if the guest still runs there. If the
-> host is not really fenced, a running guest can lose its network and keep writing to volumes that Cinder now
-> considers free. What is lost: as for any delete, the local disks (when the host is cleaned up) and the volumes
-> created with `delete_on_termination`. Precondition: the host is confirmed powered off or cut off from the network
-> and the storage; the owner confirms the data is not needed or backed up. Cannot be undone.
-
-```bash
 openstack server delete <server-id>
 ```
 
@@ -219,7 +225,7 @@ destructive step of its own, needing a database backup and its own review, and i
 ```bash
 openstack server show <server-id>                       # No server found
 openstack port list --device-id <server-id>             # empty
-openstack volume list --all-projects --long | grep <server-id>   # no volume still attached to it
+openstack volume show <volume-id> -c status -c attachments   # for each volume it had: no attachment to it
 ```
 
 On the compute, the guest is gone (`virsh list --all --uuid`). If the delete was local, check when the compute
