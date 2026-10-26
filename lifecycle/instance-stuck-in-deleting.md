@@ -1,0 +1,227 @@
+---
+title: Instance stuck in deleting, or in ERROR after a delete. Deleting it again does nothing
+kind: runbook
+status: draft
+openstack_releases: ["2026.1"]
+components: [nova, libvirt, cinder, neutron, placement]
+deployment_methods: [kolla-ansible, any]
+environment:
+  topology: any
+  network: any
+  storage: any
+  os: any
+risk: state-changing
+confirmed_by: []
+upstream_refs:
+  - https://docs.openstack.org/nova/2026.1/reference/vm-states.html
+  - https://docs.openstack.org/python-openstackclient/2026.1/cli/command-objects/server.html
+authored_by: agent:ozarland-author
+last_verified: 2026-10-26
+---
+
+# Instance stuck in deleting, or in ERROR after a delete. Deleting it again does nothing
+
+## Symptom
+
+After `openstack server delete <server-id>`, the instance does not go away:
+
+```text
+$ openstack server show <server-id> -c status -c OS-EXT-STS:task_state -c OS-EXT-SRV-ATTR:host
+| OS-EXT-SRV-ATTR:host  | <compute>  |
+| OS-EXT-STS:task_state | deleting   |
+| status                | ACTIVE     |      (or SHUTOFF, ERROR...)
+```
+
+or it ends in `ERROR` with a fault from the delete. Running `openstack server delete` again returns without error
+and changes nothing: while its compute is up, Nova's API logs `Instance is already in deleting state, ignoring this
+request` (`nova/compute/api.py`).
+
+## Impact
+
+One instance. It keeps its quota, its Placement allocation on the compute, its ports (and IP addresses) and its
+volume attachments until the delete completes. If the guest was not destroyed, it may still be running on the
+compute.
+
+## Quick checks
+
+Read-only. With admin credentials:
+
+```bash
+# 1. State, host, and the delete action
+openstack server show <server-id> -c status -c OS-EXT-STS:task_state -c OS-EXT-STS:power_state \
+  -c OS-EXT-SRV-ATTR:host -c OS-EXT-SRV-ATTR:instance_name -c locked -c fault
+openstack server event list <server-id>
+
+# 2. Is the instance's compute up, as Nova sees it?
+openstack compute service list --service nova-compute --host <compute>
+```
+
+On the compute, does the guest still exist, and what did `nova-compute` log for it?
+
+**Kolla-Ansible:**
+
+```bash
+sudo docker exec nova_libvirt virsh list --all --uuid | grep <server-id>
+sudo grep <server-id> /var/log/kolla/nova/nova-compute.log | tail -n 30
+```
+
+**Any:** `sudo virsh list --all --uuid | grep <server-id>`, and the `nova-compute` log.
+
+## Diagnosis
+
+### How a delete runs (Nova 2026.1)
+
+The API (`nova/compute/api.py`, `_delete`) chooses between two paths:
+
+- **The compute is up:** it sets `task_state` `deleting` and sends `terminate_instance` to that compute over RPC.
+  The compute (`nova/compute/manager.py`) logs `Terminating instance`, destroys the guest through libvirt
+  (`Instance destroyed successfully.`), deallocates the network, detaches the volumes, deletes the Placement
+  allocation, then removes the instance from the database.
+- **The compute is down** (or the instance has no host, or is shelved offloaded): a **local delete**. The API logs
+  `instance's host <compute> is down, deleting from database`, deallocates the ports, cleans up the volume
+  attachments and the allocation itself, and marks the instance deleted. Nothing is done on the compute: if it comes
+  back, the guest may still be defined there.
+
+`task_state` `deleting` with the compute up means the API sent the request and the compute did not finish it.
+
+### What the compute logs
+
+| Message (`nova-compute` log) | Meaning |
+|---|---|
+| no `Terminating instance` for the server ID | The compute never received the request: message bus problem, or `nova-compute` blocked |
+| `Terminating instance`, then nothing | The compute is stuck in the delete, usually in libvirt destroying a guest whose I/O hangs (storage lost) |
+| `Cannot destroy instance, operation time out` | libvirt could not kill the guest in time; the instance goes to `ERROR` |
+| `Error from libvirt during destroy. Code=<n> Error=<message>` | Other libvirt failure; the instance goes to `ERROR` |
+| `Setting instance vm_state to ERROR` with a traceback | Any error of the delete on the compute: the traceback names the step |
+| `Ignoring unknown cinder exception for volume <id>` or `Ignoring unknown exception for volume <id>` | Cinder failed to detach a volume; Nova continues the delete, and the volume may stay `in-use` |
+| `Service started deleting the instance during the previous run, but did not finish. Restarting the deletion now.` | `nova-compute` restarted and resumed the delete |
+
+## Possible causes
+
+### Cause 1: the request never reached the compute, or `nova-compute` is stuck
+
+A message bus incident, or `nova-compute` blocked on another operation. The compute log has no
+`Terminating instance` for the server ID.
+
+### Cause 2: the guest cannot be destroyed
+
+The QEMU process does not die, usually because it waits on storage that no longer answers (NFS, iSCSI, Ceph lost).
+libvirt reports a timeout, or `nova-compute` waits.
+
+### Cause 3: the delete failed part way (ERROR)
+
+A libvirt error, or a failure after the guest was destroyed (network deallocation, Placement). The instance is in
+`ERROR`; deleting it again retries the whole delete.
+
+### Cause 4: the compute is gone, but Nova still sees it up
+
+The host died less than `service_down_time` (60 s by default) ago, or something still reports for it. Nova sends the
+request to a compute that will never answer.
+
+### Cause 5: the instance is protected
+
+Not stuck, refused: a locked instance (`locked` `True`) returns `Instance <id> is locked`; an instance with
+`disable_terminate` set is not deleted, and the API only logs `instance termination disabled`.
+
+## Resolution
+
+### For cause 1: restart `nova-compute`, which resumes the delete
+
+Fix the message bus first if it is the cause
+([RabbitMQ](https://github.com/OzarLand/openstack-vm-runbooks/blob/main/recovery/rabbitmq-partition-or-alarm-rpc-timeouts.md)).
+At start-up, `nova-compute` resumes every delete left in `deleting` on its host (`_init_instance`).
+
+> ⚠️ **State-changing.** Restarts `nova-compute` on that compute; running instances are not affected, operations in
+> progress on that compute fail. Undo: none needed.
+
+**Kolla-Ansible:** `sudo docker restart nova_compute`
+
+**Any:** restart the `nova-compute` service.
+
+### For cause 2: free the guest, then delete again
+
+Repair the storage path if you can: the QEMU process then dies and the delete completes. A process waiting on
+storage that is gone for good often cannot be killed; then the host needs a reboot, after moving its other
+instances ([maintenance](../migration/moving-instances-off-a-host-for-maintenance.md)). Once the guest is gone from
+`virsh list --all`, delete again (cause 3).
+
+### For cause 3: delete again
+
+An instance in `ERROR` with no task state accepts a new delete, which runs every step again:
+
+> ⚠️ **State-changing.** Deletes the instance: its guest, local disks, ports and allocations. Volumes are detached,
+> not deleted, unless they were created with `delete_on_termination`. Cannot be undone.
+
+```bash
+openstack server delete <server-id>
+```
+
+If the instance stays in `deleting` with its compute up and the guest already gone, clear the task state, then
+delete again:
+
+> ⚠️ **State-changing.** Sets the instance to `ERROR` with no task state in the database only. Undo: none needed, the
+> next step deletes it.
+
+```bash
+openstack server set --state error <server-id>
+openstack server delete <server-id>
+```
+
+### For cause 4: make sure the host is down, then let Nova delete locally
+
+If the host is really gone, wait until Nova reports its `nova-compute` `down` (quick check 2), then delete again:
+the API does a local delete. If the host may come back, fence it first
+([fence before you evacuate](../recovery/compute-host-failure-fence-before-evacuate.md)): a host that returns still
+has the guest defined, and its `nova-compute` finds an instance it no longer knows.
+
+> ⚠️ **State-changing.** Disables the compute for scheduling and marks it down, so that the API does a local delete.
+> Precondition: the host is powered off or cut off. Undo: `openstack --os-compute-api-version 2.11 compute service set --up
+> --enable <compute> nova-compute` once it is repaired.
+
+```bash
+openstack --os-compute-api-version 2.11 compute service set --disable --disable-reason "<why>" --down \
+  <compute> nova-compute
+openstack server delete <server-id>
+```
+
+### For cause 5: unlock or allow termination
+
+The owner, or an admin, unlocks the instance (`openstack server unlock <server-id>`) and deletes it again.
+
+## Verification
+
+```bash
+openstack server show <server-id>                       # No server found
+openstack port list --device-id <server-id>             # empty
+openstack volume list --all-projects --long | grep <server-id>   # no volume still attached to it
+```
+
+On the compute, the guest is gone (`virsh list --all --uuid`). If the delete was local, check when the compute
+comes back that the guest is gone there too. For ports, volumes or allocations left behind, see
+[stale records](stale-records-stuck-instances-orphan-ports-attachments.md) and
+[stale volume attachment](../volumes/stale-volume-attachment-after-instance-deleted-or-evacuated.md).
+
+## Validity and limits
+
+- Written from Nova 2026.1 (`nova/compute/api.py` `_delete`, `_local_delete`; `nova/compute/manager.py`
+  `terminate_instance`, `_shutdown_instance`, `_init_instance`; `nova/virt/libvirt/driver.py` `_destroy`) and
+  python-openstackclient 2026.1. Not reproduced on a lab.
+- Not covered: soft delete (`reclaim_instance_interval`, instances in `SOFT_DELETED`), Ironic instances, and down
+  cells.
+
+## Related
+
+- [Stale records](stale-records-stuck-instances-orphan-ports-attachments.md): the periodic clean-up of instances,
+  ports, attachments and allocations.
+- [Compute host unreachable. Fence before you evacuate](../recovery/compute-host-failure-fence-before-evacuate.md)
+- [Stale volume attachment after an instance was deleted](../volumes/stale-volume-attachment-after-instance-deleted-or-evacuated.md)
+- Nova 2026.1: [VM states and transitions](https://docs.openstack.org/nova/2026.1/reference/vm-states.html)
+
+---
+
+*Provenance: written by agent:ozarland-author, from the Nova and python-openstackclient 2026.1 documentation and
+source.
+Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=lifecycle/instance-stuck-in-deleting.md&title=Feedback%3A+lifecycle/instance-stuck-in-deleting.md):
+your release, your deployment method, and what happened.
