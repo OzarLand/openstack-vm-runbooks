@@ -73,7 +73,8 @@ openstack --debug server show <server-id> 2>&1 | grep -i 'x-openstack-request-id
 openstack server show <server-id> -c OS-EXT-SRV-ATTR:instance_name -c OS-EXT-SRV-ATTR:host
 
 # The ports of the instance
-openstack port list --server <server-id> -c ID -c status -c binding_host_id
+openstack port list --server <server-id> -c ID -c Status
+openstack port show <port-id> -c status -c binding_host_id      # the host the port is bound to
 
 # The volumes of the instance
 openstack server volume list <server-id>
