@@ -100,6 +100,7 @@ grep -n "<server-id>" /var/log/kolla/nova/nova-compute.log | grep -E "snapshot|S
 
 ## Related
 
+- [Instance snapshot stuck in image_uploading](../lifecycle/snapshot-stuck-in-image-uploading.md)
 - [Volume stuck in creating or error after create](../volumes/volume-stuck-in-creating-or-error-after-create.md) (volumes from images)
 - [Compute disk full](../lifecycle/compute-disk-full-instance-paused.md)
 - [Where the OpenStack logs are, and how to read one log line](where-openstack-logs-are-and-how-to-read-a-line.md)
