@@ -138,7 +138,7 @@ Compare check 2 and check 3:
 | A consumer on the provider that is not an instance at all (`openstack server show <consumer-uuid>` finds nothing), and `audit` lists it | Orphaned allocation: the instance or the migration no longer exists |
 | An instance listed on another host, whose allocation is still on this provider too (check 4 shows two providers, no move in progress); `audit` lists it on this provider as well | Leftover source allocation after an evacuation or a failed move |
 | An instance on this host with no allocation at all (check 4 empty), and `heal_allocations --dry-run` proposes to create it | Missing allocation |
-| An instance with `task_state` set (migrating, resizing, rebuilding for an evacuation) holding allocations on two providers | Normal while the move runs: the migration's UUID holds the source allocation, the instance's UUID the destination one. `audit` lists the destination one as orphaned: do not touch it |
+| An instance with `task_state` set (migrating, resizing, rebuilding for an evacuation) holding allocations on two providers | Normal while the move runs: the migration's UUID holds the source allocation, the instance's UUID the destination one. until the instance's host switches to the destination, `audit` lists the destination one as orphaned: do not touch it |
 
 ### What `audit` and `heal_allocations` look at
 
