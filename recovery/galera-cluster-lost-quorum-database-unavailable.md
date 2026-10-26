@@ -1,7 +1,7 @@
 ---
 title: Every API fails on database errors. The Galera cluster lost quorum, or stopped on every node
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [mariadb, galera, kolla-ansible, nova, neutron, keystone]
 deployment_methods: [kolla-ansible, any]
@@ -11,7 +11,8 @@ environment:
   storage: any
   os: any
 risk: destructive
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible multinode, 3 controllers with ProxySQL, 2 computes", date: 2026-10-26, note: "full procedure on a disposable lab: case A (one node stopped), case B (port 4567 dropped on every node, then quorum reset with wsrep_provider_pc_bootstrap), case C (power loss of every node, mariadb-recovery 4.5 min, API containers restarted); mariadb_recover_inventory_name and Any variants not run" }
 upstream_refs:
   - https://docs.openstack.org/kolla-ansible/2026.1/user/operating-kolla.html
   - https://docs.openstack.org/kolla-ansible/2026.1/admin/mariadb-backup-and-restore.html
@@ -33,6 +34,17 @@ errors, for example:
 (pymysql.err.OperationalError) (2013, 'Lost connection to MySQL server during query')
 (pymysql.err.OperationalError) (2003, "Can't connect to MySQL server on ...")
 ```
+
+With ProxySQL in front of Galera (Kolla-Ansible 2026.1 deploys it by default with MariaDB), the services see
+ProxySQL's errors instead (observed on a lab):
+
+```text
+(pymysql.err.OperationalError) (9001, 'Max connect timeout reached while reaching hostgroup 0 after 10000ms')
+(pymysql.err.OperationalError) (2013, 'Lost connection to MySQL server during query')
+(pymysql.err.OperationalError) (1180, 'Error while appending streaming replication fragment(provider status: Not connected to Primary Component)')
+```
+
+`1047 WSREP has not yet prepared node for application use` is what a client connected directly to a node gets.
 
 On the MariaDB nodes, one of two pictures:
 
@@ -126,7 +138,9 @@ own: a node that was not stopped last has `safe_to_bootstrap: 0`, and none knows
 ## Resolution
 
 Before any state-changing step, take a backup. In case A, the cluster still has a Primary component, and
-`kolla-ansible mariadb-backup -i <inventory>` works (see the backup and restore guide). In cases B and C it does not:
+`kolla-ansible mariadb-backup -i <inventory>` works (see the backup and restore guide) if `enable_mariabackup: "yes"`
+is set in `globals.yml`. Without it, the command ends with `failed=0` and takes no backup (every task is skipped):
+check that a backup file was written. In cases B and C it does not:
 `mariadb-backup` needs a node in a Primary component, so copy each node's `mariadb` Docker volume instead, with its
 container stopped. Then stop new requests at the APIs
 if your procedure allows it ([reopening provisioning](reopening-provisioning-after-control-plane-incident.md)).
@@ -137,7 +151,12 @@ Fix what stopped the node (disk, network, host), then start its container. It jo
 copies what it missed.
 
 > ⚠️ **State-changing.** Starts MariaDB on that node; it receives the missing transactions from a donor node, which
-> slows the donor while the copy runs. Undo: stop the container again.
+> slows the donor while the copy runs. Undo: `sudo systemctl stop kolla-mariadb-container.service`.
+
+On Kolla-Ansible 2026.1, each container has a systemd unit (`kolla-<container>-container.service`, `Restart=always`,
+`RestartSec=59`): a container stopped with `docker stop` is started again by systemd about a minute later. To keep a
+node's MariaDB stopped while you repair the host, use `sudo systemctl stop kolla-mariadb-container.service`, and
+`sudo systemctl start kolla-mariadb-container.service` to start it.
 
 ```bash
 sudo docker start mariadb
@@ -162,14 +181,17 @@ Primary again: compare `wsrep_last_committed` on the running nodes, then on the 
 **Kolla-Ansible:**
 
 ```bash
-sudo docker exec -it mariadb mariadb -uroot -p -e "SET GLOBAL wsrep_provider_options='pc.bootstrap=YES'"
+sudo docker exec -it mariadb mariadb -uroot -p -e "SET GLOBAL wsrep_provider_pc_bootstrap=ON"
+# once the node is Primary, reset the variable (the bootstrap is not repeated)
+sudo docker exec -it mariadb mariadb -uroot -p -e "SET GLOBAL wsrep_provider_pc_bootstrap=OFF"
 ```
 
-**Any:**
+On the MariaDB 11.4 that Kolla-Ansible 2026.1 ships, the Galera provider options are plugin variables
+(`wsrep_provider_pc_*`): `SET GLOBAL wsrep_provider_options='pc.bootstrap=YES'` fails with
+`ERROR 1210 (HY000): wsrep_provider_options cannot be changed while the wsrep-provider plugin is loaded`.
 
-```sql
-SET GLOBAL wsrep_provider_options='pc.bootstrap=YES';
-```
+**Any:** `SET GLOBAL wsrep_provider_pc_bootstrap=ON;` where `SHOW GLOBAL VARIABLES LIKE 'wsrep_provider_pc%'` lists it,
+otherwise `SET GLOBAL wsrep_provider_options='pc.bootstrap=YES';`.
 
 The other running nodes then join this component. Nodes that were cut off join when they come back.
 
@@ -202,6 +224,19 @@ To choose the bootstrap host yourself (the backup and restore guide uses this fo
 kolla-ansible mariadb-recovery -i <inventory> -e mariadb_recover_inventory_name=<host>
 ```
 
+After a power loss of every controller, the API containers that started while the database was unavailable may
+not recover on their own once the cluster is back (observed on a lab: `nova_api`, `nova_metadata`, `placement_api`
+and `neutron_server` stayed `unhealthy`, their uWSGI log said `unable to load app 0` then `no python application
+found`, HAProxy answered `503 No server is available to handle this request`, and `nova_conductor` and
+`nova_scheduler` crash-looped because Placement answered 500). Check every controller with
+`sudo docker ps --filter health=unhealthy` and restart what it lists:
+
+> ⚠️ **State-changing.** Restarts the API containers; requests in flight on that controller fail. Undo: none needed.
+
+```bash
+sudo docker restart <container> [<container>...]      # for example placement_api nova_api nova_metadata neutron_server
+```
+
 **Any:** the Galera crash recovery guide: find the node with the highest seqno (`grastate.dat`, or
 `mysqld --wsrep-recover` when it says `-1`), set `safe_to_bootstrap: 1` on that node only, start it with
 `--wsrep-new-cluster` (or `galera_new_cluster`), then start the others normally.
@@ -213,6 +248,7 @@ kolla-ansible mariadb-recovery -i <inventory> -e mariadb_recover_inventory_name=
 sudo docker exec -it mariadb mariadb -uroot -p -e "SHOW STATUS WHERE Variable_name IN
   ('wsrep_cluster_status','wsrep_local_state_comment','wsrep_ready','wsrep_cluster_size')"
 sudo docker ps --filter name=mariadb --format '{{.Names}} {{.Status}}'        # healthy
+sudo docker ps --filter health=unhealthy --format '{{.Names}} {{.Status}}'     # empty on every controller
 
 # from a host with admin credentials
 openstack token issue
@@ -223,11 +259,30 @@ openstack compute service list
 Then check the services that may have failed while the database was gone, before reopening provisioning:
 [reopening provisioning after a control-plane incident](reopening-provisioning-after-control-plane-incident.md).
 
+## Lab observations
+
+Kolla-Ansible 22.2.0 (2026.1), three controllers with Galera and ProxySQL, two computes, MariaDB 11.4.13, Galera
+26.4.27, 2026-10-26:
+
+- **Case C** (every VM of the lab powered off, then on): each `mariadb` container ran `--wsrep-recover`, logged
+  `No nodes coming from primary view, primary view is not possible`, then `failed to reach primary view` and
+  `Aborting` about 30 s later, and was restarted by systemd a minute later, in a loop. `grastate.dat` showed
+  `seqno: -1`, `safe_to_bootstrap: 0` on all three. `kolla-ansible deploy --tags mariadb` failed with the message
+  quoted in *Symptom*. `kolla-ansible mariadb-recovery` took 4 min 34 s, found the same seqno on every node,
+  bootstrapped from one, and the others joined by SST. The API containers then had to be restarted (see cause 3).
+- **Case A** (`docker stop mariadb` on the ProxySQL writer): the other two stayed `Primary`, size 2; ProxySQL moved
+  the writer after 14 s; no API error was seen. `docker start` brought the node to `Synced` in 18 s (IST).
+- **Case B** (Galera port 4567 dropped on every node): every node `non-Primary`, `wsrep_ready` `OFF` after 9 s; the
+  APIs returned 502. Once the port was open again, the Primary component formed again on its own within 3 s. The
+  quorum reset with `wsrep_provider_pc_bootstrap=ON` on one node made it Primary at once; the others joined by IST
+  when the port was opened.
+
 ## Validity and limits
 
 - Written from Kolla-Ansible 2026.1 (`recover_cluster.yml`, `lookup_cluster.yml`, `galera.cnf.j2`, the operating
-  guide and the MariaDB backup and restore guide) and the Galera crash recovery and quorum reset guides. Not run on a
-  lab.
+  guide and the MariaDB backup and restore guide) and the Galera crash recovery and quorum reset guides. Cases A, B
+  (with the quorum reset) and C run on a disposable Kolla-Ansible 2026.1 lab with ProxySQL (see *Lab observations*);
+  the `mariadb_recover_inventory_name` form and the **Any** variants were not run.
 - Assumes Docker; with Podman, replace `docker` with `podman`.
 - Not covered: a single-node MariaDB (Kolla-Ansible restarts it without recovery), MariaDB shards
   (`mariadb_shard_group`), restoring from a backup (see the backup and restore guide), ProxySQL problems with a
