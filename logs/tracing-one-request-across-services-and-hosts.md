@@ -46,7 +46,7 @@ from one to the next at the right place.
 | Nova → Neutron, Cinder, Glance, Placement | the **global request id**: Nova's id appears inside the called service's brackets, before that service's own id | Nova's clients pass `global_request_id=context.global_id` (`nova/network/neutron.py`, `nova/volume/cinder.py`, `nova/image/glance.py`, and the Placement report client). The called service accepts the `X-Openstack-Request-Id` header as its global request id and generates its own request id. |
 | Neutron server → agent or OVN → back to Nova (`network-vif-plugged`) | the **port id** | The agent works on ports, not on requests; Neutron tells Nova that a port is up with an external event, which is a new API request to nova-api with its own request id. |
 | Nova → libvirt / QEMU on the compute | the **instance name** (`instance-%08x`) and the **instance UUID** | libvirt names the domain from `instance_name_template` (default `instance-%08x`); Nova logs the instance UUID in `[instance: <uuid>]`. |
-| Nova → Cinder → storage backend | the **volume id** | Nova logs `Attaching volume <volume-id> to <mountpoint>`; Cinder and the backend log the volume id. |
+| Nova → Cinder → storage backend | the **volume id**, and Nova's request id as Cinder's global request id | Nova logs `Attaching volume <volume-id> to <mountpoint>`. Cinder passes the volume as a log `resource`, which the default `oslo.log` format does not print, so many Cinder lines show only the request ids. |
 
 So, for a failed boot:
 
@@ -55,7 +55,8 @@ So, for a failed boot:
    you that service's own request id if you need to go deeper there.
 3. For the network wiring on the compute, switch to the **port id** (and its tap device name).
 4. For the hypervisor, switch to the **instance name** and UUID.
-5. For storage, switch to the **volume id**.
+5. For storage, switch to the **volume id** where Cinder prints it, and keep Nova's request id for the other Cinder
+   lines.
 
 ## Getting the identifiers
 
@@ -187,7 +188,9 @@ grep -h "<volume-id>" /var/log/kolla/cinder/cinder-api.log /var/log/kolla/cinder
   /var/log/kolla/cinder/cinder-volume.log | sort
 ```
 
-Nova's request id also appears in Cinder's lines as the global request id, so either id works on the Cinder side.
+Many Cinder lines do not contain the volume id with the default `oslo.log` format (the volume is passed as a log
+`resource`, and `%(resource)s` is not in the format string). Grep Nova's request id as well: Cinder logs it as the
+global request id for the calls Nova makes.
 
 ## Lining up the clocks
 
