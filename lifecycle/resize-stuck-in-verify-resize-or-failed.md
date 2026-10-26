@@ -101,6 +101,21 @@ that many seconds. Kolla-Ansible 2026.1 does not set it, and sets `allow_resize_
 A `nova-compute` that restarts while an instance is in `resize_migrating` reverts the instance on that host and
 clears the task state (`_init_instance`). A restart in `resize_prep` clears the task state only.
 
+### What the compute logs say
+
+Messages of `nova/compute/manager.py` (2026.1), in the `nova-compute` log of the compute named:
+
+| Message | Where | Meaning |
+|---|---|---|
+| `Migrating` | source | The disk copy starts (`_resize_instance`) |
+| `Setting instance back to <state> after: <error>` | source or destination | A rollback error (`InstanceFaultRollback`): the instance is back in its previous state, `<error>` says why |
+| `Setting instance vm_state to ERROR` followed by a traceback | source or destination | Any other error: the instance is in `ERROR`; the traceback is the cause |
+| `Instance found in migrating state during startup. Resetting task_state` | source | `nova-compute` restarted during the copy and reverted the instance (`_init_instance`) |
+| `Failed to revert crashed migration` | source | That revert failed: recover by hand (below) |
+| `Found <n> unconfirmed migrations older than <s> seconds`, then `Automatically confirming migration <id> for instance <uuid>` | destination | `resize_confirm_window` at work |
+| `Setting migration <id> to error: In states <vm_state>/<task_state>, not RESIZED/None` | destination | The automatic confirm skipped an instance that was not in `VERIFY_RESIZE` |
+| `Confirming resize on source host.` / `Reverting resize on destination host.` | source / destination | A confirm or revert running |
+
 ## Possible causes
 
 ### Cause 1: nobody confirmed (VERIFY_RESIZE)
