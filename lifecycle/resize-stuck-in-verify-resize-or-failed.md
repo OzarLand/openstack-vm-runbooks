@@ -150,8 +150,8 @@ shrink disks, except a root disk booted from volume.
 Both choices belong to the instance's owner, and neither can be undone.
 
 > 🛑 **Destructive.** `confirm` deletes the instance's previous copy (disks and definition) on the source compute and
-> frees its resources: going back to the previous flavor or host is no longer possible. Precondition: the owner has
-> checked the resized instance and agrees. Cannot be undone.
+> frees its resources: the old copy is lost for good, and going back to the previous flavor or host takes a new
+> resize or migration. Precondition: the owner has checked the resized instance and agrees. Cannot be undone.
 
 ```bash
 openstack server resize confirm <server-id>      # or: openstack server migration confirm <server-id>
@@ -159,8 +159,9 @@ openstack server resize confirm <server-id>      # or: openstack server migratio
 
 > 🛑 **Destructive.** `revert` destroys the resized guest and restarts the previous copy on the source, with the
 > previous flavor: everything the guest wrote to its local disks since the resize is lost (data on volumes is kept).
-> Precondition: the owner agrees; if the data written since the resize matters, snapshot the resized instance first
-> (`openstack server image create`). Cannot be undone.
+> Precondition: the owner agrees; if the data written since the resize matters, copy it out from inside the guest
+> first, or confirm instead of reverting. A Nova snapshot is not possible here: `openstack server image create` is
+> refused (HTTP 409) for an instance in `VERIFY_RESIZE`. Cannot be undone.
 
 ```bash
 openstack server resize revert <server-id>       # or: openstack server migration revert <server-id>
@@ -179,8 +180,7 @@ then `kolla-ansible reconfigure -i <inventory> --tags nova`.
 ### For cause 2: restart the service, then check again
 
 Bring back the service that stopped (quick check 4), or the message bus
-([RabbitMQ](https://github.com/OzarLand/openstack-vm-runbooks/blob/main/recovery/rabbitmq-partition-or-alarm-rpc-timeouts.md),
-[shared dependencies](../diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md)). If the instance
+([shared dependencies](../diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md)). If the instance
 was in `resize_migrating` on that compute, its restart reverts the instance. Then check quick check 1 again.
 
 If the instance stays in `RESIZE` with the services up, find where its disks are (the `host` field and the migration
@@ -224,7 +224,9 @@ openstack server reboot --hard <server-id>
 When the failure came after the disk copy (in `finish_resize`), the source compute keeps the previous copy as
 `<instances-path>/<server-id>_resize`. Leave it until the instance runs and its owner has checked it; it is the only
 copy if the recovery goes wrong. When the copy itself failed, the libvirt driver renamed the directory back and
-removed the partial copy on the destination: the instance's disks are on the source only.
+tried to remove the partial copy on the destination: the instance's disks are on the source. That clean-up is best
+effort (`_cleanup_remote_migration` ignores its own errors): if the copy failed because SSH failed, a partial
+`<server-id>` directory can remain on the destination; remove it once the instance runs on the source.
 
 ### For cause 5: choose a flavor with a disk at least as large
 
