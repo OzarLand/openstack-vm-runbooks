@@ -68,7 +68,7 @@ configuration. With `log_dir` alone, `oslo.log` names the file after the program
 | nova-api | `nova_api` | `/var/log/kolla/nova/nova-api.log`, requests in `nova-api-uwsgi.log` | controllers |
 | nova-scheduler | `nova_scheduler` | `/var/log/kolla/nova/nova-scheduler.log` | controllers |
 | nova-conductor | `nova_conductor` | `/var/log/kolla/nova/nova-conductor.log` (cell conductor) | controllers |
-| nova super conductor | `nova_super_conductor` | `/var/log/kolla/nova/nova-super-conductor.log` (only with several cells) | controllers |
+| nova super conductor | `nova_super_conductor` | `/var/log/kolla/nova/nova-super-conductor.log` (only with `enable_cells: true`) | controllers |
 | nova-compute | `nova_compute` | `/var/log/kolla/nova/nova-compute.log` | computes |
 | libvirt | `nova_libvirt` | `/var/log/kolla/libvirt/libvirtd.log`; each instance's QEMU log is libvirt's `/var/log/libvirt/qemu/<instance-name>.log` inside the container (not under `kolla_logs`, see the limits) | computes |
 | placement-api | `placement_api` | `/var/log/kolla/placement/placement-api.log`, requests in `placement-api-uwsgi.log` | controllers |
@@ -102,9 +102,10 @@ Things that surprise people on Kolla-Ansible:
   (`<service>-uwsgi.log`), which carries one line per HTTP request in uWSGI's own format, starting with
   `[pid: <pid>|app: <n>|req: <n>/<n>] <client address> ...`.
 - **fluentd reads the files, it does not replace them.** The `fluentd` container (enabled by default,
-  `enable_fluentd: true`) tails the files above, and the systemd journal from `/var/log/journal`. It sends them to
-  OpenSearch only when `enable_central_logging` is true (default `false`). Without central logging, the files on
-  each node are all there is.
+  `enable_fluentd: true`) tails the files above. It reads the systemd journal only with central logging
+  (`enable_fluentd_systemd` is `enable_fluentd and enable_central_logging` in `group_vars/all/fluentd.yml`), and it
+  sends logs to OpenSearch only when `enable_central_logging` is true (default `false`). Without central logging, the
+  files on each node are all there is.
 - **The host's own logs are outside `/var/log/kolla`.** The kernel, the container engine, chrony and systemd units
   log to the journal of the host (`journalctl`), as on any Linux host.
 
@@ -132,14 +133,16 @@ names that differ by distribution
 | `nova-scheduler.log` | `openstack-nova-scheduler` | `nova-scheduler` |
 
 The other projects follow the same pattern (`/var/log/neutron/`, `/var/log/cinder/`, and so on), but where a
-service writes depends on its packaging, not on OpenStack. `oslo.log` decides as follows
+service writes depends on its packaging, not on OpenStack. `oslo.log` adds one handler for each output that is
+configured, and they add up: a service can write to a file and to the journal at the same time
 ([`_setup_logging_from_conf`](https://opendev.org/openstack/oslo.log/src/branch/stable/2026.1/oslo_log/log.py)):
 
 - `log_file` and/or `log_dir` set (in the configuration file, or as `--log-file` on the command line of the unit):
   a file;
+- `use_stderr = true`: standard error;
 - `use_journal = true`: the systemd journal, natively, with structured fields;
-- `use_syslog = true`: syslog, in addition;
-- none of these, and `use_stderr = false`: standard output, which systemd captures in the journal.
+- `use_syslog = true`: syslog;
+- none of the first three: standard output, which systemd captures in the journal.
 
 So on a package install, look in both places:
 
@@ -293,7 +296,7 @@ copied into the container at start (`config_strategy: COPY_ALWAYS` by default). 
 ```bash
 # On the host that runs the service (example: nova-compute on one compute)
 grep -n '^debug' /etc/kolla/nova-compute/nova.conf          # expect debug = False; the first match is in [DEFAULT]
-df -h /var/lib/docker                                        # room for the extra log volume
+df -h "$(readlink -f /var/log/kolla)"                       # room for the extra log volume (Docker or Podman)
 ```
 
 > ⚠️ **State-changing.** Edits the service's configuration on this host and restarts its container. The restart
