@@ -31,6 +31,8 @@ upstream_refs:
   - https://github.com/openstack/neutron/blob/stable/2026.1/neutron/conf/plugins/ml2/drivers/ovs_conf.py
   - https://github.com/openstack/nova/blob/stable/2026.1/nova/network/neutron.py
   - https://github.com/openvswitch/ovs/blob/v3.7.1/ovsdb/ovsdb-server.c
+  - https://github.com/ovn-org/ovn/blob/main/controller/ovn-controller.c
+  - https://github.com/openstack/kolla-ansible/blob/stable/2026.1/ansible/roles/cron/templates/cron-logrotate-global.conf.j2
 authored_by: agent:ozarland-author
 last_verified: 2026-10-26
 ---
@@ -134,13 +136,18 @@ default on `127.0.0.1:6633`, options `of_listen_address` and `of_listen_port` in
 or `ovn-controller` (ML2/OVN). A controller connection is named `<bridge><-><target>`, for example
 `br-int<->tcp:127.0.0.1:6633` ([`connmgr.c`](https://github.com/openvswitch/ovs/blob/v3.7.1/ofproto/connmgr.c)).
 
+With ML2/OVN, `ovn-controller` is not in the bridge's Controller table: it connects as a client to the bridge's
+management socket, `unix:<rundir>/br-int.mgmt`
+([`ovn-controller.c`](https://github.com/ovn-org/ovn/blob/main/controller/ovn-controller.c)). Failures on that link
+are logged by `ovn-controller`, in `ovn-controller.log`, not as `br-int<->…` lines in `ovs-vswitchd.log`.
+
 | Message (format) | Meaning | Source |
 |---|---|---|
 | `<name>: connecting...` then `<name>: connected` | (Re)connection to a controller or to the database | `rconn.c`, `reconnect.c` |
 | `<name>: connection failed (<error>)`, `<name>: connection timed out` | The controller or database is not answering. `Connection refused` on `127.0.0.1:6633` means the Neutron agent is not listening (stopped, restarting) | `rconn.c` |
 | `<name>: connection closed by peer`, `<name>: connection dropped (<error>)` | The other side went away | `reconnect.c` |
 | `<name>: no response to inactivity probe after <n> seconds, disconnecting` | The other side is alive enough to keep the socket open but did not answer for `<n>` seconds: an overloaded or blocked agent, `ovsdb-server` or `ovs-vswitchd` | `reconnect.c`, `rconn.c` |
-| `<name>: waiting <n> seconds before reconnect` | Back-off between attempts; the wait doubles up to a maximum | `reconnect.c` |
+| `<name>: waiting <n> seconds before reconnect` | Back-off between attempts; the wait doubles up to a maximum. Logged by `rconn.c` for OpenFlow connections (whole seconds) and by `reconnect.c` for database connections | `rconn.c`, `reconnect.c` |
 | `<name>: receive error: <error>`, `<name>: send error: <error>` | A JSON-RPC (database) connection failed; `<name>` such as `unix#<n>` is a client of the unix socket | `jsonrpc.c` |
 
 A controller connection that drops and comes back while the Neutron agent restarts is expected; the agent's restart
@@ -187,8 +194,11 @@ ovs-appctl -t ovsdb-server vlog/list
 file only happens if the daemon was started with `--log-file`.
 
 > ⚠️ **State-changing.** Debug logging can grow the log file very fast on a busy compute (some modules log every
-> packet or flow) and costs CPU. Instances are not affected. The change lasts until you undo it or the daemon restarts.
-> Raise one module at a time, on the destination `file`, and note the level shown by `vlog/list` before you change it.
+> packet or flow) and costs CPU. On Kolla-Ansible, `/var/log/kolla` is shared by every service of the host, so a
+> runaway log can fill the disk for all of them. Instances are not affected. The change lasts until you undo it or the
+> daemon restarts. Raise one module at a time, on the destination `file`, and note the level shown by `vlog/list`
+> before you change it. Many debug messages are rate-limited; `ovs-appctl vlog/disable-rate-limit <module>` lifts that
+> and adds even more volume: use it only briefly, and undo it with `vlog/enable-rate-limit <module>`.
 
 ```bash
 # On the compute. Kolla-Ansible: docker exec openvswitch_vswitchd ovs-appctl ...
@@ -210,14 +220,21 @@ compute.
 ### Rotation
 
 `ovs-appctl vlog/reopen` makes the daemon close and reopen its log file, which is what a log rotation needs after
-moving the file; `vlog/close` closes it. Neither has an effect if the daemon was started without `--log-file`.
+moving the file. Neither it nor `vlog/close` has an effect if the daemon was started without `--log-file`.
+Kolla-Ansible's logrotate configuration uses `copytruncate`
+([`cron-logrotate-global.conf.j2`](https://github.com/openstack/kolla-ansible/blob/stable/2026.1/ansible/roles/cron/templates/cron-logrotate-global.conf.j2)),
+so `vlog/reopen` is rarely needed there.
+
+Do not use `vlog/close` on a production host: the daemon then stops writing its log file until `vlog/reopen` or a
+restart, and the next incident leaves no trace.
 
 ## A short reading order
 
 1. Network lost for every instance of one compute: is `ovs-vswitchd` running, and did its log restart at `00001`?
 2. One instance without network: `added interface tap…` for its port at boot, or `could not open network device`?
-3. Flows missing or stale: `connection failed` or `no response to inactivity probe` towards the Neutron agent or
-   `ovn-controller`, then the agent's own log.
+3. Flows missing or stale: with ML2/OVS, `connection failed` or `no response to inactivity probe` towards the
+   Neutron agent in `ovs-vswitchd.log`, then the agent's own log. With ML2/OVN, read `ovn-controller.log`: the
+   OpenFlow link to `br-int.mgmt` is logged there.
 4. Slowness, drops under load: `Unreasonably long … poll interval` and `blocked … waiting … to quiesce`, then the
    kernel log and host load for the same UTC minute.
 
@@ -230,7 +247,8 @@ Related runbooks: [ovs-vswitchd down on a compute](../networking/ovs-vswitchd-do
 
 - Written from upstream source and documentation only: Open vSwitch v3.7.1, Kolla-Ansible and Neutron
   `stable/2026.1`. Every message above is a format string from that source, not a captured line. Older Open vSwitch
-  releases may word some lines differently (`ovs-vswitchd --version` gives yours).
+  releases may word some lines differently (`ovs-vswitchd --version` gives yours). The Open vSwitch version on a
+  2026.1 compute depends on the base distribution of the images or packages, so it may not be 3.7.1.
 - Not run on a lab yet. A capture of a compute with an instance booted and deleted, the Neutron agent restarted, and a
   module raised to `dbg` and back, is requested to replace the formats with redacted real lines.
 - DPDK (`ovs-vswitchd` with a userspace datapath) adds its own modules and messages; not covered.
