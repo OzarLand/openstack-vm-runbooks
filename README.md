@@ -146,6 +146,7 @@ lab), **documentation** (upstream documentation and source), **production incide
 | Page | Components | Releases | Status | Source |
 |---|---|---|---|---|
 | [Where the OpenStack logs are, and how to read one log line](logs/where-openstack-logs-are-and-how-to-read-a-line.md) | nova, neutron, placement, keystone, glance, cinder, rabbitmq, mariadb, haproxy, ovs, ovn, libvirt | 2026.1 | draft | documentation |
+| [Reading the Placement logs, and the Placement lines in Nova's logs](logs/reading-placement-logs.md) | placement, nova | 2026.1 | draft | documentation |
 
 ### Recovery
 
