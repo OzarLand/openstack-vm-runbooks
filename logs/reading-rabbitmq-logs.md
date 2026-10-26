@@ -34,8 +34,8 @@ When RabbitMQ misbehaves, the symptoms appear in every OpenStack service at once
 reconnection lines, and the cause is in RabbitMQ's own log on one of its nodes. This page reads both sides: the
 broker's log (node down, partition, alarms, connections) and the client lines that `oslo.messaging` writes in the
 OpenStack services' logs. Broker messages are quoted from the RabbitMQ 4.2.9 source (`deps/rabbit/src/`), the
-version line Kolla 2026.1 installs (`rabbitmq-server-4.2.*` in its `rabbitmq` image); client messages from
-`oslo.messaging` 2026.1.
+version line Kolla 2026.1 pins on its RPM-based `rabbitmq` images (`rabbitmq-server-4.2.*`; on other images check
+with `rabbitmqctl version`); client messages from `oslo.messaging` 2026.1.
 
 The fix for a broken RabbitMQ cluster is not on this page; it says what the lines mean and where to look next.
 
@@ -65,7 +65,7 @@ lines after the first.
 
 ```bash
 # Kolla-Ansible, on a RabbitMQ node
-grep -nE '\[(warning|error)\]' /var/log/kolla/rabbitmq/rabbit@$(hostname).log | tail -30
+grep -nE '\[(warning|error)\]' /var/log/kolla/rabbitmq/rabbit@*.log | tail -30
 docker exec rabbitmq rabbitmq-diagnostics cluster_status
 docker exec rabbitmq rabbitmq-diagnostics alarms
 ```
@@ -74,9 +74,14 @@ docker exec rabbitmq rabbitmq-diagnostics alarms
 
 RabbitMQ 4.2 has two metadata stores. **Khepri** (Raft-based) is the default for new clusters from 4.2.0; a cluster
 upgraded from earlier versions keeps **Mnesia** until the `khepri_db` feature flag is enabled
-([metadata store guide](https://www.rabbitmq.com/docs/4.2/metadata-store)). Kolla-Ansible enables all feature
-flags after an upgrade (`rabbitmqctl enable_feature_flag all` in `tasks/feature-flags.yml`) and writes
-`cluster_partition_handling = pause_minority` (`rabbitmq_cluster_partition_handling` default).
+([metadata store guide](https://www.rabbitmq.com/docs/4.2/metadata-store)).
+
+**On Kolla-Ansible 2026.1, expect Khepri.** Its `rabbitmq.yml` runs the role's `post-deploy.yml`, and with it
+`feature-flags.yml` (`rabbitmqctl enable_feature_flag all`), on every `deploy`, `reconfigure` and `upgrade`; in RabbitMQ
+4.2, `khepri_db` is a stable feature flag (`rabbit_core_ff.erl`), so enabling all flags enables it. Kolla-Ansible still
+writes `cluster_partition_handling = pause_minority` (`rabbitmq_cluster_partition_handling` default), but with Khepri
+that setting has no effect. The Mnesia rows below apply to other deployment methods and to clusters that have not
+enabled `khepri_db`.
 
 What a partition looks like in the log depends on the store, and the node says which one at start
 (`rabbit_node_monitor.erl`):
@@ -84,7 +89,7 @@ What a partition looks like in the log depends on the store, and the node says w
 | Line at start | Meaning |
 |---|---|
 | `Starting rabbit_node_monitor (partition handling strategy unapplicable with Khepri)` | Khepri: `cluster_partition_handling` has no effect; availability follows Raft majorities. |
-| `Starting rabbit_node_monitor (in pause_minority mode)` | Mnesia, with Kolla-Ansible's setting. |
+| `Starting rabbit_node_monitor (in pause_minority mode)` | Mnesia, with `cluster_partition_handling = pause_minority`. |
 | `Starting rabbit_node_monitor (in <mode> mode), might be partitioned from [<nodes>]` | Mnesia, and the node already sees peers it may be partitioned from at start. |
 
 ```bash
@@ -165,14 +170,15 @@ closes (`rabbit_reader.erl`):
 | `closing AMQP connection (<client>, vhost: '<vhost>', user: '<user>', duration: '<duration>')` | info | A clean close: a service stopped or restarted. |
 | `closing AMQP connection <pid> (<client>, vhost: '<vhost>', user: '<user>', duration: '<duration>'):` / `client unexpectedly closed TCP connection` | warning | The client went away without closing: its process died, or a network device (HAProxy, firewall) cut an idle connection. |
 | `closing AMQP connection <pid> (<client>, duration: '<duration>'):` / `missed heartbeats from client, timeout: <n>s` | error | The broker heard nothing from the client for the negotiated heartbeat timeout. The client process is stuck (blocked event loop, CPU starvation), or the network between them dropped. |
-| `<mechanism> login refused: user '<user>' - invalid credentials` | error | A service uses a wrong password, typically after a password change not deployed everywhere. |
+| `<mechanism> login refused: user '<user>' - invalid credentials` | error | A service uses a wrong password, typically after a password change not deployed everywhere. The text usually appears inside a `closing AMQP connection … {handshake_error,…}` line: grep `login refused`. |
 
 **Churn** (many accept and close lines a minute for the same clients) means services reconnect in a loop. Count
 them per client to find which host or service:
 
 ```bash
-grep -c "accepting AMQP connection" /var/log/kolla/rabbitmq/rabbit@$(hostname).log
-grep "missed heartbeats from client" /var/log/kolla/rabbitmq/rabbit@$(hostname).log | tail
+grep -c "accepting AMQP connection" /var/log/kolla/rabbitmq/rabbit@*.log
+grep "missed heartbeats from client" /var/log/kolla/rabbitmq/rabbit@*.log | tail
+grep "login refused" /var/log/kolla/rabbitmq/rabbit@*.log | tail
 ```
 
 On the client side, `oslo.messaging` logs (`impl_rabbit.py`; prefix `[<connection-id>]`):
@@ -184,7 +190,7 @@ On the client side, `oslo.messaging` logs (`impl_rabbit.py`; prefix `[<connectio
 | `[<id>] Reconnected to AMQP server on <host>:<port> via [<transport>] client with port <port>.` | INFO | Reconnected. A burst of these across services marks the end of a broker or network incident. |
 | `A recoverable connection/channel error occurred, trying to reconnect: <error>` | INFO | The heartbeat thread found the connection broken and reconnects. |
 | `Failed to publish message to topic '<topic>': <error>` | ERROR | A send failed after the retries. |
-| `Timed out waiting for a reply to message ID <msg-id>` (in a `MessagingTimeout`) | ERROR, in a traceback | An RPC call got no answer within `rpc_response_timeout` (60 s). Either the server side (conductor, agent, compute) did not process it, or the reply was lost. (`amqpdriver.py`) |
+| `Timed out waiting for a reply to message ID <msg-id>` (in a `MessagingTimeout`; a second form, `Timed out waiting for a reply <reply queue> to message ID <msg-id>.`, comes from the reply waiter, so grep `Timed out waiting for a reply`) | ERROR, in a traceback | An RPC call got no answer within `rpc_response_timeout` (60 s). Either the server side (conductor, agent, compute) did not process it, or the reply was lost. (`amqpdriver.py`) |
 
 The client heartbeat is `heartbeat_timeout_threshold` (default 60 s), checked `heartbeat_rate` times (default 3) in
 that window (`[oslo_messaging_rabbit]`).
@@ -195,8 +201,9 @@ that window (`[oslo_messaging_rabbit]`).
    same minute points at RabbitMQ, not at those services.
 2. **Alarms first:** `rabbitmq-diagnostics alarms` and `resource limit alarm set` in each node's log. An alarm on one
    node blocks the whole cluster.
-3. **Membership:** `cluster_status`, then `node <node> down`, `Partial partition detected` and
-   `Cluster minority/secondary status detected` lines, with their times, on each node.
+3. **Membership:** `cluster_status`, then `node <node> down` / `rabbit on node <node> down` lines, with their times,
+   on each node. With Mnesia only (not Kolla-Ansible 2026.1), also `Partial partition detected` and
+   `Cluster minority/secondary status detected`.
 4. **Connections:** churn and `missed heartbeats from client` point at clients or the network between them and the
    broker; group by client address to find the host.
 5. **Then the clients:** the first `AMQP server … is unreachable` and the last `Reconnected to AMQP server` in a
@@ -209,9 +216,9 @@ How the shared dependencies fail together: [VM creation fails platform-wide](../
 - Broker messages are quoted from the RabbitMQ **4.2.9** source and the RabbitMQ 4.2 guides; client messages from
   `oslo.messaging` 2026.1. **No line on this page was captured on a lab**, apart from the guide's own examples,
   which come from older RabbitMQ versions and show the shape, not 4.2 output. A lab request asks for real samples.
-- Whether a Kolla-Ansible 2026.1 cluster runs Khepri or Mnesia depends on its history (new or upgraded) and on the
-  feature flags; check with the commands above. The partition lines marked "Mnesia" do not appear with Khepri,
-  whose partition handling relies on Raft and logs leader elections instead (not detailed here).
+- Kolla-Ansible 2026.1 enables `khepri_db` on deploy, reconfigure and upgrade, so its clusters are expected to run
+  Khepri; check with the commands above. The partition lines marked "Mnesia" do not appear with Khepri, whose
+  partition handling relies on Raft and logs leader elections instead (not detailed here).
 - Default values (watermark 0.6, disk 50 MB, net tick 60 s, heartbeat 60 s) are upstream defaults; your deployment
   may override them in `rabbitmq.conf` or `[oslo_messaging_rabbit]`.
 
