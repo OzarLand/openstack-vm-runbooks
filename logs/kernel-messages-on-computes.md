@@ -16,6 +16,8 @@ upstream_refs:
   - https://github.com/systemd/systemd/blob/main/man/journalctl.xml
   - https://github.com/util-linux/util-linux/blob/master/sys-utils/dmesg.1.adoc
   - https://github.com/torvalds/linux/blob/v7.3/mm/oom_kill.c
+  - https://github.com/torvalds/linux/blob/v7.3/include/linux/sched.h
+  - https://github.com/openvswitch/ovs/blob/v3.7.1/vswitchd/ovs-vswitchd.8.in
   - https://github.com/torvalds/linux/blob/v7.3/kernel/hung_task.c
   - https://github.com/torvalds/linux/blob/v7.3/Documentation/admin-guide/sysctl/kernel.rst
   - https://github.com/torvalds/linux/blob/v7.3/net/netfilter/nf_conntrack_core.c
@@ -66,7 +68,7 @@ journalctl -k -f                                # follow
 
 The previous boot is only there if the journal is persistent (`/var/log/journal` exists, or `Storage=persistent`);
 otherwise the kernel lines before a crash or a reboot are lost. Configuring the journal is covered on the systemd and
-journald page.
+journald page (planned).
 
 ### dmesg
 
@@ -101,10 +103,12 @@ oom_reaper: reaped process <pid> (<command>), now anon-rss:<n>kB, file-rss:<n>kB
 - The first line names the process that **asked** for memory, not the one killed.
 - `Out of memory:` is a host-wide OOM; `Memory cgroup out of memory:` means a cgroup limit was hit (for example a
   container's memory limit), not the whole host.
-- `<command>` for an instance is the QEMU binary name (`qemu-kvm`, `qemu-system-x86_64`, depending on the
-  distribution). Match the pid with the instance: the instance log in `/var/log/libvirt/qemu/` then ends with
+- `<command>` is the task's `comm`, which the kernel cuts to 15 characters (`TASK_COMM_LEN` is 16 with the final
+  null byte, in [`include/linux/sched.h`](https://github.com/torvalds/linux/blob/v7.3/include/linux/sched.h)). For an
+  instance it is the QEMU binary name, cut: `qemu-kvm`, or `qemu-system-x86` for `qemu-system-x86_64`. The process
+  that asked for memory, in the first line, can also be a QEMU vCPU thread, whose name looks like `CPU 0/KVM`. Match the pid with the instance: the instance log in `/var/log/libvirt/qemu/` then ends with
   `shutting down, reason=crashed`, and `nova-compute` logs `Instance shutdown by itself` (see the libvirt and QEMU
-  logs page).
+  logs page, planned in #67).
 
 ```bash
 journalctl -k | grep -E "invoked oom-killer|Out of memory|Memory cgroup out of memory|oom_reaper"
@@ -124,6 +128,7 @@ From [`arch/x86/kvm/vmx/vmx.c`](https://github.com/torvalds/linux/blob/v7.3/arch
 |---|---|
 | `kvm_intel: VMX not enabled (by BIOS) in MSR_IA32_FEAT_CTL on CPU <n>` | Virtualisation is disabled in the firmware: KVM cannot load. Nova then cannot start `kvm` instances on this host |
 | `kvm_intel: VMX not supported by CPU <n>`, `kvm_amd: SVM not supported by CPU <n>` | The CPU (or the outer hypervisor, for a nested lab) does not expose hardware virtualisation |
+| (AMD, SVM disabled in the firmware) | `kvm_amd` in v7.3 has no message of its own for this case, unlike Intel's `VMX not enabled (by BIOS)`; its support checks only log `SVM not supported by CPU <n>` (and `CPU <n> isn't AMD or Hygon`). Older kernels used other wording. Check that `kvm_amd` is loaded and the firmware settings |
 | `kvm: SMP vm created on host with unstable TSC; guest TSC will not be reliable` | The host's TSC is not stable; guests may see clock problems |
 | `kvm: <instruction> instruction emulated as NOP!` | A guest used an instruction KVM only pretends to run; usually harmless, logged once |
 
@@ -158,6 +163,10 @@ A link that flaps under the tunnel or provider network makes instances lose pack
 nothing.
 
 ### Bonding and LACP
+
+This section is about bonds built with the Linux bonding driver. A bond built inside Open vSwitch (a port with
+several interfaces in `ovs-vswitchd`) writes nothing to the kernel log: read `ovs-appctl bond/show`,
+`ovs-appctl lacp/show` and `ovs-vswitchd.log` instead (see the Open vSwitch logs page, planned in #70).
 
 The bonding driver prefixes per-member messages with `<bond>: (slave <interface>): `
 ([`include/net/bonding.h`](https://github.com/torvalds/linux/blob/v7.3/include/net/bonding.h)). From
@@ -218,7 +227,7 @@ Filesystem errors:
 | `<why> (0x<flags>) detected at <function> (<file>:<line>).  Shutting down filesystem.` then `Please unmount the filesystem and rectify the problem(s)` | [`fs/xfs/xfs_fsops.c`](https://github.com/torvalds/linux/blob/v7.3/fs/xfs/xfs_fsops.c) | XFS shut itself down. `<why>` is `Log I/O Error`, `Metadata I/O Error`, `Corruption of in-memory data`, `Corruption of on-disk metadata` or `Block device removal` |
 
 The `<disk>` can be a local disk (the instances directory, the root filesystem) or a remote volume attached through
-iSCSI or multipath (`sd*`, `dm-*`). For the iSCSI and multipath side, see the host storage logs. A full disk is not an
+iSCSI or multipath (`sd*`, `dm-*`). For the iSCSI and multipath side, see the host storage logs page (planned). A full disk is not an
 error line in the kernel log; for that case see
 [compute disk full, instance paused](../lifecycle/compute-disk-full-instance-paused.md).
 
