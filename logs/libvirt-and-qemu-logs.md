@@ -21,6 +21,8 @@ upstream_refs:
   - https://gitlab.com/libvirt/libvirt/-/blob/v12.8.0/src/qemu/qemu_migration.c
   - https://gitlab.com/libvirt/libvirt/-/blob/v12.8.0/src/conf/domain_conf.c
   - https://gitlab.com/libvirt/libvirt/-/blob/v12.8.0/src/qemu/qemu.conf.in
+  - https://gitlab.com/libvirt/libvirt/-/blob/v12.8.0/tools/virt-admin.c
+  - https://github.com/openstack/kolla/blob/stable/2026.1/docker/nova/nova-libvirt/kolla_nova_libvirt_start.sh
   - https://gitlab.com/qemu-project/qemu/-/blob/v11.1.2/system/runstate.c
   - https://gitlab.com/qemu-project/qemu/-/blob/v11.1.2/accel/kvm/kvm-all.c
   - https://gitlab.com/qemu-project/qemu/-/blob/v11.1.2/util/error-report.c
@@ -120,35 +122,72 @@ From the [debug logs kbase](https://gitlab.com/libvirt/libvirt/-/blob/v12.8.0/do
 
 ### Turning debug on, then off
 
-> ⚠️ **State-changing.** Debug logging writes far more and can fill the disk that holds the log; the compute's
-> instances keep running. Change one compute at a time, and undo it as shown below when you have what you need.
+> ⚠️ **State-changing.** Debug logging writes far more and can fill the disk that holds the log. The runtime method
+> below does not restart the daemon, and the compute's instances keep running. Change one compute at a time, and undo
+> it as shown below when you have what you need.
 
-**Any, at runtime, without a restart:** `virt-admin` changes the filters and outputs of the running daemon. The change
-is lost when the daemon restarts or stops on its idle timeout; `daemon-timeout --timeout 0` (libvirt 8.6.0 and later)
-keeps it running. The admin URI is `virtqemud:///system` for the modular daemon and `libvirtd:///system` for the
-monolithic one. First save the current values, to restore them afterwards:
+**At runtime, without a restart:** `virt-admin` changes the filters and outputs of the running daemon. The change is
+lost when the daemon restarts or stops. The admin URI is `virtqemud:///system` for the modular daemon and
+`libvirtd:///system` for the monolithic one, including Kolla-Ansible's. First note the current values: `virt-admin`
+prints them as `Logging filters: <filters>` and `Logging outputs: <outputs>`
+([`tools/virt-admin.c`](https://gitlab.com/libvirt/libvirt/-/blob/v12.8.0/tools/virt-admin.c)).
+
+**Kolla-Ansible:** the `nova_libvirt` container runs `libvirtd --listen` with no idle timeout
+([`kolla_nova_libvirt_start.sh`](https://github.com/openstack/kolla/blob/stable/2026.1/docker/nova/nova-libvirt/kolla_nova_libvirt_start.sh)).
+Run `virt-admin` inside the container, if the image ships it (`command -v virt-admin`); otherwise use the persistent
+method below. Write the debug file on the `kolla_logs` volume, next to the normal log:
 
 ```bash
-# On the compute (root). Kolla-Ansible: run inside the container, docker exec -it nova_libvirt bash,
-# if virt-admin is present in the image (command -v virt-admin); otherwise use the persistent method below.
-virt-admin -c virtqemud:///system daemon-log-filters     # note the current value
-virt-admin -c virtqemud:///system daemon-log-outputs     # note the current value
+# On the compute (root). With Podman, use podman exec instead of docker exec.
+docker exec nova_libvirt virt-admin -c libvirtd:///system daemon-log-filters    # note: Logging filters: ...
+docker exec nova_libvirt virt-admin -c libvirtd:///system daemon-log-outputs    # note: Logging outputs: ...
 
-virt-admin -c virtqemud:///system daemon-log-outputs "1:file:/var/log/libvirt/libvirtd-debug.log 3:journald"
+docker exec nova_libvirt virt-admin -c libvirtd:///system daemon-log-outputs "1:file:/var/log/kolla/libvirt/libvirtd-debug.log 3:file:/var/log/kolla/libvirt/libvirtd.log"
+docker exec nova_libvirt virt-admin -c libvirtd:///system daemon-log-filters "3:remote 4:event 3:util.json 3:util.object 3:util.dbus 3:util.netlink 3:node_device 3:rpc 3:access 1:*"
+```
+
+**Any, modular daemon:** the daemon is usually socket-activated and stops after an idle timeout (120 seconds in common
+deployments, per the kbase), which would discard the runtime settings. `daemon-timeout --timeout 0` (libvirt 8.6.0 and
+later) keeps it running:
+
+```bash
+# On the compute (root)
+virt-admin -c virtqemud:///system daemon-log-filters     # note: Logging filters: ...
+virt-admin -c virtqemud:///system daemon-log-outputs     # note: Logging outputs: ...
+virt-admin -c virtqemud:///system daemon-timeout --timeout 0
+
+virt-admin -c virtqemud:///system daemon-log-outputs "1:file:/var/log/libvirt/virtqemud-debug.log 3:journald"
 virt-admin -c virtqemud:///system daemon-log-filters "3:remote 4:event 3:util.json 3:util.object 3:util.dbus 3:util.netlink 3:node_device 3:rpc 3:access 1:*"
 ```
 
-To undo, set the values you noted back with the same two commands. An empty filter list (`daemon-log-filters ""`)
-removes every filter; an empty output list restores the host's default output.
+For the monolithic `libvirtd` on a package install, use `-c libvirtd:///system` and a file name such as
+`/var/log/libvirt/libvirtd-debug.log`.
 
-**Kolla-Ansible, persistent:** set `nova_libvirt_logging_debug: true` in `/etc/kolla/globals.yml` (or in the host's
-`host_vars`, to limit it to one compute), then run `kolla-ansible reconfigure` limited to that compute. This rewrites
-`libvirtd.conf` with `log_level = 1` and restarts `nova_libvirt`; restarting `nova_libvirt` does not stop the instances
-([restarting nova_libvirt](../lifecycle/restarting-nova-libvirt-does-not-stop-instances.md)). Undo by removing the
-variable and reconfiguring again. With no filters, level 1 logs every module: expect a large file.
+**Undo:** set back exactly the two values you noted, with the same `daemon-log-outputs "<noted outputs>"` and
+`daemon-log-filters "<noted filters>"` commands. Do not use the empty string to restore: an empty output list falls
+back to the host's default output, which can differ from what was configured (for example a different journald
+level). The `daemon-timeout --timeout 0` setting has no undo command to read back; it ends with the next restart of the
+daemon, after which the configured timeout applies again. Delete the debug file when you no longer need it.
 
-**Any, persistent:** set `log_filters` and `log_outputs` in the daemon's configuration file, then restart the socket or
-the service (`systemctl restart virtqemud.socket`, or `libvirtd.socket`/`libvirtd.service`), as the kbase describes.
+**Persistent methods.** Both rewrite the configuration and then restart the libvirt daemon.
+
+> ⚠️ **State-changing.** Restarts the libvirt daemon of the compute. While it restarts, libvirt operations on this
+> compute (start, stop, new instances, migrations) wait. Precondition: no migration runs to or from the compute
+> (`openstack server migration list --host <compute> --status running` returns nothing, on a controller with admin
+> credentials), and on Kolla-Ansible `nova_libvirt` runs in the host's PID and cgroup namespaces (quick check 3 of
+> [restarting nova_libvirt](../lifecycle/restarting-nova-libvirt-does-not-stop-instances.md) prints `host host`);
+> otherwise every instance of the compute can stop or a migration can fail. Undo: revert the setting and restart again,
+> under the same precondition.
+
+**Kolla-Ansible:** set `nova_libvirt_logging_debug: true` in `/etc/kolla/globals.yml` (or in the host's `host_vars`, to
+limit it to one compute), then run `kolla-ansible reconfigure` limited to that compute. This rewrites `libvirtd.conf`
+with `log_level = 1` and restarts `nova_libvirt`. Undo by removing the variable and reconfiguring again. With no
+filters, level 1 logs every module: expect a large file.
+
+**Any:** set `log_filters` and `log_outputs` in the daemon's configuration file, then restart the socket or the service
+(`systemctl restart virtqemud.socket`, or `libvirtd.socket`/`libvirtd.service`), as the kbase describes. Whether the
+instances survive that restart on a package install depends on the distribution's unit configuration and was not
+checked here.
 
 ## The instance log: /var/log/libvirt/qemu/\<instance-name\>.log
 
@@ -172,6 +211,11 @@ docker exec nova_libvirt tail -n 50 /var/log/libvirt/qemu/<instance-name>.log
 The file is per instance and per host: after a live migration, the start on the destination is in the destination's
 file, and the source's file ends with the migration.
 
+**Kolla-Ansible:** no volume is mounted at `/var/log/libvirt` in `nova_libvirt` (see `nova_libvirt_default_volumes` in
+the nova-cell [defaults](https://github.com/openstack/kolla-ansible/blob/stable/2026.1/ansible/roles/nova-cell/defaults/main.yml)).
+The instance logs live in the container's own layer and are **lost when `nova_libvirt` is recreated**, for example on an
+upgrade or a redeploy. Copy the file out (`docker cp`) before such an operation if you still need it.
+
 ### The lines libvirt writes, and what they mean
 
 All the lines below are format strings from libvirt's source (v12.8.0), not captured lines. libvirt timestamps
@@ -181,7 +225,7 @@ them in UTC.
 |---|---|---|
 | `<timestamp>: starting up libvirt version: <version>, qemu version: <x.y.z>, kernel: <release>, hostname: <host>` followed by the full QEMU command line | Each QEMU start: boot, hard reboot, power on, incoming migration, unshelve | `qemuLogOperation` in `qemu_process.c` |
 | `<timestamp>: initiating migration` (or `resuming migration`) | On the **source**, when libvirt asks QEMU to start migrating | `qemu_migration.c` |
-| `<timestamp>: shutting down, reason=<reason>` | Each stop of the QEMU process, just before libvirt makes sure it is gone | `qemuProcessStop` in `qemu_process.c` |
+| `<timestamp>: shutting down, reason=<reason>` | Each stop of the QEMU process, written once the process has been killed or has exited, while libvirt cleans up | `qemuProcessStop` in `qemu_process.c` |
 | `<timestamp>: panic <details>` | The guest reported a panic through a pvpanic or Hyper-V crash device, when the instance has one | `processGuestPanicEvent` in `qemu_driver.c` |
 
 A command line that contains `-incoming` belongs to the destination side of a migration: QEMU starts there waiting for
@@ -209,15 +253,17 @@ which of the two actually stopped the guest. `nova-compute.log` has the matching
 
 ### The lines QEMU writes
 
-QEMU prefixes its error messages with its program name and, because libvirt starts it with `-msg timestamp=on`, an
-ISO 8601 UTC timestamp ([`util/error-report.c`](https://gitlab.com/qemu-project/qemu/-/blob/v11.1.2/util/error-report.c)).
-Messages worth knowing (formats from QEMU v11.1.2):
+Messages that QEMU reports through `error_report` carry its program name and, because libvirt starts it with
+`-msg timestamp=on`, an ISO 8601 UTC timestamp
+([`util/error-report.c`](https://gitlab.com/qemu-project/qemu/-/blob/v11.1.2/util/error-report.c)). Messages that the
+KVM code writes straight to stderr with `fprintf` have **no** prefix and no timestamp: place them by the libvirt lines
+around them. Messages worth knowing (formats from QEMU v11.1.2):
 
 | Message (format) | Meaning | Source |
 |---|---|---|
-| `terminating on signal <n> from pid <pid> (<process name>)` | QEMU received a catchable signal (15 is SIGTERM) and exits; the pid and name say who sent it. libvirt's destroy sends SIGTERM first, so after `reason=destroyed` this line naming the libvirt daemon is normal. Another sender is worth investigating | `qemu_kill_report` in `system/runstate.c` |
-| `KVM internal error. Suberror: <n>`, followed by `extra data[<i>]: ...` and, for suberror 1, `emulation failure` and a register dump | KVM could not handle a guest exit. The guest stops; check the kernel log of the host for KVM messages at the same time | `kvm_handle_internal_error` in `accel/kvm/kvm-all.c` |
-| `error: kvm run failed <errno text>` | The `KVM_RUN` call itself failed | `kvm_cpu_exec` in `accel/kvm/kvm-all.c` |
+| `terminating on signal <n> from pid <pid> (<process name>)`, or `terminating on signal <n>` when the sender is unknown | QEMU received a catchable signal (15 is SIGTERM) and exits; the pid and name say who sent it. libvirt's destroy sends SIGTERM first, so this line naming the libvirt daemon, just **before** `shutting down, reason=destroyed`, is normal. Another sender is worth investigating | `qemu_kill_report` in `system/runstate.c` |
+| `KVM internal error. Suberror: <n>` (no prefix), followed by `extra data[<i>]: ...` and, for suberror 1, `emulation failure` and a register dump | KVM could not handle a guest exit. The guest stops; check the kernel log of the host for KVM messages at the same time | `kvm_handle_internal_error` in `accel/kvm/kvm-all.c` |
+| `error: kvm run failed <errno text>` (no prefix) | The `KVM_RUN` call itself failed | `kvm_cpu_exec` in `accel/kvm/kvm-all.c` |
 
 A SIGKILL cannot be caught: when the kernel OOM killer kills QEMU, QEMU writes nothing. The instance log then only
 shows `shutting down, reason=crashed`, and the explanation is in `journalctl -k` on the host: the kernel's
