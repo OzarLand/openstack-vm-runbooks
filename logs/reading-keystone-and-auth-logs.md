@@ -4,13 +4,13 @@ kind: diagnostic
 status: draft
 openstack_releases: ["2026.1"]
 components: [keystone, memcached, nova, neutron]
-deployment_methods: [kolla-ansible, any]
+deployment_methods: [kolla-ansible]
 environment:
   topology: multinode
   network: any
   storage: any
   os: any
-risk: read-only
+risk: state-changing
 confirmed_by: []
 upstream_refs:
   - https://opendev.org/openstack/keystone/src/branch/stable/2026.1/keystone/server/flask/application.py
@@ -48,10 +48,14 @@ each controller. The middleware lines of a service are in that service's own log
 Every service pins `keystonemiddleware` to `WARN` through `oslo.log`'s default `default_log_levels`
 (`keystonemiddleware=WARN`, `keystoneauth=WARN` in `_options.py`). So the middleware's `INFO` lines below
 (`Rejecting request`, `Identity server rejected authorization`) do **not** appear unless you lower that level for the
-service; its `WARNING`, `ERROR` and `CRITICAL` lines do. Plan the investigation around the visible ones, and change
-`default_log_levels` for one service only when you need the rest (see
-[turning debug on for one service](where-openstack-logs-are-and-how-to-read-a-line.md#turning-debug-on-for-one-service-then-off);
-`debug = true` alone does not lower a pinned library).
+service; its `WARNING`, `ERROR` and `CRITICAL` lines do. `debug = true` alone does not lower a pinned library. Plan
+the investigation around the visible lines. If you need the rest, set `default_log_levels` for one service only:
+setting it **replaces the whole default list**, so copy the defaults from `oslo_log/_options.py` and change only
+`keystonemiddleware=WARN` to `keystonemiddleware=INFO`; the service needs a restart, as for `debug` in
+[turning debug on for one service](where-openstack-logs-are-and-how-to-read-a-line.md#turning-debug-on-for-one-service-then-off).
+
+> ⚠️ **State-changing.** Changing `default_log_levels` means editing the service's configuration and restarting it
+> on that host, with the same impact and the same undo as the debug procedure linked above.
 
 ## In Keystone's log
 
@@ -67,8 +71,10 @@ service; its `WARNING`, `ERROR` and `CRITICAL` lines do. Plan the investigation 
 Sources: `keystone/server/flask/application.py`, `keystone/token/provider.py`, `keystone/common/fernet_utils.py`.
 
 When Keystone cannot decrypt a token with any of its keys, the Fernet formatter raises `Could not recognize Fernet
-token` (`token_formatters.py`); during validation this surfaces as the 404 above, so on a node with different keys
-you see validation failures for tokens issued by another node rather than a dedicated error line.
+token` (`token_formatters.py`); the Fernet provider turns it into `TokenNotFound` (`token/providers/fernet/core.py`),
+and Keystone logs `NotFound` errors at DEBUG (`application.py`). So, **with debug on**, a node with different keys
+logs `Could not recognize Fernet token` for tokens issued by another node; at the default level there is no
+dedicated line, only the 404 to the caller. That string is the one to look for in a key-mismatch incident.
 
 ```bash
 # Kolla-Ansible, on each controller
@@ -85,8 +91,8 @@ answer in memcached).
 | Line (message text) | Level | Visible by default | What it means | Client gets |
 |---|---|---|---|---|
 | `Authorization failed for token` | WARNING | yes | Keystone said the **user's** token is not valid (expired, revoked, or unknown to this Keystone node). | 401 |
-| `Identity response: <body>` | WARNING (with the 401 path) / INFO (with the 404 path) | partly | Keystone's answer body, logged alongside the lines above and below. | — |
-| `Unable to validate token: <error>` | CRITICAL | yes | The middleware could not get an answer it trusts: Keystone unreachable or timing out (`ConnectFailure`, `RequestTimeout`, `DiscoveryFailure`), or the **service's own** credentials refused (`Identity server rejected authorization necessary to fetch token data`), or another error from Keystone (`Failed to fetch token data from identity server`). | 503, `The Keystone service is temporarily unavailable.` |
+| `Identity response: <body>` | WARNING (with the 401 path and the `Bad response code` path) / INFO (with the 404 path) | partly | Keystone's answer body, logged alongside the lines above and below. | — |
+| `Unable to validate token: <error>` | CRITICAL | yes | The middleware could not get an answer it trusts: Keystone unreachable or timing out (`ConnectFailure`, `RequestTimeout`, `DiscoveryFailure`), or the **service's own** credentials refused (`Identity server rejected authorization necessary to fetch token data`), or an HTTP error from Keystone (`Failed to fetch token data from identity server`, after the `Bad response code` line). | 503, `The Keystone service is temporarily unavailable.` |
 | `Bad response code while validating token: <status> <message>` | ERROR | yes | Keystone answered with an unexpected HTTP error (for example 500 or 503). | 503 |
 | `Identity server rejected authorization` | INFO | no | Keystone refused the service's own token (`[keystone_authtoken]` user, password or project wrong). The middleware retries once, then logs the CRITICAL line above. | — |
 | `Rejecting request` | INFO | no | The request is refused because the token is missing or invalid. | 401 |
