@@ -1,8 +1,8 @@
 ---
 title: Stale records. Instances stuck in BUILD, ERROR or deleting, orphan ports and attachments, phantom allocations
 kind: runbook
-status: draft
-openstack_releases: [unrecorded]
+status: lab-verified
+openstack_releases: ["2026.1"]
 components: [nova, placement, neutron, cinder, mariadb]
 deployment_methods: [any]
 environment:
@@ -11,12 +11,13 @@ environment:
   storage: any
   os: any
 risk: destructive
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-26, note: "full procedure on a disposable lab except the Cinder parts (no Cinder): stuck build, stuck delete, orphan port, phantom and missing allocations cleaned; archive and purge need --all-cells in nova_api" }
 upstream_refs:
   - https://docs.openstack.org/nova/latest/cli/nova-manage.html
   - https://docs.openstack.org/cinder/latest/cli/cinder-manage.html
 authored_by: agent:ozarland-author
-last_verified: 2026-10-18
+last_verified: 2026-10-26
 ---
 
 # Stale records. Instances stuck in BUILD, ERROR or deleting, orphan ports and attachments, phantom allocations
@@ -50,11 +51,12 @@ blocked by quota, capacity planning on wrong numbers, slower incident response.
 
 ```bash
 # Instances in a transitional state for longer than any operation should take
-openstack server list --all-projects --long -c ID -c Status -c "Task State" -c Host -c Updated \
+openstack server list --all-projects --long -c ID -c Status -c "Task State" -c Host \
   | awk '$4=="BUILD" || $4=="ERROR" || $6!="None"'
+# (there is no "Updated" column in this list; read it per instance with: openstack server show <server-id> -c updated)
 
 # Placement allocations without a matching instance
-nova-manage placement audit --verbose              # read-only without --delete
+nova-manage placement audit --verbose              # read-only without --delete; exit code 3 when it finds some
 
 # Ports whose device no longer exists (port list has no device_id column, so read it per port)
 for p in $(openstack port list --device-owner compute:nova -f value -c ID); do
@@ -66,7 +68,10 @@ done
 openstack volume list --all-projects --status in-use -c ID -c "Attached to" -f value
 ```
 
-**Kolla-Ansible:** `nova-manage` runs in the `nova_api` container, `cinder-manage` in `cinder_api`.
+**Kolla-Ansible:** `nova-manage` runs in the `nova_api` container (`sudo docker exec nova_api nova-manage ...`),
+`cinder-manage` in `cinder_api`. The `nova_api` container's `[database]` is the cell0 database: `db
+archive_deleted_rows` and `db purge` need `--all-cells` there, or they only touch cell0. `virsh` runs in the
+`nova_libvirt` container. `openstack resource provider ...` needs the `osc-placement` client plugin.
 
 ## Diagnosis
 
@@ -76,7 +81,9 @@ For each stale record, establish what is real before touching it:
   Did the build time out? Check `nova-compute.log` for the UUID. Usually safe to delete via the API.
 - **Instance stuck in `deleting`**: the compute received the delete and never finished (host died, storage hung).
   Check the host and the domain. If the host is gone, a deletion will complete once Nova considers it `down`
-  (local delete), or needs `reset-state` first.
+  (local delete), or needs `reset-state` first. A local delete removes the record, the ports and the allocation,
+  not the domain: if the host is only stopped, the domain keeps running until `nova-compute` returns and processes
+  the delete it had queued.
 - **Instance in `ERROR`**: read `fault`. Many are simply failed builds (delete them). Some are real instances whose
   last operation failed (resize, migration): the domain may be running and healthy; reset the state instead of
   deleting.
@@ -86,7 +93,10 @@ For each stale record, establish what is real before touching it:
   `cinder --os-volume-api-version 3.27 attachment-list --all-tenants 1 --volume-id <volume-id>` with
   `openstack server show` on the instance, if it exists.
 - **Phantom allocation**: `placement audit` lists allocations whose consumer (instance) no longer exists, or exists
-  on a different host than the allocation says (left over from a failed migration or evacuation).
+  on a different host than the allocation says (left over from a failed migration or evacuation). It also lists
+  the allocation of an instance still in `BUILD` without a host (for example a build queued for a stopped
+  `nova-compute`) as "can be deleted": clear stuck builds first, and check each consumer UUID with
+  `openstack server show` before `--delete`.
 
 ## Possible causes
 
@@ -105,10 +115,12 @@ Work with project tools in this order. Take a database backup before anything th
 > then deleting is the usual path for a truly dead instance.
 
 ```bash
-openstack server set --state error <server-id>      # make it deletable
+openstack server set --state error --auto-approve <server-id>      # make it deletable
 openstack server delete <server-id>
 # Instance whose domain is actually running fine after a failed operation:
-openstack server set --state active <server-id>
+openstack server set --state active --auto-approve <server-id>
+# python-openstackclient 10.x asks for confirmation without --auto-approve; without a terminal it does nothing.
+# An instance in BUILD can usually be deleted directly, without the reset.
 ```
 
 If the delete hangs because the host is gone, Nova performs a local delete once the compute service is `down`; if
@@ -160,8 +172,10 @@ openstack volume set --state available --detached <volume-id>
 > example with `--before <date>`). Cannot be undone without the backup.
 
 ```bash
-nova-manage db archive_deleted_rows --until-complete --verbose
-nova-manage db purge --all --verbose          # or --before <date>
+nova-manage db archive_deleted_rows --until-complete --all-cells
+nova-manage db purge --all --all-cells --verbose          # or --before <date>
+# 2026.1: --all-cells with --verbose archives, then fails printing the summary
+# (ValueError: not enough values to unpack); leave out --verbose. Exit code 1 means rows were archived.
 cinder-manage db purge <days>
 ```
 
@@ -181,8 +195,23 @@ row before and after, and the reason, in the change record.
 openstack server list --all-projects --long | awk '$4=="BUILD" || $6!="None"'   # empty or explainable
 nova-manage placement audit --verbose                                         # no orphan allocations
 openstack quota show --usage <project>                                        # matches reality
-openstack resource provider usage show <rp-uuid>                              # matches what the host runs
+openstack resource provider usage show <rp-uuid>                              # matches what the host runs (osc-placement)
 ```
+
+## Lab observations
+
+Kolla-Ansible 2026.1 all-in-one, no Cinder. `nova-compute` stopped through its systemd unit, then: a delete left an
+instance `ACTIVE`/`deleting`; a create stayed `BUILD`/`scheduling` with no host; an orphan port and a phantom
+allocation were made by hand, and one running instance's allocation was deleted.
+
+- The quick checks found all of them. `placement audit` also listed the stuck build's allocation as deletable.
+- Once the compute service was reported `down` (about 60 s after it stopped), a second delete completed at once
+  (`instance's host ... is down, deleting from database`), but the domain kept running for 3 minutes, until
+  `nova-compute` started and processed the queued delete.
+- `audit --delete`, `heal_allocations`, `port delete`, the reset to `error` then `active` of a running instance, and
+  the delete of the stuck build all worked; quota usage and the provider usage then matched the 3 instances left.
+- Archive without `--all-cells` in `nova_api` archived only cell0 (1 instance); with `--all-cells` the 6 deleted
+  cell1 instances went to the shadow tables. Volume steps not run (no Cinder).
 
 ## Validity and limits
 
