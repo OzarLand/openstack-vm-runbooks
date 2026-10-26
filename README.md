@@ -71,6 +71,7 @@ A page written for one deployment method is welcome; variants for other methods 
 | Instances answer ping, but large transfers stall | [Tunnel MTU mismatch](networking/tunnel-mtu-mismatch-large-packets-dropped.md) |
 | A snapshot stays in `image_uploading`, its image `queued` or `saving` | [Snapshot never finishes](lifecycle/snapshot-stuck-in-image-uploading.md) |
 | Every API call fails at once | [Expired certificates or Fernet keys](diagnostics/expired-certificates-and-fernet-keys-break-every-api-call.md) |
+| An API answers 503 "No server is available to handle this request", or the VIP moves between nodes | [API 503, backend DOWN, VIP flapping](recovery/api-returns-503-haproxy-backend-down-or-vip-flapping.md) |
 | Every API fails, the logs show database errors (`WSREP has not yet prepared node`) | [Galera lost quorum](recovery/galera-cluster-lost-quorum-database-unavailable.md) |
 | VM creation fails everywhere, running instances are fine | [Check the shared dependencies first](diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md) |
 | A new instance is ACTIVE but never got an IP address | [DHCP agents down](networking/new-instance-gets-no-ip-dhcp-agents-down.md) |
@@ -164,6 +165,7 @@ lab), **documentation** (upstream documentation and source), **production incide
 | Page | Components | Releases | Status | Source |
 |---|---|---|---|---|
 | [After a compute reboot, instances stay SHUTOFF or come back without network](recovery/after-a-compute-reboot-instances-shutoff-or-without-network.md) | nova, neutron, ovs, libvirt | 2026.1 | lab-verified | documentation |
+| [The API returns 503, an HAProxy backend is DOWN, or the VIP flaps or sits on two nodes](recovery/api-returns-503-haproxy-backend-down-or-vip-flapping.md) | haproxy, keepalived, keystone, nova, neutron | 2026.1 | draft | documentation |
 | [Compute host unreachable, instances down. Fence before you evacuate](recovery/compute-host-failure-fence-before-evacuate.md) | nova, libvirt, cinder, ceph | 2026.1 | lab-verified | book, lab run |
 | [Every API fails on database errors. The Galera cluster lost quorum, or stopped on every node](recovery/galera-cluster-lost-quorum-database-unavailable.md) | mariadb, galera, kolla-ansible, nova, neutron, keystone | 2026.1 | draft | documentation |
 | [nova-compute is down and the compute refuses an SSH login, but the host is alive](recovery/nova-compute-down-host-alive-ssh-refused.md) | nova, libvirt, ssh | 2026.1 | lab-verified | lab run |
