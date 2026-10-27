@@ -58,7 +58,8 @@ an outage. Verify them for your own platform before an incident; they depend on 
    exercise: stop the APIs and the bus, then check that an instance keeps its connectivity, renews its lease, and
    that a router failover still works. Write the result down for your platform.
    **Kolla-Ansible 2026.1:** each container is wrapped in a systemd unit `kolla-<container>-container.service` with
-   `Restart=always`, so a plain `docker stop` is undone about a minute later. Stop the unit instead
+   `Restart=always`, so a plain `docker stop` is undone after `RestartSec` (11 s with the Kolla defaults, 59 s on
+   the lab, which sets `docker_client_timeout: 600`). Stop the unit instead
    (`systemctl stop kolla-<container>-container.service`) and start it again the same way. This stops the control
    plane: do it on a lab or in a planned recovery exercise only, never to diagnose a live incident.
 
