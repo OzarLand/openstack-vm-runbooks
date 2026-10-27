@@ -92,8 +92,9 @@ A volume that stays in `deleting` means step 2 never ran or never finished: the 
   driver flattens them first (`Image <pool>/<image>@<snap> is dependent on the image <volume>.`), which takes time for
   large clones.
 - The driver first tries to remove the image; the RBD trash is a fallback when the removal fails (snapshots
-  remain). `enable_deferred_deletion` only sets that fallback's delay: a trashed image is deleted after
-  `deferred_deletion_delay`.
+  remain). `enable_deferred_deletion` sets that fallback's delay (`deferred_deletion_delay`) and starts Cinder's
+  periodic trash purge (every `deferred_deletion_purge_interval`, 60 s by default). Without it (the default), a
+  trashed image stays in the RBD trash, and keeps its space, until someone or a Ceph trash purge schedule purges it.
 - **Encrypted volumes:** the API deletes the volume's encryption key from the key manager **before** sending the
   delete. From then on the volume cannot be decrypted, even if it later comes back `available`. If the key manager
   fails, the volume goes to `error_deleting` with `Unable to delete encryption key for volume` in the API's answer and
@@ -205,7 +206,7 @@ openstack quota show --usage <project>            # volumes and gigabytes in use
 ```
 
 On Ceph: `rbd ls <pool> | grep <volume-id>` shows nothing, or only a `.deleted` image kept for its clones; `rbd trash
-ls <pool>` shows whether it waits in the trash.
+ls <pool>` shows whether it waits in the trash: without `enable_deferred_deletion`, Cinder never purges it.
 
 ## Validity and limits
 

@@ -194,7 +194,8 @@ uses noVNC, enable it in that compute's configuration:
 
 **Kolla-Ansible:** remove the override that disables it (`[vnc] enabled = false`), wherever it is:
 `/etc/kolla/config/global.conf`, `/etc/kolla/config/nova.conf`, `/etc/kolla/config/nova/nova-compute.conf`, or the
-per-host `/etc/kolla/config/nova/<inventory-hostname>/nova.conf`; then
+per-host `/etc/kolla/config/nova/<inventory-hostname>/nova.conf` and
+`/etc/kolla/config/nova/<inventory-hostname>/nova-compute.conf`; then
 `kolla-ansible reconfigure -i <inventory> --tags nova --limit <compute>`.
 
 **Any:** set `[vnc] enabled = true` in that compute's `nova.conf` and restart `nova-compute`.
