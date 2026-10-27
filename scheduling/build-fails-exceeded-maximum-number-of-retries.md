@@ -13,7 +13,6 @@ environment:
 risk: state-changing
 confirmed_by:
   - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, multinode (3 controllers, 2 computes)", date: 2026-10-27, note: "on a disposable lab: cause 3 (an image property both computes reject at spawn) and cause 1 (one compute broken the same way by a nova.conf change) reproduced; quick checks, disable, enable and Verification run; cause 2 not reproduced as such, the Any: lines not run" }
-  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, multinode (3 controllers, 2 computes)", date: 2026-10-27, note: "on a disposable lab: cause 3 (an image property both computes reject at spawn) and cause 1 (one compute broken the same way by a nova.conf change) reproduced; quick checks, disable, enable and Verification run; cause 2 not reproduced as such, the Any: lines not run" }
 upstream_refs:
   - https://docs.openstack.org/nova/2026.1/configuration/config.html#scheduler.max_attempts
   - https://docs.openstack.org/nova/2026.1/configuration/config.html#filter_scheduler.build_failure_weight_multiplier

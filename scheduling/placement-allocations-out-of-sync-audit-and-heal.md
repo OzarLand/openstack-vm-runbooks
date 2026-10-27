@@ -13,7 +13,6 @@ environment:
 risk: destructive
 confirmed_by:
   - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, multinode (3 controllers, 2 computes)", date: 2026-10-27, note: "the three causes injected by hand with osc-placement on a disposable lab (orphan consumer, stale second provider, deleted allocation); quick checks, saving, audit, audit --delete, allocation unset, heal_allocations (one instance, --force, delete then heal) and Verification run; the undo from the saved JSON, heal of every instance, No valid host and a real evacuation not run" }
-  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, multinode (3 controllers, 2 computes)", date: 2026-10-27, note: "the three causes injected by hand with osc-placement on a disposable lab (orphan consumer, stale second provider, deleted allocation); quick checks, saving, audit, audit --delete, allocation unset, heal_allocations (one instance, --force, delete then heal) and Verification run; the undo from the saved JSON, heal of every instance, No valid host and a real evacuation not run" }
 upstream_refs:
   - https://docs.openstack.org/nova/2026.1/admin/troubleshooting/orphaned-allocations.html
   - https://docs.openstack.org/nova/2026.1/cli/nova-manage.html#placement-audit
