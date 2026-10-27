@@ -143,8 +143,9 @@ are logged by `ovn-controller`, in `ovn-controller.log`, not as `br-int<->…` l
 
 | Message (format) | Meaning | Source |
 |---|---|---|
-| `<name>: connecting...` then `<name>: connected` | (Re)connection to a controller or to the database | `rconn.c`, `reconnect.c` |
-| `<name>: connection failed (<error>)`, `<name>: connection timed out` | The controller or database is not answering. `Connection refused` on `127.0.0.1:6633` means the Neutron agent is not listening (stopped, restarting) | `rconn.c` |
+| `<name>: connecting...` then `<name>: connected` | (Re)connection to a controller or to the database. For OpenFlow, `rconn.c` logs `connected` at INFO only for reliable connections (such as a configured controller), and at DBG otherwise | `rconn.c`, `reconnect.c` |
+| `<name>: connection failed (<error>)`, `<name>: connection timed out` | An OpenFlow controller is not answering. `Connection refused` on `127.0.0.1:6633` means the Neutron agent is not listening (stopped, restarting) | `rconn.c` |
+| `<name>: connection attempt failed (<error>)`, `<name>: connection attempt timed out` | The same for a database (JSON-RPC) connection, such as a client of `ovsdb-server` | `reconnect.c` |
 | `<name>: connection closed by peer`, `<name>: connection dropped (<error>)` | The other side went away | `reconnect.c` |
 | `<name>: no response to inactivity probe after <n> seconds, disconnecting` | The other side is alive enough to keep the socket open but did not answer for `<n>` seconds: an overloaded or blocked agent, `ovsdb-server` or `ovs-vswitchd` | `reconnect.c`, `rconn.c` |
 | `<name>: waiting <n> seconds before reconnect` | Back-off between attempts; the wait doubles up to a maximum. Logged by `rconn.c` for OpenFlow connections (whole seconds) and by `reconnect.c` for database connections | `rconn.c`, `reconnect.c` |
