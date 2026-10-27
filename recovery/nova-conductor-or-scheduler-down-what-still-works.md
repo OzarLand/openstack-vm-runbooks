@@ -10,7 +10,7 @@ environment:
   network: any
   storage: any
   os: any
-risk: state-changing
+risk: destructive
 confirmed_by: []
 upstream_refs:
   - https://docs.openstack.org/nova/2026.1/admin/architecture.html
@@ -51,7 +51,7 @@ database.
 
 ### nova-scheduler down on every controller
 
-- New instances stay in `BUILD` / `scheduling` for up to 30 minutes, then go to `ERROR`. Their fault is the
+- New instances stay in `BUILD` / `scheduling` for about a minute (`rpc_response_timeout`), then go to `ERROR`. Their fault is the
   exception's class name, not `No valid host` (`exception_to_dict` in `nova/compute/utils.py` keeps only the class
   name of a non-Nova exception):
 
@@ -66,7 +66,7 @@ database.
   ```text
   ERROR nova.conductor.manager [...] Failed to schedule instances
   ...
-  oslo_messaging.exceptions.MessagingTimeout: Timed out waiting for a reply to message ID <message-id>
+  oslo_messaging.exceptions.MessagingTimeout: Timed out waiting for a reply <reply-queue> to message ID <message-id>.
   ```
 
 - In RabbitMQ, the `scheduler` queue has no consumer.
@@ -77,9 +77,9 @@ database.
 |---|---|---|
 | Running instances | unaffected | unaffected |
 | `openstack server list`, `show`, API reads | work (nova-api reads the databases itself) | work |
-| New instances | wait in `BUILD`, finish when conductor is back | wait up to `long_rpc_timeout` (1800 s), then `ERROR` in cell0 |
+| New instances | wait in `BUILD`, finish when conductor is back | fail after about `rpc_response_timeout` (60 s), `ERROR` in cell0 |
 | Resize, cold migration, live migration without a host, evacuate | wait in the queue | wait, then fail |
-| Start, stop, reboot of existing instances | sent to the compute, which needs the conductor for its database updates: they stall | work |
+| Start, stop, reboot of existing instances | sent to the compute, which needs the conductor for its database updates: they time out after `rpc_response_timeout` and can leave a `task_state` set (clear it with `openstack server set --state active` or `--state error` once the conductor is back, then repeat the action) | work |
 | Compute services | reported `down` after `service_down_time` (60 s) | stay `up` |
 | Danger | deleting an instance while its compute is reported `down` is a local delete (see Diagnosis) | none beyond failed requests |
 
@@ -92,8 +92,8 @@ Read-only. On a controller.
 sudo docker ps -a --filter name=nova_conductor --filter name=nova_scheduler --filter name=nova_super_conductor \
   --format '{{.Names}} {{.Status}}'
 
-# 2. Do their queues have consumers?
-sudo docker exec rabbitmq rabbitmqctl list_queues name messages consumers | grep -E '^(conductor|scheduler)\b'
+# 2. Do their queues have consumers? (<vhost> is the one in transport_url, "/" by default on Kolla-Ansible)
+sudo docker exec rabbitmq rabbitmqctl list_queues -p <vhost> name messages consumers | grep -E '^(conductor|scheduler)\b'
 #    expected: consumers > 0 on both. 0 consumers and messages growing on conductor: no conductor listening.
 
 # 3. Their logs (Kolla-Ansible)
@@ -123,10 +123,12 @@ report status.`
 
 ### What the scheduler does, so what fails without it
 
-The conductor *calls* the scheduler (`select_destinations`) and waits for the answer. This call uses
-`[DEFAULT] long_rpc_timeout`, 1800 s by default (`nova/scheduler/rpcapi.py`, `nova/conf/rpc.py`), not the usual
-60 s `rpc_response_timeout`. So a build waits 30 minutes, then the conductor logs `Failed to schedule instances`
-and buries the instance in cell0 (`_bury_in_cell0` in `nova/conductor/manager.py`): it creates the instance record
+The conductor *calls* the scheduler (`select_destinations`) and waits for the answer. `nova/scheduler/rpcapi.py`
+prepares this call with `timeout=CONF.long_rpc_timeout` (1800 s) and `call_monitor_timeout=CONF.rpc_response_timeout`
+(60 s). With a call monitor, oslo.messaging raises `MessagingTimeout` as soon as no heartbeat has come for
+`call_monitor_timeout`, and only a scheduler that picked up the message sends heartbeats. `long_rpc_timeout` bounds a
+call that a live scheduler is working on. So with no scheduler consuming, a build fails after about 60 s: the
+conductor logs `Failed to schedule instances` and buries the instance in cell0 (`_bury_in_cell0` in `nova/conductor/manager.py`): it creates the instance record
 in the cell0 database with `vm_state` `error` and the exception as fault.
 
 ### cell0, where failed builds live
@@ -181,22 +183,31 @@ Restarting Nova services while RabbitMQ is partitioned or blocked does not help:
 
 - Builds queued while the conductor was down finish by themselves; check that none stays in `BUILD` after a few
   minutes.
-- Builds that timed out while the scheduler was down are in `ERROR` in cell0. They are not retried: delete them and
-  build again.
-
-> ⚠️ **State-changing.** Deletes the failed instance record from cell0. Nothing exists on any compute for it.
-> Precondition: `openstack server show <server-id>` shows `ERROR` and an empty `OS-EXT-SRV-ATTR:host`. Undo: none;
-> build the instance again.
+- Builds that timed out while the scheduler was down are in `ERROR` in cell0. They are not retried: their owners
+  build them again, and the failed records can be deleted. `--status ERROR` lists `ERROR` instances of every cell,
+  including real instances on computes with disks and volumes: select only the ones of the outage.
 
 ```bash
-openstack server list --all-projects --status ERROR -c ID -c Name -c Host --long
+openstack server list --all-projects --status ERROR --long -c ID -c Name -c Host -c "Project ID"
+openstack server show <server-id> -c OS-EXT-SRV-ATTR:host -c fault -c created
+```
+
+> 🛑 **Destructive.** Deletes the instance record and its fault, which is the only trace of why it failed. Who is
+> affected: the project that owns it, which must build again. Precondition: `OS-EXT-SRV-ATTR:host` is empty, the
+> fault is `MessagingTimeout` or `No valid host` and `created` falls in the outage window, and you have recorded
+> the ID, project and fault. Undo: none.
+
+```bash
 openstack server delete <server-id>
 ```
 
 ## Verification
 
+> ⚠️ **State-changing.** The last two commands create and delete a test instance. Needs quota, an image, a flavor
+> and a network.
+
 ```bash
-sudo docker exec rabbitmq rabbitmqctl list_queues name messages consumers | grep -E '^(conductor|scheduler)\b'
+sudo docker exec rabbitmq rabbitmqctl list_queues -p <vhost> name messages consumers | grep -E '^(conductor|scheduler)\b'
 # expected: consumers > 0, messages near 0
 openstack compute service list
 # expected: every nova-conductor, nova-scheduler and nova-compute up
@@ -204,13 +215,11 @@ openstack server create --image <image> --flavor <flavor> --network <network> --
 openstack server delete --wait <test-name>
 ```
 
-> ⚠️ **State-changing.** The test creates and deletes an instance. Needs quota, an image, a flavor and a network.
-
 ## Validity and limits
 
 - Written from Nova 2026.1: `nova/conductor/api.py` (`wait_until_ready`), `nova/conductor/manager.py`
   (`schedule_and_build_instances`, `_bury_in_cell0`), `nova/compute/utils.py` (`exception_to_dict`), `nova/scheduler/rpcapi.py` (`select_destinations` with
-  `long_rpc_timeout`), `nova/servicegroup/drivers/db.py`, `nova/conf/rpc.py`, `nova/conf/api.py`
+  `long_rpc_timeout` and `call_monitor_timeout`), `nova/servicegroup/drivers/db.py`, `nova/conf/rpc.py`, `nova/conf/api.py`
   (`list_records_by_skipping_down_cells`), `nova/compute/api.py` (local delete), and Kolla-Ansible 2026.1 (`nova`
   and `nova-cell` role defaults: `nova_scheduler`, `nova_conductor`, `nova_super_conductor` only with
   `enable_cells`). The MessagingTimeout text is oslo.messaging's. Not reproduced on a lab.
