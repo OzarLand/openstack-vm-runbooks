@@ -149,6 +149,7 @@ more serious). An expired TLS certificate shows as connection errors (`ConnectFa
 
 ## Related
 
+- [401 for tokens that should be valid: Fernet keys differ between Keystone nodes, or a clock is off](../recovery/keystone-401-for-every-request-fernet-keys-or-clock.md) (the fix)
 - [Every API call fails at once: expired certificates or Fernet keys](../diagnostics/expired-certificates-and-fernet-keys-break-every-api-call.md)
 - [Where the OpenStack logs are, and how to read one log line](where-openstack-logs-are-and-how-to-read-a-line.md)
 - [Logs index](README.md)

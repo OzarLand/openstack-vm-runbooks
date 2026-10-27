@@ -17,6 +17,7 @@ These pages explain how to read; the fixes are in the runbooks of the other fold
 | [Reading the Cinder logs](reading-cinder-logs.md) | cinder-volume driver start and heartbeat, create failures, cinder-scheduler filtering, os-brick iSCSI lines on the compute | 2026.1 | draft |
 | [Following one request, instance, port or volume through the logs of every service and host](tracing-one-request-across-services-and-hosts.md) | Which id links which hop, grep and journalctl recipes across hosts, the port-id chain of network-vif-plugged, time zones and clock offset | 2026.1 | draft |
 | [Reading the MariaDB and Galera logs, and the oslo.db lines that go with them](reading-mariadb-galera-logs.md) | Error log format, WSREP state changes, quorum and membership, IST and SST, client errors, oslo.db exceptions | 2026.1 | draft |
+| [Reading the Glance logs, and the image lines in Nova's logs](reading-glance-logs.md) | Store refusals at upload (full, quota, permissions), Nova's download and snapshot lines | 2026.1 | draft |
 | [Reading the Nova logs. What normal looks like, and what the common lines mean](reading-nova-logs.md) | nova-api, nova-scheduler, nova-conductor, nova-compute: start-up, periodic lines, common error lines and what to read next | 2026.1 | draft |
 | [Reading the HAProxy, keepalived and memcached logs](reading-haproxy-keepalived-memcached-logs.md) | Backend DOWN and UP lines, 503s and termination states in request lines, VRRP state changes and the check_alive script, memcached counters | 2026.1 | draft |
 | [Reading the RabbitMQ logs, and the oslo.messaging lines that go with them](reading-rabbitmq-logs.md) | Broker log format, Khepri or Mnesia, nodes down and partitions, memory and disk alarms, flow control, connection churn and heartbeats, client reconnect lines | 2026.1 | draft |
@@ -33,9 +34,6 @@ These pages explain how to read; the fixes are in the runbooks of the other fold
 
 ## Planned
 
-1. Per service, what normal looks like and what the common error lines mean: Nova, Placement, Neutron and its
-   agents, OVN, Keystone, Glance, Cinder, Heat, Octavia.
-2. Infrastructure logs: RabbitMQ, MariaDB/Galera, HAProxy, keepalived, memcached.
-3. Hypervisor and system logs: libvirt and QEMU, Open vSwitch, the kernel, systemd and the journal, the container
-   engine, chrony, iSCSI and multipath, Ceph clients.
-4. A dictionary of frequent error messages: what each means, its usual causes, and the next log to read.
+1. Per service: Glance, Heat and Octavia (pages in review).
+2. System logs: chrony and clock skew, iSCSI and multipath, NFS and Ceph clients (pages in review).
+3. A dictionary of frequent error messages: what each means, its usual causes, and the next log to read.

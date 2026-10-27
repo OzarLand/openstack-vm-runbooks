@@ -81,6 +81,7 @@ configuration. With `log_dir` alone, `oslo.log` names the file after the program
 | RabbitMQ | `rabbitmq` | `/var/log/kolla/rabbitmq/rabbit@<hostname>.log` | controllers |
 | MariaDB / Galera | `mariadb` | `/var/log/kolla/mariadb/mariadb.log` | controllers |
 | HAProxy | `haproxy` | under `/var/log/kolla/haproxy/` (sent through syslog to fluentd, file `haproxy_latest`) | load balancer nodes |
+| ProxySQL (database proxy, default with MariaDB) | `proxysql` | `/var/log/kolla/proxysql/proxysql.log` (`errorlog` in `proxysql.yaml.j2`) | load balancer nodes |
 | Open vSwitch | `openvswitch_vswitchd`, `openvswitch_db` | `/var/log/kolla/openvswitch/ovs-vswitchd.log`, `ovsdb-server.log` | computes, network nodes |
 | OVN | `ovn_controller`, `ovn_northd`, `ovn_nb_db`, `ovn_sb_db` | `/var/log/kolla/openvswitch/ovn-controller.log`, `ovn-northd.log`, `ovn-nb-db.log`, `ovn-sb-db.log` | computes, controllers |
 
