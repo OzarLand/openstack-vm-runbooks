@@ -36,8 +36,8 @@ $ openstack volume show <volume-id> -c status -c attachments -c os-vol-host-attr
 Or the delete is refused at once:
 
 ```text
-Invalid volume: Volume <volume-id> status must be available or error or error_restoring or error_extending or
-error_managing and must not be migrating, attached, belong to a group, have snapshots, awaiting a transfer, or be
+Invalid volume: Volume status must be available or error or error_restoring or error_extending or error_managing
+and must not be migrating, attached, belong to a group, have snapshots, awaiting a transfer, or be
 disassociated from snapshots after volume transfer.
 ```
 
@@ -87,10 +87,23 @@ A volume that stays in `deleting` means step 2 never ran or never finished: the 
 
 - A volume that still has an RBD **watcher** (a client that has it open, such as a QEMU process on a compute) raises
   `ImageBusy`, logged as `ImageBusy error raised while deleting RBD volume`, and the volume goes back to `available`.
-- A volume with copy-on-write clones (volumes or images created from its snapshots) is renamed `<volume-name>.deleted`
-  and kept until its clones are gone; or, when it has snapshots, the driver flattens the dependent images first
-  (`Image <pool>/<image>@<snap> is dependent on the image <volume>.`), which takes time for large clones.
-- With `enable_deferred_deletion`, the image is moved to the RBD trash and deleted after `deferred_deletion_delay`.
+- A volume that other volumes were cloned from (it has a `<volume-name>.clone_snap` snapshot) is renamed
+  `<volume-name>.deleted` and kept until those clones are gone; when it has other snapshots with dependent images, the
+  driver flattens them first (`Image <pool>/<image>@<snap> is dependent on the image <volume>.`), which takes time for
+  large clones.
+- The driver first tries to remove the image; the RBD trash is a fallback (when snapshots remain), and with
+  `enable_deferred_deletion` the image is moved to the trash and deleted after `deferred_deletion_delay`.
+- **Encrypted volumes:** the API deletes the volume's encryption key from the key manager **before** sending the
+  delete. From then on the volume cannot be decrypted, even if it later comes back `available`. If the key manager
+  fails, the volume goes to `error_deleting` with `Unable to delete encryption key for volume` in the API's answer and
+  log, and nothing reaches `cinder-volume`.
+
+### When `cinder-volume` restarts
+
+A delete is recorded as a cleanable operation before it is sent. A message still queued is consumed when
+`cinder-volume` comes back, and a delete that `cinder-volume` had taken and not finished is run again at start-up
+(`CleanableManager` in `cinder/manager.py`, logging `Initiating service <id> cleanup`; `_do_cleanup` in
+`cinder/volume/manager.py` deletes volumes found in `deleting`).
 
 ## Possible causes
 
@@ -117,14 +130,23 @@ to `available`. Often a compute that still has the volume attached although Cind
 
 Attached, snapshots, migrating, in a group or transfer: the `Invalid volume` message names the conditions.
 
+### Cause 6: the key manager refused to delete the encryption key
+
+Encrypted volume, `error_deleting`, `Unable to delete encryption key for volume` from the API, nothing in
+`cinder-volume`'s log.
+
 ## Resolution
 
 ### For cause 1: bring `cinder-volume` back, then delete again
 
-Start the service ([RabbitMQ](../recovery/rabbitmq-partition-or-alarm-rpc-timeouts.md) if the bus is the cause). A
-volume left in `deleting` is not retried by Cinder on its own: set it to `error`, then delete again.
+Start the service ([RabbitMQ](../recovery/rabbitmq-partition-or-alarm-rpc-timeouts.md) if the bus is the cause), then
+**wait**: the delete may still be queued, and an interrupted one is run again at start-up. Read the service's log for
+the volume: `Initiating service … cleanup`, then `Deleted volume successfully.` Only if the volume is still in
+`deleting` once the service is up and its log shows no delete in progress for it, set it to `error` and delete again.
 
-> ⚠️ **State-changing.** `volume set --state error` changes Cinder's record only, not the backend. Undo:
+> ⚠️ **State-changing.** `volume set --state error` changes Cinder's record only, not the backend. Precondition: no
+> delete of this volume in progress in the `cinder-volume` log (a reset during a delete that is still running races
+> it). For an encrypted volume, the key is already gone: the data is not recoverable whatever the status says. Undo:
 > `openstack volume set --state <previous-state> <volume-id>`.
 
 ```bash
@@ -138,6 +160,9 @@ openstack volume set --state error <volume-id>
 openstack volume delete <volume-id>
 ```
 
+`openstack volume delete --force <volume-id>` (admin) has the same effect as the reset and the delete together, with
+the same 🛑 and the same precondition.
+
 ### For cause 2: fix the backend, then delete again
 
 Fix what the traceback names, then delete again (the 🛑 above applies). A volume in `error_deleting` is not in the
@@ -145,7 +170,8 @@ list of states the API accepts: set it to `error` first, as for cause 1.
 
 ### For cause 3: wait
 
-Follow the log. On Ceph, `rbd status <pool>/volume-<volume-id>` shows its watchers and `rbd children` its clones
+Follow the log, and do not reset the state or delete again while the flatten runs: it would race the delete Cinder is
+running. On Ceph, `rbd status <pool>/volume-<volume-id>` shows its watchers and `rbd children` its clones
 (read-only).
 
 ### For cause 4: find who still uses the volume, never force it
@@ -160,8 +186,14 @@ keeps writing to storage that Cinder considers free.
 
 ### For cause 5: remove what the API names
 
-Detach it, delete its snapshots (or use `--cascade`), wait for the migration, or take it out of its group, then delete
-again (the 🛑 above applies). `--force` drops only the status condition.
+Detach it, delete its snapshots, wait for the migration, or take it out of its group, then delete again (the 🛑 above
+applies). `--cascade` deletes the volume **and its snapshots** in one call: the 🛑 then covers the snapshots too.
+`--force` drops only the status condition.
+
+### For cause 6: fix the key manager, then delete again
+
+Fix the key manager (Barbican, or the configured backend) from the API log, then reset to `error` and delete again
+(the ⚠️ and 🛑 above apply).
 
 ## Verification
 
@@ -170,14 +202,15 @@ openstack volume show <volume-id>                 # No volume with a name or ID 
 openstack quota show --usage <project>            # volumes and gigabytes in use went down
 ```
 
-On Ceph: `rbd ls <pool> | grep <volume-id>` shows nothing, or only a `.deleted` image kept for its clones.
+On Ceph: `rbd ls <pool> | grep <volume-id>` shows nothing, or only a `.deleted` image kept for its clones; `rbd trash
+ls <pool>` shows whether it waits in the trash.
 
 ## Validity and limits
 
 - Written from Cinder 2026.1 (`cinder/volume/api.py` `delete`, `cinder/volume/manager.py` `delete_volume`,
   `cinder/volume/drivers/rbd.py` `delete_volume`) and python-openstackclient 2026.1. Not reproduced on a lab.
-- Not covered: volumes in groups or consistency groups, transfers, backends other than Ceph in detail, and the
-  database purge of deleted rows.
+- Not covered: volumes in groups or consistency groups, transfers, backends other than Ceph in detail (for LVM,
+  leftovers show in `sudo lvs <vg> | grep volume-<volume-id>`), and the database purge of deleted rows.
 
 ## Related
 
