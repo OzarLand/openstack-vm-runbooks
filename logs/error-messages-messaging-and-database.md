@@ -33,7 +33,8 @@ last_verified: 2026-10-27
 
 This page belongs to the dictionary of frequent OpenStack error messages. For each message: where it appears, what it
 means, the usual causes, the next log to read, and the runbook that fixes it. The messages are the format strings of
-the upstream source at `stable/2026.1`, not captured lines; `<…>` marks a value.
+the upstream source at `stable/2026.1`; `<…>` marks a value. Where a section shows a *Lab sample*, the lines were
+captured on a Kolla-Ansible 2026.1 lab with three controllers (redacted).
 
 How to read the RabbitMQ broker log itself is on
 [reading the RabbitMQ logs](reading-rabbitmq-logs.md).
@@ -58,6 +59,14 @@ How to read the RabbitMQ broker log itself is on
   the traceback). If the timeouts are everywhere, the RabbitMQ log first.
 - **Fix:** [RPC timeouts caused by RabbitMQ](../recovery/rabbitmq-partition-or-alarm-rpc-timeouts.md) when the broker
   is the cause.
+- **Lab sample** (Neutron agents, while the control plane was starting after all controllers were rebooted; Neutron
+  wraps the timeout in its own retry message). The lab's 90-second stop of every RabbitMQ node did not produce a
+  `MessagingTimeout`: the calls waited while the clients reconnected.
+
+  ```text
+  2026-10-27 06:52:15.108 7 ERROR neutron_lib.rpc [None req-<request-id> - - - - - -] Timeout in RPC method has_alive_neutron_server. Waiting for 11 seconds before next attempt. If the server is not down, consider increasing the rpc_response_timeout option as Neutron server(s) may be overloaded and unable t...
+  2026-10-27 06:52:15.108 7 WARNING neutron_lib.rpc [None req-<request-id> - - - - - -] Increasing timeout for has_alive_neutron_server calls to 120 seconds. Restart the agent to restore it to the default value.: oslo_messaging.exceptions.MessagingTimeout: Timed out waiting for a reply to message ID <msg-id>
+  ```
 
 ### `[<connection-id>] AMQP server on <host>:<port> is unreachable: <error>. Trying again in <n> seconds.`
 
@@ -72,6 +81,19 @@ How to read the RabbitMQ broker log itself is on
 - **Read next:** on that node, the RabbitMQ log and the state of the container; then whether other services report the
   same node.
 - **Fix:** [RPC timeouts caused by RabbitMQ](../recovery/rabbitmq-partition-or-alarm-rpc-timeouts.md) (missing node).
+- **Lab sample** (`nova-compute`, RabbitMQ stopped on one controller, then on all three). The `<error>` was, in turn,
+  the broker's shutdown notice, `RecoverableConnectionError`, a reset, then `ECONNREFUSED` while the port was closed;
+  with one node down, `nova-compute` was reconnected to another node 10 s after its first error; with all three down
+  they retried every second until a node was back. Requests in flight also log `Connection failed: <error> (retrying
+  in <n> seconds)`.
+
+  ```text
+  2026-10-27 07:31:59.842 6 ERROR oslo.messaging._drivers.impl_rabbit [-] [<conn-id>] AMQP server on 192.0.2.13:5672 is unreachable: <RecoverableConnectionError: unknown error>. Trying again in 1 seconds.: amqp.exceptions.RecoverableConnectionError: <RecoverableConnectionError: unknown error>
+  2026-10-27 07:32:00.845 6 ERROR oslo.messaging._drivers.impl_rabbit [-] [<conn-id>] AMQP server on 192.0.2.13:5672 is unreachable: [Errno 111] ECONNREFUSED. Trying again in 1 seconds.: ConnectionRefusedError: [Errno 111] ECONNREFUSED
+  2026-10-26 21:08:22.136 21 ERROR oslo.messaging._drivers.impl_rabbit [-] [<conn-id>] AMQP server on 192.0.2.11:5672 is unreachable: (0, 0): (320) CONNECTION_FORCED - broker forced connection closure with reason 'shutdown'. ...
+  2026-10-27 07:35:42.188 6 ERROR oslo.messaging._drivers.impl_rabbit [None req-<request-id> - - - - - -] Connection failed: [Errno 111] ECONNREFUSED (retrying in 0 seconds): ConnectionRefusedError: [Errno 111] ECONNREFUSED
+  2026-10-27 07:37:17.874 6 INFO oslo.messaging._drivers.impl_rabbit [-] [<conn-id>] Reconnected to AMQP server on 192.0.2.12:5672 via [amqp] client with port 55436.
+  ```
 
 ### `[<connection-id>] AMQP server <host>:<port> closed the connection. Check login credentials: <error>`
 
@@ -90,6 +112,8 @@ How to read the RabbitMQ broker log itself is on
 - **Means:** the heartbeat found the connection broken (timeout, refused, reset) and the client reconnects.
 - **Usual causes:** the broker restarted or dropped the connection (for example the broker's `missed heartbeats from
   client`), or the network between them broke.
+- **Lab sample:** `... INFO oslo.messaging._drivers.impl_rabbit [-] A recoverable connection/channel error occurred,
+  trying to reconnect: [Errno 104] Connection reset by peer` (a RabbitMQ node stopped).
 - **Read next:** the RabbitMQ log for `missed heartbeats from client` or `closing AMQP connection` with the same
   client at the same time. One line is normal during a broker restart; many lines across services are not.
 
@@ -106,6 +130,13 @@ How to read the RabbitMQ broker log itself is on
 - **Means:** the service sent its first RPC call to `nova-conductor` and got `MessagingTimeout`. It keeps retrying;
   `nova-conductor connection established successfully` marks the end.
 - **Read next:** is `nova-conductor` running and connected to the same broker and virtual host; the broker state.
+- **Lab sample** (`nova-compute` started while the database was still down after all nodes were rebooted; 11
+  minutes between the two lines):
+
+  ```text
+  2026-10-27 06:51:24.717 6 WARNING nova.conductor.api [None req-<request-id> - - - - - -] Timed out waiting for nova-conductor.  Is it running? Or did this service start before nova-conductor?  Reattempting establishment of nova-conductor connection...: oslo_messaging.exceptions.MessagingTimeout: ...
+  2026-10-27 07:02:41.161 6 INFO nova.conductor.api [None req-<request-id> - - - - - -] nova-conductor connection established successfully
+  ```
 
 ### Nova: `Lost connection to nova-conductor for reporting service status.`
 
@@ -115,6 +146,11 @@ How to read the RabbitMQ broker log itself is on
 - **Means:** the periodic heartbeat that `nova-compute` sends through the conductor (it has no direct database
   access; the other Nova services write their heartbeat to the database themselves) timed out. If it lasts longer than `service_down_time`
   (60 s), the API shows this service `down` while it still runs.
+- **On a lab** this line did not appear, neither with all RabbitMQ nodes stopped for 90 s nor with the database
+  unreachable. With the conductor unable to reach the database, `nova-compute` logged instead
+  `Unexpected error while reporting service status: oslo_messaging.rpc.client.RemoteError: Remote error:
+  OperationalError (pymysql.err.OperationalError) (9001, ...)`, then, at INFO, `Recovered from being unable to report
+  status.` The conductor and scheduler log the same pair for their own database heartbeat.
 - **Read next:** the conductor's log and the broker state at that time.
 - **Fix:** [RPC timeouts caused by RabbitMQ](../recovery/rabbitmq-partition-or-alarm-rpc-timeouts.md); for a compute
   shown down while its instances run, [nova-compute down, instances still running](../recovery/nova-compute-down-instances-still-running.md).
@@ -127,6 +163,20 @@ How to read the RabbitMQ broker log itself is on
   `DBConnectionError` (`@filters("mysql", sqla_exc.OperationalError, …2002|2003|2006|2013|1047…)` in
   [`exc_filters.py`](https://github.com/openstack/oslo.db/blob/stable/2026.1/oslo_db/sqlalchemy/exc_filters.py)).
   The exact text after the exception name depends on the driver; the code is what matters.
+- **Lab sample** (ProxySQL stopped on every controller, so the internal VIP was gone; then a connection lost during
+  a query):
+
+  ```text
+  2026-10-27 07:40:28.433 31 ERROR nova.servicegroup.drivers.db [-] Unexpected error while reporting service status: oslo_db.exception.DBConnectionError: (pymysql.err.OperationalError) (2003, "Can't connect to MySQL server on '192.0.2.10' (timed out)")
+  2026-10-27 07:41:44.754 7 WARNING oslo_db.sqlalchemy.engines [None req-<request-id> - - - - - -] SQL connection failed. -1 attempts left.: oslo_db.exception.DBConnectionError: (pymysql.err.OperationalError) (2003, "Can't connect to MySQL server on '192.0.2.10' ([Errno 113] No route to host)")
+  2026-10-27 07:14:01.143 23 CRITICAL keystone [None req-<request-id> - - - - - -] Unhandled error: oslo_db.exception.DBConnectionError: (pymysql.err.OperationalError) (2013, 'Lost connection to MySQL server during query')
+  ```
+
+  The text in brackets after 2003 varied with the state of the VIP: `timed out`, `[Errno 113] No route to host`,
+  `[Errno 113] EHOSTUNREACH`, `[Errno 111] Connection refused`.
+- **Behind ProxySQL:** when ProxySQL runs but has no backend for the query, the code is ProxySQL's own `9001` (`Max
+  connect timeout reached while reaching hostgroup 0 after 10000ms`); on a lab it reached the logs mostly as
+  `sqlalchemy.exc.OperationalError`, and twice as `DBConnectionError`.
 - **Means, by code** (names from PyMySQL's
   [`CR.py`](https://github.com/PyMySQL/PyMySQL/blob/main/pymysql/constants/CR.py) and
   [`ER.py`](https://github.com/PyMySQL/PyMySQL/blob/main/pymysql/constants/ER.py)):
@@ -160,7 +210,9 @@ How to read the RabbitMQ broker log itself is on
   default) every `retry_interval` (10 s by default)
   ([`options.py`](https://github.com/openstack/oslo.db/blob/stable/2026.1/oslo_db/options.py)). After the last
   attempt, the service fails to start and, on Kolla-Ansible, its unit restarts it. With `max_retries = -1`, oslo.db
-  retries forever (`itertools.count()` in `_test_connection`).
+  retries forever (`itertools.count()` in `_test_connection`). Kolla-Ansible sets `max_retries = -1`, and the counter
+  then goes negative: on a lab, a `nova_scheduler` restarted while the database VIP was gone logged
+  `SQL connection failed. -1 attempts left.` up to `-5 attempts left.` (07:41:44 to 07:42:33), then started normally.
 - **Read next:** same as `DBConnectionError`; on a service in a restart loop, see
   [the systemd journal and the container engine](systemd-journal-and-container-engine.md).
 
@@ -186,16 +238,22 @@ How to read the RabbitMQ broker log itself is on
 
 ## Validity and limits
 
-- Written from upstream source only: oslo.messaging, oslo.db and Nova `stable/2026.1`, PyMySQL (main branch) for the
-  error code names. Every message is a format string from that source, not a captured line; the text that a database
-  driver adds after the exception name varies.
-- Not run on a lab yet. A lab capture of RabbitMQ stopped on one node, then on all nodes, and of the database backend
-  made unavailable behind its proxy (ProxySQL by default), is requested to add real redacted lines.
+- Written from upstream source: oslo.messaging, oslo.db and Nova `stable/2026.1`, PyMySQL (main branch) for the
+  error code names. The messages in the headings and explanations are format strings from that source; only the *Lab
+  sample* blocks are captured lines. The text that a database driver adds after the exception name varies.
+- Lab samples: Kolla-Ansible 22.2.0 (2026.1), three controllers (RabbitMQ cluster, Galera behind ProxySQL), two
+  computes, 2026-10-27: RabbitMQ stopped on one node for 2 minutes, on all three for 90 s during an instance boot (the
+  instance went ACTIVE once RabbitMQ was back), ProxySQL stopped on all controllers for 2 minutes with `nova_scheduler`
+  restarted meanwhile. Not observed on the lab: `closed the connection. Check login credentials`, `Unexpected error
+  during heartbeat thread processing`, `Lost connection to nova-conductor for reporting service status.`, `DBDeadlock`,
+  and the codes 2002, 2006 and 1047 in a service log. The `MessagingTimeout` and `Timed out waiting for nova-conductor`
+  samples come from the lab's control plane starting after all its nodes were rebooted, not from an injection.
 - The reading of 1047 as `WSREP has not yet prepared node for application use` is the line quoted in the Galera
   runbook; the codes and their names are from PyMySQL.
 - Only the RabbitMQ driver of oslo.messaging is covered.
 
 ---
 
-*Provenance: written by agent:ozarland-author, from upstream source code (oslo.messaging, oslo.db, Nova, PyMySQL).
+*Provenance: written by agent:ozarland-author, from upstream source code (oslo.messaging, oslo.db, Nova, PyMySQL) and
+lab samples from Kolla-Ansible 2026.1 (2026-10-27, by the lab reviewer).
 Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
