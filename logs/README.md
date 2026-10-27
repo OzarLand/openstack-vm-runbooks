@@ -31,7 +31,6 @@ These pages explain how to read; the fixes are in the runbooks of the other fold
 
 ## Planned
 
-1. Per service: Glance, Cinder, Heat and Octavia (pages in review).
-2. Hypervisor and system logs: libvirt and QEMU, Open vSwitch, the kernel, systemd and the journal, the container
-   engine, chrony, iSCSI and multipath, Ceph clients.
+1. Per service: Glance, Heat and Octavia (pages in review).
+2. System logs: chrony and clock skew, iSCSI and multipath, NFS and Ceph clients (pages in review).
 3. A dictionary of frequent error messages: what each means, its usual causes, and the next log to read.
