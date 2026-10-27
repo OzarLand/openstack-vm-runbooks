@@ -1,7 +1,7 @@
 ---
 title: RPC timeouts in every service, computes reported down. RabbitMQ is partitioned, blocked by an alarm, or a node is missing
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [rabbitmq, oslo.messaging, kolla-ansible, nova, neutron, cinder]
 deployment_methods: [kolla-ansible, any]
@@ -11,7 +11,8 @@ environment:
   storage: any
   os: any
 risk: destructive
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, RabbitMQ 4.2.9 with Khepri", date: 2026-10-27, note: "read-only quick checks on every node; cause 1 (one node stopped 29 s, systemctl), cause 2 (one node cut from the two others on port 25672 for 2.5 min) and cause 3 (memory alarm with set_vm_memory_high_watermark absolute 10MB, 4.5 min) injected and undone; cause 4 seen with nova_conductor/nova_scheduler stopped (#103 run); verification run. Not run: the partition recovery (stop and start of the untrusted side, healed by itself), a disk alarm, rabbitmq-reset-state, Mnesia" }
 upstream_refs:
   - https://docs.openstack.org/kolla-ansible/2026.1/reference/message-queues/rabbitmq.html
   - https://www.rabbitmq.com/docs/4.2/partitions
@@ -19,7 +20,7 @@ upstream_refs:
   - https://www.rabbitmq.com/docs/4.2/metadata-store
   - https://www.rabbitmq.com/docs/4.2/quorum-queues
 authored_by: agent:ozarland-author
-last_verified: 2026-10-26
+last_verified: 2026-10-27
 ---
 
 # RPC timeouts in every service, computes reported down. RabbitMQ is partitioned, blocked by an alarm, or a node is missing
@@ -82,8 +83,8 @@ sudo tail -n 100 /var/log/kolla/rabbitmq/rabbit@<hostname>.log
 |---|---|
 | Every node lists all others as running, no partition, no alarm, no queue growing | RabbitMQ is healthy: look at the services and the database ([shared dependencies](../diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md)) |
 | One node stopped or missing from the running nodes, the others agree | Cause 1: a node is down |
-| *Network Partitions* lists nodes that cannot communicate | Cause 2: a network partition |
-| An alarm in `cluster_status` or `check_local_alarms` | Cause 3: a memory or disk alarm |
+| Nodes disagree on the running nodes (each side lists only its own), or *Network Partitions* lists nodes; the log says `node '<node>' down: net_tick_timeout` | Cause 2: a network partition |
+| An alarm in `cluster_status` or `check_local_alarms`; `rabbitmqctl list_connections name state` shows `blocked` / `blocking` connections | Cause 3: a memory or disk alarm |
 | RPC queues (`conductor`, `scheduler`, `compute.<host>`, `q-plugin`…) growing, with 0 consumers | Cause 4: consumers gone |
 
 ## Diagnosis
@@ -106,10 +107,17 @@ sudo tail -n 100 /var/log/kolla/rabbitmq/rabbit@<hostname>.log
 - **`pause_minority`** (relevant with Mnesia): nodes that are not in a strict majority pause, stop listening, check
   every second, and resume when they see the majority again. Clients connected to them reconnect elsewhere. The guide
   warns that it does not protect against a node that was suspended (a frozen VM, a long pause) and then resumed.
+  With Khepri (lab, RabbitMQ 4.2.9), the minority node did not pause: it kept accepting AMQP connections (a
+  `nova-scheduler` reconnected to it), `cluster_status` showed `Network Partitions (none)` on both sides, and a build
+  sent during the partition failed with `MessagingTimeout` after 60 s.
 - **Alarms:** when a node's memory goes above its watermark, or its free disk below its limit, RabbitMQ blocks every
   publishing connection **on every node** of the cluster until the alarm clears (RabbitMQ alarms guide). Connections
   that only consume keep working, but a connection that also publishes is blocked: RPC callers, and RPC servers when
-  they publish their replies. In practice, RPC stops.
+  they publish their replies. In practice, RPC stops. On the lab, a memory alarm on one node: every service logged
+  `The broker has blocked the connection: connection blocked, see broker logs`, both computes went `down` and every
+  Neutron agent dead, without `MessagingTimeout` or `Lost connection to nova-conductor` on the computes; a
+  `server create` got `502 Bad Gateway` from HAProxy after 60 s, while `nova-api` finished the request (`202`) once
+  the alarm cleared and the instance then went `ACTIVE`: a client that retries can create a second instance.
 - **Streams** for fanout keep messages until the retention policy deletes them (Kolla-Ansible's defaults: 500 MB
   segments, kept 1800 s once full). Many ready messages in a `stream` queue are expected, not a backlog
   (Kolla-Ansible RabbitMQ guide).
@@ -149,11 +157,18 @@ own once RabbitMQ is reachable again.
 ### For cause 1: start the node again
 
 > ⚠️ **State-changing.** Starts RabbitMQ on that node; it rejoins the cluster, and its quorum queue replicas catch
-> up from the leaders. Undo: stop the container.
+> up from the leaders. Undo: `sudo systemctl stop kolla-rabbitmq-container.service`.
 
 ```bash
-sudo docker start rabbitmq
+sudo systemctl start kolla-rabbitmq-container.service      # Kolla-Ansible 2026.1; other methods: start the service
 sudo docker exec rabbitmq rabbitmq-diagnostics cluster_status      # the node is back in the running nodes
+```
+
+The node takes some time to boot (40 s on the lab): until then `cluster_status` on it fails with `epmd reports: node
+'rabbit' not running at all`. Wait for it:
+
+```bash
+sudo timeout 300 sh -c 'until docker exec rabbitmq rabbitmq-diagnostics -q check_running; do sleep 2; done'
 ```
 
 Streams do not get a replica back on a node that was down when they were declared. Once the cluster is healthy,
@@ -163,7 +178,8 @@ replicas, and warns that stream membership changes are not entirely safe: run it
 ### For cause 2: repair the network, then let the cluster heal
 
 With quorum queues, Khepri, or `pause_minority`, the minority side catches up or resumes on its own once the network
-is back. Check `cluster_status` on every node.
+is back (lab, Khepri: 4 s after the network came back, `detected a new leader` in the minority node's log, and all
+three nodes running). Check `cluster_status` on every node.
 
 If a partition is still listed after the network is fixed (Mnesia, or a node that was suspended), the RabbitMQ
 partitions guide says to choose the side you trust, "stop all nodes in the other partitions, then start them all up
@@ -180,11 +196,11 @@ warning.
 
 ```bash
 # 1. on every node of the side you do not trust: stop (all of them first)
-sudo docker stop rabbitmq
+sudo systemctl stop kolla-rabbitmq-container.service
 # 2. then on every node of that side: start
-sudo docker start rabbitmq
+sudo systemctl start kolla-rabbitmq-container.service
 # 3. then on each node of the trusted side, one at a time
-sudo docker restart rabbitmq
+sudo systemctl restart kolla-rabbitmq-container.service
 ```
 
 ### For cause 3: free the resource
@@ -204,7 +220,7 @@ service drains its queue.
 > needed.
 
 ```bash
-sudo docker restart <service-container>          # for example nova_conductor
+sudo systemctl restart kolla-<service-container>-container.service   # for example kolla-nova_conductor-container.service
 ```
 
 ### Last resort: reset RabbitMQ's state
@@ -245,7 +261,7 @@ sudo docker exec rabbitmq rabbitmqctl list_queues name type messages consumers -
 # from a host with admin credentials
 openstack compute service list          # every compute up again within about a minute
 openstack network agent list            # every agent alive
-openstack volume service list
+openstack volume service list           # only with Cinder
 ```
 
 Then a test build, and the clean-up of what stayed stuck:
@@ -256,7 +272,19 @@ Then a test build, and the clean-up of what stayed stuck:
 
 - Written from Kolla-Ansible 2026.1 (RabbitMQ guide, `rabbitmq.conf.j2`, `reset-state.yml`, role defaults, release
   notes), the Nova 2026.1 source (`servicegroup/drivers/db.py`, `service_down_time`) and the RabbitMQ 4.2 partitions,
-  alarms, metadata store and quorum queue guides. Not run on a lab.
+  alarms, metadata store and quorum queue guides.
+- Lab observations (Kolla-Ansible 22.2.0, 2026.1, 3 controllers, RabbitMQ 4.2.9 on Erlang/OTP 27.3.4 (patch 18), Khepri
+  enabled, `pause_minority`, 2026-10-27): quick checks ran as written on the three nodes. Cause 1: one node stopped
+  29 s, a build went `ACTIVE` in 25 s meanwhile, no compute or agent down; restarted node running 40 s after
+  `systemctl start`. Cause 2: one node cut from the two others on the clustering port 25672: `down: net_tick_timeout`
+  74 s after the cut on both sides, `Network Partitions (none)` everywhere, computes and agents stayed up, one build
+  failed (`MessagingTimeout`, 60 s); healed by itself 4 s after the cut was removed. Cause 3: memory alarm set with
+  `rabbitmqctl set_vm_memory_high_watermark absolute 10MB` on one node for 4.5 min: as in *What each failure does*;
+  every service up and every agent alive within 16 s of `set_vm_memory_high_watermark 0.6`, the stuck build `ACTIVE`
+  within 26 s. Cause 4: `nova_conductor` or `nova_scheduler` stopped on every controller, its queue at 0 consumers
+  (see [nova-conductor or nova-scheduler down](nova-conductor-or-scheduler-down-what-still-works.md)).
+- Not run on the lab: the partition recovery (stop and start of the untrusted side), a disk alarm, the last resort
+  (`rabbitmq-reset-state`), Mnesia and its `pause_minority` pause, a partition of more than one node.
 - RabbitMQ 4.3 removes Mnesia and partition handling strategies; on a later Kolla-Ansible release, read that
   release's RabbitMQ version first.
 - Not covered: TLS problems between services and RabbitMQ, credentials (see
