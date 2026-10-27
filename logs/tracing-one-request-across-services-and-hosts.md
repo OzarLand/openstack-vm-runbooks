@@ -11,7 +11,8 @@ environment:
   storage: any
   os: any
 risk: read-only
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-27, note: "one host, ML2/OVS hybrid firewall: a boot followed by request id (26 lines in 6 files, also through the ansible shell search), port id and instance id; real port-chain lines; not run: several hosts and their clock offset, journal searches, the DEBUG lines, OVN, a volume" }
 upstream_refs:
   - https://opendev.org/openstack/oslo.middleware/src/branch/stable/2026.1/oslo_middleware/request_id.py
   - https://opendev.org/openstack/oslo.context/src/branch/stable/2026.1/oslo_context/context.py
@@ -23,7 +24,7 @@ upstream_refs:
   - https://opendev.org/openstack/neutron/src/branch/stable/2026.1/neutron/plugins/ml2/drivers/openvswitch/agent/ovs_neutron_agent.py
   - https://www.freedesktop.org/software/systemd/man/latest/journalctl.html
 authored_by: agent:ozarland-author
-last_verified: 2026-10-26
+last_verified: 2026-10-27
 ---
 
 # Following one request, instance, port or volume through the logs of every service and host
@@ -87,6 +88,10 @@ as `("tap" + port_id)[:14]` (`NIC_NAME_LEN = 14` in `nova/network/model.py`, use
 port=<port-id>; echo "tap${port:0:11}"
 ```
 
+With ML2/OVS and the `OVSHybridIptablesFirewallDriver` (`firewall_driver` in `openvswitch_agent.ini`), the tap device
+sits on a Linux bridge `qbr<11>`, and the port that Open vSwitch sees and logs is `qvo<11>` (same 11 characters):
+search `ovs-vswitchd.log` for `qvo${port:0:11}`.
+
 ## Searching
 
 ### One host
@@ -94,12 +99,13 @@ port=<port-id>; echo "tap${port:0:11}"
 **Kolla-Ansible:**
 
 ```bash
+# /var/log/kolla is readable by root only: sudo, and a root shell where a glob must be expanded
 # Every service log on this host that mentions the id, in time order
-grep -rh "<request-id>" /var/log/kolla/ | sort | less -S
+sudo grep -rh "<request-id>" /var/log/kolla/ | sort | less -S
 # Only the services you expect
-grep -h "<request-id>" /var/log/kolla/nova/*.log /var/log/kolla/neutron/*.log | sort
+sudo sh -c 'grep -h "<request-id>" /var/log/kolla/nova/*.log /var/log/kolla/neutron/*.log' | sort
 # Rotated files too, if the event is older than the current file (zgrep reads plain and .gz files)
-zgrep -h "<request-id>" /var/log/kolla/nova/nova-compute.log* | sort
+sudo sh -c 'zgrep -h "<request-id>" /var/log/kolla/nova/nova-compute.log*' | sort
 ```
 
 `sort` works on these lines because `oslo.log` starts each one with `YYYY-MM-DD HH:MM:SS.mmm`, which sorts as text.
@@ -161,10 +167,10 @@ driver; they will be covered on the OVN page.
 
 ```bash
 # On the compute that built the instance (Kolla-Ansible paths)
-grep "<port-id>" /var/log/kolla/neutron/neutron-openvswitch-agent.log
-grep "tap<first-11-chars>" /var/log/kolla/openvswitch/ovs-vswitchd.log
+sudo grep "<port-id>" /var/log/kolla/neutron/neutron-openvswitch-agent.log
+sudo grep -E "(tap|qvo)<first-11-chars>" /var/log/kolla/openvswitch/ovs-vswitchd.log   # qvo with the hybrid firewall
 # On the controllers
-grep "<port-id>" /var/log/kolla/neutron/neutron-server.log /var/log/kolla/nova/nova-api.log
+sudo grep "<port-id>" /var/log/kolla/neutron/neutron-server.log /var/log/kolla/nova/nova-api.log
 ```
 
 If the instance waited for `network-vif-plugged` and gave up, the
@@ -174,9 +180,9 @@ If the instance waited for `network-vif-plugged` and gave up, the
 
 ```bash
 # Nova's side, on the compute
-grep "<server-id>" /var/log/kolla/nova/nova-compute.log
+sudo grep "<server-id>" /var/log/kolla/nova/nova-compute.log
 # libvirt's side: the daemon log names the domain (warnings and errors only, see below)
-grep "<instance-name>" /var/log/kolla/libvirt/libvirtd.log
+sudo grep "<instance-name>" /var/log/kolla/libvirt/libvirtd.log
 # QEMU's own log of the instance, inside the libvirt container (as root; podman exec on Podman deployments)
 sudo docker exec nova_libvirt tail -50 /var/log/libvirt/qemu/<instance-name>.log
 ```
@@ -189,9 +195,9 @@ it at all.
 
 ```bash
 # Nova, on the compute
-grep "<volume-id>" /var/log/kolla/nova/nova-compute.log
+sudo grep "<volume-id>" /var/log/kolla/nova/nova-compute.log
 # Cinder, on the controllers and the storage nodes
-grep -h "<volume-id>" /var/log/kolla/cinder/cinder-api.log /var/log/kolla/cinder/cinder-scheduler.log \
+sudo grep -h "<volume-id>" /var/log/kolla/cinder/cinder-api.log /var/log/kolla/cinder/cinder-scheduler.log \
   /var/log/kolla/cinder/cinder-volume.log | sort
 ```
 
@@ -228,11 +234,34 @@ A timeline built from several hosts is only as good as their clocks and their ti
    `network-vif-plugged`. If the timestamps disagree with that order across two hosts, the clocks are wrong, not
    the code.
 
+## Lab observations
+
+Kolla-Ansible 22.2.0 (2026.1) all-in-one, ML2/OVS with the hybrid iptables firewall, host in UTC, on 2026-10-27: one
+boot followed by the `create` request id from `openstack server event list`.
+
+- `sudo grep -rh <request-id> /var/log/kolla/` found 26 lines in `nova-api.log`, `nova-api-uwsgi.log`,
+  `nova-scheduler.log`, `nova-compute.log`, `placement-api.log` and `neutron-openvswitch-agent.log` (none in
+  `nova-conductor.log` or `neutron-server.log`). The `ansible ... -m shell` search returned the same 26 lines.
+- The port chain, real lines (ids replaced):
+
+  ```text
+  2026-10-27 13:22:47.208 27 INFO nova.api.openstack.compute.server_external_events [req-<id> req-<id> <id> <id> - - default default] Creating event network-changed:<port-id> for instance <server-id> on compute-1
+  2026-10-27 13:22:50.248Z|00851|bridge|INFO|bridge br-int: added interface qvo<11-chars> on port 19
+  2026-10-27 13:22:50.793 7 INFO neutron.plugins.ml2.drivers.openvswitch.agent.ovs_neutron_agent [None req-<id> - - - - - -] Port <port-id> updated. Details: {'device': '<port-id>', 'device_id': '<server-id>', ...
+  2026-10-27 13:22:50.983 29 INFO nova.api.openstack.compute.server_external_events [req-<id> req-<id> <id> <id> - - default default] Creating event network-vif-plugged:<port-id> for instance <server-id> on compute-1
+  2026-10-27 13:22:51.371 7 INFO neutron.plugins.ml2.drivers.openvswitch.agent.ovs_neutron_agent [None req-<id> - - - - - -] Configuration for devices up ['<port-id>'] and devices down [] completed.
+  2026-10-27 13:22:55.167 6 INFO nova.compute.manager [...] [instance: <server-id>] Took 7.19 seconds to spawn the instance on the hypervisor.
+  ```
+
+- `ovs-vswitchd.log` had no line with `tap<11>`, one with `qvo<11>`. `libvirtd.log` had no line for the instance
+  name (no warning or error); its QEMU log was read with `docker exec nova_libvirt tail`.
+- `nova-compute.log` lines are in UTC without a zone, `ovs-vswitchd.log` with `Z`, as *Lining up the clocks* says.
+  The host had no `chronyc`; `timedatectl timesync-status` showed the time server.
+
 ## Validity and limits
 
-- Written from the 2026.1 sources and documentation listed in the front matter. **Not yet observed on a lab**: the
-  log lines are message texts from the source, not captured lines. The lab request for the first page of this
-  folder asks for real samples of the request id and global request id (issue #54).
+- Written from the 2026.1 sources and documentation listed in the front matter, and checked on an all-in-one lab
+  (*Lab observations*): one host, so the several-hosts search and the clock offset between hosts were not tested.
 - Which services pass the global request id is checked here for Nova's calls to Neutron, Cinder, Glance and
   Placement only. Neutron's notification to Nova (the `network-vif-plugged` event) is a separate request; this page
   does not claim it carries a global id.
