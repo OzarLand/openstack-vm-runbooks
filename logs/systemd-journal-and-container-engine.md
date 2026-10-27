@@ -1,7 +1,7 @@
 ---
 title: Reading the systemd journal and the container engine on an OpenStack host. Units, priorities, time ranges, restart loops
 kind: diagnostic
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [systemd, docker, podman, nova, neutron]
 deployment_methods: [kolla-ansible, any]
@@ -11,7 +11,8 @@ environment:
   storage: any
   os: any linux with systemd
 risk: state-changing
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-27, note: "systemd 255, Docker 29.9.2, unit with RestartSec=59/StartLimitInterval=600 (docker_client_timeout 600): nova_compute restart loop for 13 min (restart counter to 11, no start-limit hit), NRestarts and RestartCount 0 confirmed, Docker debug via SIGHUP (undo needs debug false), journal commands; not run: Podman, the persistent-journal drop-in, the Kolla default restart values" }
 upstream_refs:
   - https://github.com/systemd/systemd/blob/v259.10/man/journalctl.xml
   - https://github.com/systemd/systemd/blob/v259.10/man/journald.conf.xml
@@ -32,7 +33,7 @@ upstream_refs:
   - https://github.com/moby/moby/blob/v28.5.2/daemon/monitor.go
   - https://github.com/containers/common/blob/main/docs/containers.conf.5.md
 authored_by: agent:ozarland-author
-last_verified: 2026-10-26
+last_verified: 2026-10-27
 ---
 
 # Reading the systemd journal and the container engine on an OpenStack host. Units, priorities, time ranges, restart loops
@@ -103,7 +104,8 @@ What follows from it:
   (`docker_restart_policy` in
   [`group_vars/all/common.yml`](https://github.com/openstack/kolla-ansible/blob/stable/2026.1/ansible/group_vars/all/common.yml)).
 - The restart limits come from the client timeout and the retries: with the defaults (120 s and 10 retries),
-  `StartLimitInterval=120`, `StartLimitBurst=10` and `RestartSec=11`.
+  `StartLimitInterval=120`, `StartLimitBurst=10` and `RestartSec=11`. A lab with `docker_client_timeout: 600` had
+  `StartLimitInterval=600` and `RestartSec=59` (11 s with the Kolla defaults, 59 s on that lab).
 - **The container engine does not restart these containers.** The Docker worker creates the container without a
   Docker restart policy, and the Podman worker removes it ("handled by systemd")
   ([`kolla_docker_worker.py`](https://github.com/openstack/kolla-ansible/blob/stable/2026.1/ansible/module_utils/kolla_docker_worker.py),
@@ -141,7 +143,11 @@ Failed to start <unit description>.
 - `restart counter is at <n>` growing is the loop itself.
 - `Start request repeated too quickly.` means the unit hit `StartLimitBurst` starts within `StartLimitInterval`:
   systemd **stops trying**, and the unit stays failed (result `start-limit-hit`) until someone starts it again or
-  resets it. On Kolla-Ansible, with the defaults, that is 10 starts in 120 seconds.
+  resets it. On Kolla-Ansible, with the defaults, that is 10 starts in 120 seconds. Because of `RestartSec`, a
+  container that fails a few seconds after each start may never reach that rate: on a lab with `RestartSec=59` and
+  `StartLimitInterval=600`, a `nova_compute` that exited about 5 s after each start looped for 13 minutes
+  (`restart counter is at 11` and growing) without `Start request repeated too quickly.`. Do not wait for the limit:
+  read the counter.
 - The reason of each exit is in the lines just before, from the service itself: read them with
   `journalctl -u <unit> -n 100`, and the service's own log file.
 
@@ -167,7 +173,8 @@ The Docker API documents, for `docker inspect`
 `RestartCount` grows only when **Docker's own restart policy** restarts the container (`daemon/monitor.go`
 increments it when the restart manager decides to restart). On Kolla-Ansible, systemd restarts the container with
 `docker start`, so `RestartCount` stays at `0` and `docker ps` shows `Up <n> seconds` again and again. Use
-`StartedAt` and systemd's `NRestarts` instead.
+`StartedAt` and systemd's `NRestarts` instead. Confirmed on a lab: during 11 systemd restarts of `nova_compute`,
+`RestartCount` stayed `0` while `StartedAt` changed at each start, and the container's Docker restart policy was `no`.
 
 ```bash
 # On the host. Podman: same commands with podman instead of docker.
@@ -199,8 +206,9 @@ so `docker logs` only keeps the recent output. Containers that use the `journald
 To get more detail from the daemon itself:
 
 > ⚠️ **State-changing.** Makes `dockerd` reload its configuration and log at debug level, which is verbose. Running
-> containers are not restarted by a reload. Undo: remove `"debug": true` from `/etc/docker/daemon.json` and send
-> `SIGHUP` again. Do not restart `docker.service` for this: unless Docker's `live-restore` is enabled, a daemon
+> containers are not restarted by a reload. Undo: set `"debug": false` in `/etc/docker/daemon.json` and send
+> `SIGHUP` again (removing the key is not enough: on a lab with Docker 29.9.2, the reload kept debug on; once off,
+> the key can be removed). Do not restart `docker.service` for this: unless Docker's `live-restore` is enabled, a daemon
 > restart stops every container of the host.
 
 ```bash
@@ -263,13 +271,34 @@ it has nothing to read there.
 3. On Kolla-Ansible: `docker inspect` for `ExitCode`, `OOMKilled` and `StartedAt`; `RestartCount` will not help.
 4. The service's own log file, then `journalctl -k` for an OOM kill at the same time.
 
+## Lab observations
+
+Kolla-Ansible 22.2.0 (2026.1) all-in-one, Ubuntu 24.04, systemd 255, Docker 29.9.2, `docker_client_timeout: 600`, on
+2026-10-27. A line that is not valid INI appended to `/etc/kolla/nova-compute/nova.conf`, then the unit restarted:
+
+```text
+compute-1 docker[<pid>]:     raise ConfigFileParseError(pe.filename, str(pe))
+compute-1 systemd[1]: kolla-nova_compute-container.service: Main process exited, code=exited, status=1/FAILURE
+compute-1 systemd[1]: kolla-nova_compute-container.service: Failed with result 'exit-code'.
+compute-1 systemd[1]: kolla-nova_compute-container.service: Scheduled restart job, restart counter is at 1.
+```
+
+- `systemctl show`: `Result=exit-code NRestarts=<n> ActiveState=activating SubState=auto-restart` between starts;
+  `docker ps -a`: `Exited (1) 3 seconds ago`; `docker inspect`: `restarts=0 exit=1 oom=false`.
+- No `Start request repeated too quickly.` in 13 minutes (one start every 64 s or so, see above). Undo: the file put
+  back, `systemctl reset-failed` and `systemctl start`.
+- `journalctl --list-invocations`: `unrecognized option` with systemd 255. `journalctl` worked without `sudo` for a
+  user in the `adm` group. `/var/log/journal` existed (persistent journal).
+- Docker debug: `Got signal to reload configuration`, `Reloaded configuration`, then `level=debug` lines (433 lines
+  in 40 s, mostly health checks); removing the key and reloading left debug on, `"debug": false` turned it off.
+
 ## Validity and limits
 
-- Written from upstream source and documentation only: systemd v259.10, Kolla-Ansible and ansible-collection-kolla
-  `stable/2026.1`, Docker documentation (main branch) and Moby v28.5.2, containers-common (main branch). Every
-  message above is a format string from that source, not a captured line.
-- Not run on a lab yet. A capture of a Kolla-Ansible container in a restart loop (unit journal, `docker inspect`,
-  `docker ps`) is requested to confirm in particular that `RestartCount` stays at `0`.
+- Written from upstream source and documentation: systemd v259.10, Kolla-Ansible and ansible-collection-kolla
+  `stable/2026.1`, Docker documentation (main branch) and Moby v28.5.2, containers-common (main branch); the restart
+  loop, `RestartCount` and the Docker debug reload checked on a lab (*Lab observations*), with systemd 255 and Docker,
+  not Podman. The start limit was not reached there, so `Start request repeated too quickly.` and `Failed to start`
+  were not observed.
 - Older systemd releases may lack `--list-invocations`, and the wording of some messages differs between versions.
 - The unit names of package installs vary by distribution; not listed exhaustively.
 
