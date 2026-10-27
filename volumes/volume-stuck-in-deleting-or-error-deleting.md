@@ -1,7 +1,7 @@
 ---
 title: Volume stuck in deleting, in error_deleting, or back to available after a delete
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [cinder, ceph, rabbitmq]
 deployment_methods: [kolla-ansible, any]
@@ -11,7 +11,8 @@ environment:
   storage: any Cinder backend; Ceph RBD details where named
   os: any
 risk: destructive
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-27, note: "Cinder LVM: cause 1 (cinder-volume stopped with systemctl; queued delete ran at start, no reset needed, so the reset step was not run for it), cause 2 (LV held open: error_deleting, reset to error and delete), cause 5 (snapshot, attachment, --force, --cascade); not run: all Ceph RBD steps (causes 3 and 4 on Ceph, rbd status/children/ls/trash), encrypted volumes (cause 6), a lost RabbitMQ message, --force on a deleting volume" }
 upstream_refs:
   - https://docs.openstack.org/cinder/2026.1/admin/manage-volumes.html
   - https://docs.openstack.org/cinder/2026.1/admin/troubleshoot.html
@@ -126,6 +127,9 @@ The backend sees the volume open (an RBD watcher, an exported LUN with a session
 to `available`. Often a compute that still has the volume attached although Cinder no longer shows the attachment
 ([stale volume attachment](stale-volume-attachment-after-instance-deleted-or-evacuated.md)).
 
+On LVM, a logical volume still open on the `cinder-volume` host does not give `available` back: `lvremove` fails with
+`Logical volume cinder-volumes/volume-<volume-id> in use.` and the volume goes to `error_deleting` (as cause 2).
+
 ### Cause 5: refused by the API
 
 Attached, snapshots, migrating, in a group or transfer: the `Invalid volume` message names the conditions.
@@ -198,17 +202,40 @@ Fix the key manager (Barbican, or the configured backend) from the API log, then
 ## Verification
 
 ```bash
-openstack volume show <volume-id>                 # No volume with a name or ID of '<volume-id>' exists.
+openstack volume show <volume-id>                 # No Volume found for <volume-id>
 openstack quota show --usage <project>            # volumes and gigabytes in use went down
 ```
 
 On Ceph: `rbd ls <pool> | grep <volume-id>` shows nothing, or only a `.deleted` image kept for its clones; `rbd trash
 ls <pool>` shows whether it waits in the trash.
 
+## Lab observations
+
+Kolla-Ansible 22.2.0 (2026.1) all-in-one, Cinder LVM (thin, iSCSI), python-openstackclient 9.0.0, on 2026-10-27,
+with 1 GB volumes:
+
+- Cause 5: a volume with a snapshot, and an attached one, were refused at once with the page's `Invalid volume: ...`
+  message (400). With `--force` on the attached one: `Invalid volume: Volume  must not be migrating, attached, belong
+  to a group, have snapshots, awaiting a transfer, or be disassociated from snapshots after volume transfer.` (the
+  status condition dropped, as the page says). `volume delete --cascade` removed the volume and its snapshot in 6 s.
+- Cause 1: `systemctl stop kolla-cinder_volume-container.service`, then `volume delete`: `deleting`, nothing in the
+  `cinder-volume` log; the service showed `down` in `volume service list` within 53 s. After `systemctl
+  start`: `Initiating service 2 cleanup`, `Service 2 cleanup completed.`, then the queued delete ran (its request ID
+  is the one of the API call) and `Deleted volume successfully.` 15 s after the start; no reset needed.
+- Cause 2 (LVM volume held open on the host): `error_deleting` 37 s after the delete, the `cinder-volume` log with
+  `ProcessExecutionError` from `lvremove` and `Stderr: '  Logical volume cinder-volumes/volume-<volume-id> in use.'`.
+  A new `volume delete` was refused (`Invalid volume: Volume status must be available or error ...`). After closing
+  the device, `volume set --state error` and `volume delete`: gone in 6 s.
+- `openstack volume show` of a deleted volume: `No Volume found for <volume-id>`. `quota show --usage` showed the
+  volumes and gigabytes in use back to 0.
+- Not run: the Ceph RBD parts (causes 3 and 4 on Ceph, `rbd status`, `rbd children`, trash), encrypted volumes (cause
+  6), `volume delete --force` of a `deleting` volume, a lost RabbitMQ message.
+
 ## Validity and limits
 
 - Written from Cinder 2026.1 (`cinder/volume/api.py` `delete`, `cinder/volume/manager.py` `delete_volume`,
-  `cinder/volume/drivers/rbd.py` `delete_volume`) and python-openstackclient 2026.1. Not reproduced on a lab.
+  `cinder/volume/drivers/rbd.py` `delete_volume`) and python-openstackclient 2026.1. Reproduced on an all-in-one lab
+  with Cinder LVM for causes 1, 2 and 5 (*Lab observations*); the Ceph RBD and encrypted-volume parts were not.
 - Not covered: volumes in groups or consistency groups, transfers, backends other than Ceph in detail (for LVM,
   leftovers show in `sudo lvs <vg> | grep volume-<volume-id>`), and the database purge of deleted rows.
 
