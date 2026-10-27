@@ -1,7 +1,7 @@
 ---
 title: Every instance on one compute loses the network while Nova shows them ACTIVE (ovs-vswitchd down)
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [neutron, ovs]
 deployment_methods: [kolla-ansible]
@@ -11,13 +11,14 @@ environment:
   storage: local ephemeral disk on the computes, no Cinder
   os: ubuntu-24.04 (noble), docker
 risk: state-changing
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, multinode (3 controllers, 2 computes), ML2/OVS VXLAN", date: 2026-10-27, note: "full procedure on a disposable lab for cause 1 (unit stopped, then started; Diagnosis commands with sudo, agent log read); cause 2 simulated by freezing ovs-vswitchd with kill -STOP, resolved by the restart; the Any: commands, a real OOM kill or hang, and OVN not run" }
 upstream_refs:
   - https://docs.openstack.org/neutron/latest/admin/deploy-ovs-selfservice.html
   - https://docs.openstack.org/neutron/latest/contributor/internals/openvswitch_agent.html
   - https://docs.openstack.org/kolla-ansible/latest/reference/networking/neutron.html
 authored_by: agent:ozarland-author
-last_verified: 2026-10-21
+last_verified: 2026-10-27
 ---
 
 # Every instance on one compute loses the network while Nova shows them ACTIVE (ovs-vswitchd down)
@@ -42,8 +43,9 @@ $ openstack network agent list --agent-type open-vswitch
 ...
 ```
 
-The loss does not start at once. On the lab, traffic kept flowing for about 25 s after ovs-vswitchd stopped, then
-stopped completely.
+The loss does not start at once. On two lab runs, traffic kept flowing for about 25 s and for 6 s after ovs-vswitchd
+stopped, then stopped completely. The agent is not reported dead at once either: on the second run it still showed
+`:-)` 53 s after the stop and `XXX` 65 s after.
 
 ## Impact
 
@@ -59,7 +61,7 @@ stopped completely.
 Run on a controller, with admin credentials:
 
 ```bash
-# 1. The Open vSwitch agent of the compute is not alive
+# 1. The Open vSwitch agent of the compute is not alive (can take about a minute after the stop)
 openstack network agent list --agent-type open-vswitch --host <compute>
 
 # 2. The instances of that compute are still ACTIVE in Nova
@@ -70,12 +72,16 @@ Run on the compute:
 
 ```bash
 # 3. The openvswitch_vswitchd container is stopped (openvswitch_db still runs)
-docker ps -a --filter name=openvswitch --format '{{.Names}} {{.Status}}'
+sudo docker ps -a --filter name=openvswitch --format '{{.Names}} {{.Status}}'
 
 # 4. ovs-vswitchd does not answer, while ovsdb-server does
-docker exec openvswitch_vswitchd ovs-appctl version   # fails while ovs-vswitchd is down (container not running)
-docker exec openvswitch_db ovs-vsctl show             # still answers
+sudo docker exec openvswitch_vswitchd ovs-appctl version   # fails while ovs-vswitchd is down (container not running)
+sudo docker exec openvswitch_db ovs-vsctl show             # still answers
 ```
+
+On the lab, `docker` without `sudo` is denied (`permission denied while trying to connect to the docker API`). The
+filter also lists `neutron_openvswitch_agent`. With the unit stopped, check 3 shows `openvswitch_vswitchd Exited (0)`
+and check 4 prints `Error response from daemon: container <container-id> is not running`.
 
 `ovs-appctl` runs in the `openvswitch_vswitchd` container. From `openvswitch_db`, `ovs-appctl -t ovs-vswitchd` reads a
 pidfile that is not valid there and fails even while ovs-vswitchd runs (`stale pidfile`, `cannot read pidfile`),
@@ -92,15 +98,19 @@ On the compute, find why ovs-vswitchd stopped:
 ```bash
 # State and recent history of the service
 systemctl status kolla-openvswitch_vswitchd-container.service
-journalctl -u kolla-openvswitch_vswitchd-container.service --since "-1h"
+sudo journalctl -u kolla-openvswitch_vswitchd-container.service --since "-1h"
 
 # Log of ovs-vswitchd itself
-docker logs --tail 200 openvswitch_vswitchd
-tail -n 200 /var/log/kolla/openvswitch/ovs-vswitchd.log
+sudo docker logs --tail 200 openvswitch_vswitchd
+sudo tail -n 200 /var/log/kolla/openvswitch/ovs-vswitchd.log
 
 # Killed by the kernel for lack of memory?
-dmesg -T | grep -i -E 'out of memory|killed process'
+sudo dmesg -T | grep -i -E 'out of memory|killed process'
 ```
+
+Without `sudo`, `tail` gives `Permission denied` and `dmesg` gives `read kernel buffer failed: Operation not
+permitted`. After a plain stop of the unit (as on the lab), the journal shows `Stopping`, `Deactivated successfully`,
+`Stopped`, the container `Exited (0)`, and `dmesg` has no out-of-memory line.
 
 **Any:** with a packaged Open vSwitch, the service is `ovs-vswitchd` (or `openvswitch-switch` on Ubuntu); read
 `journalctl -u ovs-vswitchd` and `/var/log/openvswitch/ovs-vswitchd.log`.
@@ -108,8 +118,16 @@ dmesg -T | grep -i -E 'out of memory|killed process'
 ### Neutron
 
 The Open vSwitch agent cannot program flows without ovs-vswitchd, so it is reported dead. Its log on the compute
-(`/var/log/kolla/neutron/neutron-openvswitch-agent.log`) is expected to show errors talking to Open vSwitch (this log
-was not read on the lab). The dead agent is a consequence, not the cause.
+(`sudo grep -E 'OVS is|Failed to communicate' /var/log/kolla/neutron/neutron-openvswitch-agent.log`) shows, as
+captured on the lab:
+
+```text
+ERROR ...openflow.native.br_int [...] Failed to communicate with the switch: RuntimeError: ofctl request ...
+WARNING ...ovs_neutron_agent [...] OVS is dead. OVSNeutronAgent will keep running and checking OVS status periodically.
+```
+
+and once ovs-vswitchd is back, `OVS is restarted. OVSNeutronAgent will reset bridges and recover ports.` then
+`Agent has just been revived. Doing a full sync.` The dead agent is a consequence, not the cause.
 
 ### Nova
 
@@ -124,9 +142,11 @@ The `openvswitch_vswitchd` container is stopped or restarting. The reason is in 
 
 ### Cause 2: ovs-vswitchd runs but is stuck
 
-The container is up but `docker exec openvswitch_vswitchd ovs-appctl version` hangs or times out. Not observed on
-the lab; the
-resolution below (a restart instead of a start) is expected to apply, but was not tested.
+The container is up but `sudo docker exec openvswitch_vswitchd ovs-appctl version` hangs or times out (wrap it in
+`timeout 10`). The container still reports `Up (healthy)`: on the lab, with ovs-vswitchd frozen by `kill -STOP`, it
+stayed healthy for the 52 s observed, `ovs-appctl version` gave no answer in 10 s, `ovs-vsctl show` in
+`openvswitch_db` still answered, and the agent logged nothing until the restart. Simulated on the lab only (a frozen
+process, not a real hang).
 
 ## Resolution
 
@@ -141,7 +161,7 @@ On the compute, start ovs-vswitchd through its unit.
 **Kolla-Ansible:**
 
 ```bash
-systemctl start kolla-openvswitch_vswitchd-container.service
+sudo systemctl start kolla-openvswitch_vswitchd-container.service
 ```
 
 **Any:**
@@ -151,8 +171,9 @@ systemctl start ovs-vswitchd
 ```
 
 Then nothing else is needed: the Open vSwitch agent notices the restart of ovs-vswitchd and programs the flows
-again. On the lab, the instances answered again about 30 s after the start, without restarting the agent or the
-instances.
+again. On the lab, the instances answered again about 30 s after the start on one run and 3 s after it on another,
+without restarting the agent or the instances. Without `sudo`, `systemctl start` fails with `Interactive
+authentication required.`
 
 Before closing the incident, find why it stopped (see Diagnosis). If it was an out-of-memory kill, it can happen
 again.
@@ -165,8 +186,12 @@ again.
 **Kolla-Ansible:**
 
 ```bash
-systemctl restart kolla-openvswitch_vswitchd-container.service
+sudo systemctl restart kolla-openvswitch_vswitchd-container.service
 ```
+
+On the lab (frozen ovs-vswitchd), the restart returned in about 1 s and the instance answered again 2.6 s later. For
+a few seconds after the restart, `ovs-appctl version` prints `cannot read pidfile
+"/var/run/openvswitch/ovs-vswitchd.pid" (No such process)`; it answers once ovs-vswitchd has started.
 
 **Any:**
 
@@ -189,8 +214,8 @@ ping -c 10 <instance-address>
 On the compute:
 
 ```bash
-docker exec openvswitch_vswitchd ovs-appctl version   # answers
-docker exec openvswitch_vswitchd ovs-ofctl dump-flows br-int | head
+sudo docker exec openvswitch_vswitchd ovs-appctl version   # answers
+sudo docker exec openvswitch_vswitchd ovs-ofctl dump-flows br-int | head
 ```
 
 Expected: agent `:-)` (alive), pings answered, flows present on `br-int`.
@@ -212,18 +237,31 @@ compute. A request was sent every 0.5 s to one instance on each compute.
 - The instances recovered about 30 s after ovs-vswitchd started, with no other action.
 - Nova never noticed anything.
 
+A second run on another build of the same lab (2026-10-27), same method, one test instance on each compute, a
+request every 0.5 s from the router namespace:
+
+| | Cause 1 (unit stopped) | Cause 2 simulated (`kill -STOP`) |
+|---|---|---|
+| Loss starts after the failure | 6 s | 17 s |
+| Agent of the compute | `:-)` until at least 53 s, not alive at 65 s; alive 6 s after the start | not polled |
+| Container status | `Exited (0)` | `Up (healthy)` |
+| Instance answers again | 3 s after `systemctl start` (gap 81.4 s) | 2.6 s after `systemctl restart` returned (gap 39.7 s) |
+| Instance on the other compute | 0 lost | 0 lost |
+
 ## Validity and limits
 
 - Observed on one lab build with the configuration above: OpenStack 2026.1, Kolla-Ansible 22.2.0, ML2/OVS with
   VXLAN, Docker, Ubuntu 24.04. Host addresses on plain interfaces, not on an OVS bridge.
 - Observed: the symptom, the signature (agent not alive, container stopped, Nova unaware), the recovery by starting
   the unit again.
-- Not run: the root-cause search in logs and `dmesg` (the lab stopped the unit on purpose), cause 2 (stuck
-  ovs-vswitchd), the `Any:` commands.
+- Run on the second lab run: the root-cause commands of Diagnosis (logs, journal, `dmesg`; nothing to find, since
+  the unit was stopped on purpose), the Neutron agent log, cause 2 as a simulation (`kill -STOP` on ovs-vswitchd)
+  and its restart.
+- Not run: the `Any:` commands; a real out-of-memory kill or a real hang of ovs-vswitchd.
 - Not tested: OVN, other releases, other deployment tools, production scale, a host whose own address sits on an OVS
   bridge (the host would lose its connectivity too, and you would need console access), DPDK datapaths.
-- The 25 s delay before the cut and the 30 s recovery are lab figures; they depend on traffic and on the number of
-  ports.
+- The delays before the cut (25 s, 6 s, 17 s) and the recovery times (30 s, 3 s) are lab figures; they depend on
+  traffic and on the number of ports.
 
 ## Related
 
