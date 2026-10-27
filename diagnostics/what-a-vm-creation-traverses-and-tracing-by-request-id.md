@@ -97,7 +97,7 @@ centralised and searchable by request id follows one boot across Nova, Placement
 
 Note that Neutron and Placement log Nova's request id (the global request id) next to their own for the calls
 Nova makes to them (`[req-<nova-id> req-<own-id> ...]`), so the one grep above finds their lines too. Glance, at
-the default log level, logs no line for a successful call, so finding nothing there does not mean Glance was not
+the default log level (observed on Kolla-Ansible with `debug = False`), logged no line for a successful call, so finding nothing there does not mean Glance was not
 called. A few unrelated lines can carry the id as well (on a lab, a later `GET /v2.1` version request in
 `nova-api.log`); check that each line belongs to the request.
 
@@ -128,7 +128,9 @@ Kolla-Ansible 2026.1 all-in-one, ML2/OVS. Two failed boots traced with the comma
 
 Describes the Nova cells v2 architecture (mandatory since Ocata) with the libvirt driver and the Neutron ML2 or OVN
 backends. Log paths are given for Kolla-Ansible; other deployments differ. Request-id pairing in logs depends on
-release and on `oslo.log` configuration.
+release and on `oslo.log` configuration. The lab confirmation (OpenStack 2026.1, Kolla-Ansible all-in-one, ML2/OVS)
+traced two failures, no valid host and a port binding failure; it did not reach the Cinder, Glance download,
+libvirt and cell-mapping rows of the table.
 
 ## Related
 

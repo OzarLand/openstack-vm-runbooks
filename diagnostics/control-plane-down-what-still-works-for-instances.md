@@ -59,7 +59,8 @@ an outage. Verify them for your own platform before an incident; they depend on 
    that a router failover still works. Write the result down for your platform.
    **Kolla-Ansible 2026.1:** each container is wrapped in a systemd unit `kolla-<container>-container.service` with
    `Restart=always`, so a plain `docker stop` is undone about a minute later. Stop the unit instead
-   (`systemctl stop kolla-<container>-container.service`) and start it again the same way.
+   (`systemctl stop kolla-<container>-container.service`) and start it again the same way. This stops the control
+   plane: do it on a lab or in a planned recovery exercise only, never to diagnose a live incident.
 
 ## How to check on a live platform, read-only
 
@@ -89,7 +90,7 @@ Glance, Placement, Heat, Horizon, RabbitMQ, MariaDB and memcached were stopped f
 - A running instance answered 1 ping per second on its fixed and floating addresses with no loss for the whole stop.
 - A forced lease renewal inside the instance was answered by dnsmasq (`DHCPREQUEST` / `DHCPACK`) during the stop.
 - A metadata request from the running instance got no answer (timeout). An instance rebooted during the stop got its
-  address by DHCP but failed every metadata request; CirrOS waits about 50 s per try, and did not start `sshd` until
+  address by DHCP but failed every metadata request; CirrOS waited roughly 50 s per try, and did not start `sshd` until
   metadata answered, about a minute after the control plane was started again (8 minutes after its boot).
 - When RabbitMQ and `neutron-server` came back, the DHCP agent logged `Agent has just been revived. Scheduling full
   sync` and restarted dnsmasq; no lease was lost.
@@ -97,7 +98,9 @@ Glance, Placement, Heat, Horizon, RabbitMQ, MariaDB and memcached were stopped f
 ## Validity and limits
 
 General behaviour of Nova and Neutron with ML2/OVS and OVN as documented upstream and observed by an operator in a
-real control-plane incident; release not recorded. Other backends (Linux Bridge, SR-IOV, vendor SDN) differ.
+real control-plane incident. The lab confirmation (OpenStack 2026.1, Kolla-Ansible all-in-one) covers ML2/OVS with a
+non-HA (legacy) router only: the OVN behaviour, L3 HA and the router or gateway failover check were not tested.
+Other backends (Linux Bridge, SR-IOV, vendor SDN) differ.
 Octavia load balancers, Designate records and other services with their own data-plane components have their own
 behaviour, not covered here.
 

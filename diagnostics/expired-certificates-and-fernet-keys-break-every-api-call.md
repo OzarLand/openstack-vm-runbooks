@@ -62,7 +62,7 @@ openssl s_client -connect <controller>:3306 -starttls mysql </dev/null 2>/dev/nu
 
 # Does a token issued on one node validate on another?
 T=$(openstack token issue -f value -c id)
-curl -s -o /dev/null -w "%{http_code}\n" -H "X-Auth-Token: $T" -H "X-Subject-Token: $T" http://<other-keystone-node>:5000/v3/auth/tokens   # 200 or 401
+curl -s -o /dev/null -w "%{http_code}\n" -H "X-Auth-Token: $T" -H "X-Subject-Token: $T" <scheme>://<other-keystone-node>:5000/v3/auth/tokens   # 200 or 401
 ```
 
 On an endpoint without TLS, the `openssl` checks print `Could not read certificate from <stdin>` and `Unable to load
@@ -131,7 +131,8 @@ Kolla-Ansible 2026.1 all-in-one (one Keystone node), no TLS. The Fernet key set 
 ## Validity and limits
 
 Derived from an operator's account of long-lived platforms where certificate expiry was one of the most common
-causes of a complete control-plane outage; release not recorded. Paths and commands are given for Kolla-Ansible;
+causes of a complete control-plane outage. The Fernet part was confirmed on a lab (OpenStack 2026.1, Kolla-Ansible
+all-in-one, one Keystone node); the certificate part and the differences between Keystone nodes were not. Paths and commands are given for Kolla-Ansible;
 other deployment tools manage certificates and Fernet keys their own way.
 
 ## Related
