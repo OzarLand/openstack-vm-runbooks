@@ -189,7 +189,6 @@ behind it; open a *Problem solved* issue if you have one.
 
 1. Live migration fails: pre-check errors, shared storage assumptions, CPU model mismatch.
 2. Floating IP does not answer: where to look between the router, the gateway and the security groups.
-3. Console not available: VNC/SPICE proxy and hypervisor side.
 
 ## Contributing
 
