@@ -91,8 +91,10 @@ A volume that stays in `deleting` means step 2 never ran or never finished: the 
   `<volume-name>.deleted` and kept until those clones are gone; when it has other snapshots with dependent images, the
   driver flattens them first (`Image <pool>/<image>@<snap> is dependent on the image <volume>.`), which takes time for
   large clones.
-- The driver first tries to remove the image; the RBD trash is a fallback (when snapshots remain), and with
-  `enable_deferred_deletion` the image is moved to the trash and deleted after `deferred_deletion_delay`.
+- The driver first tries to remove the image; the RBD trash is a fallback when the removal fails (snapshots
+  remain). `enable_deferred_deletion` sets that fallback's delay (`deferred_deletion_delay`) and starts Cinder's
+  periodic trash purge (every `deferred_deletion_purge_interval`, 60 s by default). Without it (the default), a
+  trashed image stays in the RBD trash, and keeps its space, until someone or a Ceph trash purge schedule purges it.
 - **Encrypted volumes:** the API deletes the volume's encryption key from the key manager **before** sending the
   delete. From then on the volume cannot be decrypted, even if it later comes back `available`. If the key manager
   fails, the volume goes to `error_deleting` with `Unable to delete encryption key for volume` in the API's answer and
@@ -146,7 +148,8 @@ the volume: `Initiating service … cleanup`, then `Deleted volume successfully.
 
 > ⚠️ **State-changing.** `volume set --state error` changes Cinder's record only, not the backend. Precondition: no
 > delete of this volume in progress in the `cinder-volume` log (a reset during a delete that is still running races
-> it). For an encrypted volume, the key is already gone: the data is not recoverable whatever the status says. Undo:
+> it). For an encrypted volume, the API deleted the key before the delete was sent (causes 1 to 5): the data is not
+> recoverable whatever the status says. In cause 6 the key deletion failed, so the key is still there. Undo:
 > `openstack volume set --state <previous-state> <volume-id>`.
 
 ```bash
@@ -161,7 +164,7 @@ openstack volume delete <volume-id>
 ```
 
 `openstack volume delete --force <volume-id>` (admin) has the same effect as the reset and the delete together, with
-the same 🛑 and the same precondition.
+the same 🛑 and both preconditions: the ⚠️ one (no delete of this volume in progress) and the 🛑 one.
 
 ### For cause 2: fix the backend, then delete again
 
@@ -203,7 +206,7 @@ openstack quota show --usage <project>            # volumes and gigabytes in use
 ```
 
 On Ceph: `rbd ls <pool> | grep <volume-id>` shows nothing, or only a `.deleted` image kept for its clones; `rbd trash
-ls <pool>` shows whether it waits in the trash.
+ls <pool>` shows whether it waits in the trash: without `enable_deferred_deletion`, Cinder never purges it.
 
 ## Validity and limits
 

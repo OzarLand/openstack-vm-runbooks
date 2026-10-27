@@ -112,8 +112,8 @@ The scheduler places instances on a compute by its `MEMORY_MB` inventory in Plac
 The host runs out of memory when what really runs there exceeds what the inventory assumed:
 
 - the host's own processes use more than `reserved_host_memory_mb`: containers of the platform, Open vSwitch, a
-  storage daemon (Ceph OSDs on a hyperconverged compute), monitoring agents, and memory the kernel cannot reclaim (shared memory and tmpfs, dirty pages under writeback,
-  unreclaimable slab), whereas the page cache is reclaimed;
+  storage daemon (Ceph OSDs on a hyperconverged compute), monitoring agents, and memory the kernel cannot reclaim
+  (shared memory and tmpfs, dirty pages under writeback, unreclaimable slab), whereas the page cache is reclaimed;
 - QEMU uses more than the flavor's RAM for each guest (its own code, device emulation, I/O buffers);
 - `ram_allocation_ratio` above 1.0 lets the guests' total exceed the host's memory, and the guests use it.
 
@@ -189,8 +189,9 @@ reserved_host_memory_mb = <MB>
 > ⚠️ **State-changing.** `reconfigure`, or the restart of `nova-compute` without Kolla-Ansible, restarts
 > `nova-compute` on the computes; running instances are not affected. The compute's `MEMORY_MB` inventory shrinks: the
 > scheduler places fewer instances there. Instances already there stay, so a compute already over its new inventory
-> stays over it until instances leave. Undo: set `reserved_host_memory_mb` and `ram_allocation_ratio` back to the
-> values read above, explicitly (removing them does not restore the ratio), and reconfigure or restart again.
+> stays over it until instances leave. Undo: set back what you changed to the values read above, explicitly
+> (removing `ram_allocation_ratio` does not restore the ratio; if only `reserved_host_memory_mb` changed, there is no
+> ratio to restore), and reconfigure or restart again.
 
 ```bash
 kolla-ansible reconfigure -i <inventory> --tags nova --limit <computes>
@@ -222,9 +223,11 @@ keeps a margin with every instance running.
 - An out-of-memory inside the guest is a different problem: the guest's own kernel kills a process, the instance stays
   `ACTIVE`.
 - Not covered: hugepages and NUMA-pinned instances, memory ballooning, swap policy on computes, and `oom_score_adj`
-  tuning. Hugepages change the arithmetic above: Nova's huge pages guide says persistent huge pages are not usable by
-  standard host processes and asks to reserve enough non-huge-page memory for them; a hugepage pool on a compute is
-  memory that neither the host nor small-page guests can use.
+  tuning. Hugepages change the arithmetic above: the libvirt driver reports `MEMORY_MB` `total` as the host's whole
+  memory, with `reserved` only `reserved_host_memory_mb` (`update_provider_tree` in `nova/virt/libvirt/driver.py`), so a
+  persistent hugepage pool stays in the inventory. Nova's huge pages guide says persistent huge pages are not usable by
+  standard host processes and asks to reserve enough non-huge-page memory for them: without that, small-page guests
+  can be placed into memory they cannot use.
 
 ## Related
 
