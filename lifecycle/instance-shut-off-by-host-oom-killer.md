@@ -68,7 +68,9 @@ memory. The process name may be shortened by the kernel (`qemu-system-x86`, `qem
 
 Then the libvirt log of that guest, which records why QEMU stopped:
 
-**Kolla-Ansible:** `sudo docker exec nova_libvirt tail -n 5 /var/log/libvirt/qemu/<instance-name>.log`
+**Kolla-Ansible:** `sudo docker exec nova_libvirt tail -n 5 /var/log/libvirt/qemu/<instance-name>.log` (`podman exec`
+with Podman). This directory is in the container's own layer: it is lost when `nova_libvirt` is recreated, so read it
+before a redeploy.
 
 **Any:** `sudo tail -n 5 /var/log/libvirt/qemu/<instance-name>.log`
 
@@ -94,8 +96,9 @@ Instance shutdown by itself. Calling the stop API. Current vm_state: active, ...
 libvirt reports the guest as stopped. `nova-compute` logs `VM Stopped (Lifecycle Event)`, sees an instance `ACTIVE` in
 its database whose guest is shut off, logs `Instance shutdown by itself. Calling the stop API.` and calls the stop API
 (`nova/compute/manager.py`, `_sync_instance_power_state`). That is the `stop` in the instance's actions: Nova aligns
-its record with the hypervisor, it does not restart the guest. If lifecycle events are missed, the periodic power
-state sync does the same within `sync_power_state_interval` (600 s by default).
+its record with the hypervisor, it does not restart the guest. If lifecycle events are missed, or turned off with
+`[workarounds] handle_virt_lifecycle_events = false`, only the periodic power state sync does it, within
+`sync_power_state_interval` (600 s by default).
 
 So any guest that dies on the compute looks like this in Nova: a QEMU crash, a `kill`, or the OOM killer. The kernel
 log tells which.
@@ -109,7 +112,8 @@ The scheduler places instances on a compute by its `MEMORY_MB` inventory in Plac
 The host runs out of memory when what really runs there exceeds what the inventory assumed:
 
 - the host's own processes use more than `reserved_host_memory_mb`: containers of the platform, Open vSwitch, a
-  storage daemon (Ceph OSDs on a hyperconverged compute), monitoring agents, the page cache it cannot free;
+  storage daemon (Ceph OSDs on a hyperconverged compute), monitoring agents, and memory the kernel cannot reclaim (shared memory and tmpfs, dirty pages under writeback,
+  unreclaimable slab), whereas the page cache is reclaimed;
 - QEMU uses more than the flavor's RAM for each guest (its own code, device emulation, I/O buffers);
 - `ram_allocation_ratio` above 1.0 lets the guests' total exceed the host's memory, and the guests use it.
 
@@ -160,8 +164,17 @@ If the compute is still short of memory, move instances away first, or the next 
 
 ### For causes 1 and 2: make the inventory match the host
 
-Set `reserved_host_memory_mb` to what the host's own processes really use, with a margin, and keep
-`ram_allocation_ratio` at 1.0 unless the guests are known to leave memory unused.
+Read the compute's current inventory first, and write down `reserved` and `allocation_ratio`: they are the values to
+restore if the change has to be undone.
+
+```bash
+openstack resource provider inventory show <rp-uuid> MEMORY_MB
+```
+
+Set `reserved_host_memory_mb` to what the host's own processes really use, with a margin. Set `ram_allocation_ratio`
+only if you want to change the current ratio (to 1.0 unless the guests are known to leave memory unused): once set,
+it overwrites any ratio set through the Placement API, and removing the option later does not put the old ratio back
+(the option's help in Nova 2026.1).
 
 **Kolla-Ansible:** in `/etc/kolla/config/nova/nova-compute.conf` (or per host, under
 `/etc/kolla/config/nova/<inventory-hostname>/nova.conf`):
@@ -169,16 +182,18 @@ Set `reserved_host_memory_mb` to what the host's own processes really use, with 
 ```ini
 [DEFAULT]
 reserved_host_memory_mb = <MB>
-ram_allocation_ratio = 1.0
+# only to change the ratio:
+# ram_allocation_ratio = 1.0
 ```
 
-> ⚠️ **State-changing.** `reconfigure` restarts `nova_compute` on the computes; running instances are not affected.
-> The compute's `MEMORY_MB` inventory shrinks: the scheduler places fewer instances there. Instances already there
-> stay, so a compute already over its new inventory stays over it until instances leave. Undo: restore the values and
-> reconfigure again.
+> ⚠️ **State-changing.** `reconfigure`, or the restart of `nova-compute` without Kolla-Ansible, restarts
+> `nova-compute` on the computes; running instances are not affected. The compute's `MEMORY_MB` inventory shrinks: the
+> scheduler places fewer instances there. Instances already there stay, so a compute already over its new inventory
+> stays over it until instances leave. Undo: set `reserved_host_memory_mb` and `ram_allocation_ratio` back to the
+> values read above, explicitly (removing them does not restore the ratio), and reconfigure or restart again.
 
 ```bash
-kolla-ansible reconfigure -i <inventory> --tags nova
+kolla-ansible reconfigure -i <inventory> --tags nova --limit <computes>
 ```
 
 **Any:** the same options in `nova.conf` on the computes, then restart `nova-compute`.
@@ -206,8 +221,10 @@ keeps a margin with every instance running.
   the Linux kernel (`mm/oom_kill.c`) and libvirt (`src/qemu/qemu_process.c`). Not reproduced on a lab.
 - An out-of-memory inside the guest is a different problem: the guest's own kernel kills a process, the instance stays
   `ACTIVE`.
-- Not covered: hugepages and NUMA-pinned instances (their memory is reserved differently), memory ballooning, swap
-  policy on computes, and `oom_score_adj` tuning.
+- Not covered: hugepages and NUMA-pinned instances, memory ballooning, swap policy on computes, and `oom_score_adj`
+  tuning. Hugepages change the arithmetic above: Nova's huge pages guide says persistent huge pages are not usable by
+  standard host processes and asks to reserve enough non-huge-page memory for them; a hugepage pool on a compute is
+  memory that neither the host nor small-page guests can use.
 
 ## Related
 
