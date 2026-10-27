@@ -11,7 +11,8 @@ environment:
   storage: any
   os: any
 risk: state-changing
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-27, note: "one Keystone, no HAProxy: wrong password (Keystone WARNING), revoked and made-up tokens (middleware WARNING, 401), Keystone stopped (middleware CRITICAL, 503), Fernet rotation lines; greps with sudo, the awk address extraction replaced; not observed: Bad response code, broken service credentials, key repository errors, Fernet key mismatch between nodes; default_log_levels change not run" }
 upstream_refs:
   - https://opendev.org/openstack/keystone/src/branch/stable/2026.1/keystone/server/flask/application.py
   - https://opendev.org/openstack/keystone/src/branch/stable/2026.1/keystone/token/provider.py
@@ -21,7 +22,7 @@ upstream_refs:
   - https://opendev.org/openstack/keystonemiddleware/src/branch/stable/2026.1/keystonemiddleware/auth_token/_identity.py
   - https://opendev.org/openstack/oslo.log/src/branch/stable/2026.1/oslo_log/_options.py
 authored_by: agent:ozarland-author
-last_verified: 2026-10-26
+last_verified: 2026-10-27
 ---
 
 # Reading the Keystone logs, and the authentication lines every service writes (401, 503, Fernet)
@@ -81,9 +82,11 @@ dedicated line, only the 404 to the caller. That string is the one to look for i
 
 ```bash
 # Kolla-Ansible, on each controller
-grep -c "Authorization failed" /var/log/kolla/keystone/keystone.log
-grep "Authorization failed" /var/log/kolla/keystone/keystone.log | awk '{print $NF}' | sort | uniq -c | sort -rn | head
-#   who gets refused most (last field: client address)
+sudo grep -c "Authorization failed" /var/log/kolla/keystone/keystone.log
+sudo grep "Authorization failed" /var/log/kolla/keystone/keystone.log | sed -E 's/.* from ([^:]+): .*/\1/' | sort | uniq -c | sort -rn | head
+#   who gets refused most (the address after "from"; the exception follows it on the line).
+#   A line with no ": <exception>" after the address is printed whole, and an IPv6 address
+#   is cut at its first ":"; read those lines by eye.
 ```
 
 ## In the other services: keystonemiddleware
@@ -114,9 +117,9 @@ The useful split:
 
 ```bash
 # Kolla-Ansible, on a controller: which services complain, and how
-grep -l "Unable to validate token" /var/log/kolla/*/*.log
-grep -h "Unable to validate token" /var/log/kolla/*/*.log | sed 's/.*Unable to validate token: //' | sort | uniq -c
-grep -c "Authorization failed for token" /var/log/kolla/nova/nova-api.log
+sudo sh -c 'grep -l "Unable to validate token" /var/log/kolla/*/*.log'
+sudo sh -c 'grep -h "Unable to validate token" /var/log/kolla/*/*.log' | sed 's/.*Unable to validate token: //' | sort | uniq -c
+sudo grep -c "Authorization failed for token" /var/log/kolla/nova/nova-api.log
 ```
 
 ## Clock and certificates
@@ -138,10 +141,31 @@ more serious). An expired TLS certificate shows as connection errors (`ConnectFa
 5. **Below:** HAProxy's `keystone` backend and memcached (the HAProxy, keepalived and memcached page of this folder,
    once published).
 
+## Captured on a lab
+
+Kolla-Ansible 22.2.0 (2026.1) all-in-one, no HAProxy, 2026-10-27, ids and addresses replaced:
+
+```text
+# keystone.log, a login with a wrong password (the client got 401)
+WARNING keystone.server.flask.application [None req-<id> - - - - - -] Authorization failed. The request you have made requires authentication. from 192.0.2.10: keystone.exception.Unauthorized: The request you have made requires authentication.
+# nova-api.log, a revoked token and a made-up token (the client got 401 for both)
+WARNING keystonemiddleware.auth_token [None req-<id> <user-id> <project-id> - - default default] Authorization failed for token: …auth_token._exceptions.InvalidToken: Token authorization failed
+# nova-api.log, Keystone stopped (systemctl stop kolla-keystone-container.service), a token not yet cached (503 in 3.6 s)
+CRITICAL keystonemiddleware.auth_token [None req-<id> ...] Unable to validate token: Unable to establish connection to http://192.0.2.10:5000/v3/auth/tokens: HTTPConnectionPool(host='192.0.2.10', port=5000): Max retries exceeded with url: /v3/auth/tokens ...
+# keystone.log, the daily Fernet rotation
+INFO keystone.common.fernet_utils [-] Starting key rotation with 3 key files: ['/etc/keystone/fernet-keys/9', ...]
+INFO keystone.common.fernet_utils [-] Current primary key is: 9
+INFO keystone.common.fernet_utils [-] Next primary key will be: 10
+```
+
+`Identity response:` did not appear with these three cases. The Keystone line ends with the exception, so the client
+address is not the last field: the grep above extracts it after `from`.
+
 ## Validity and limits
 
-- Every message is quoted from Keystone, `keystonemiddleware` and `oslo.log` 2026.1. **None was captured on a lab.**
-  A lab request asks for real samples.
+- Every message is quoted from Keystone, `keystonemiddleware` and `oslo.log` 2026.1; *Captured on a lab* has the
+  lines observed. Not observed: `Bad response code`, a service's own credentials refused, key repository errors,
+  `Could not recognize Fernet token` (needs debug and two Keystone nodes).
 - Which middleware line appears for a given failure follows from the source paths read here; the client status codes
   (401, 503) are the ones the middleware raises in those paths.
 - Federation, application credentials, OAuth2 and the `external_oauth2_token` middleware are not covered.

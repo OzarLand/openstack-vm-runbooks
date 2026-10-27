@@ -1,7 +1,7 @@
 ---
 title: Where the OpenStack logs are, and how to read one log line
 kind: diagnostic
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [nova, neutron, placement, keystone, glance, cinder, rabbitmq, mariadb, haproxy, ovs, ovn, libvirt]
 deployment_methods: [kolla-ansible, any]
@@ -11,7 +11,8 @@ environment:
   storage: any
   os: any
 risk: state-changing
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-27, note: "Kolla part: log directories and files, read commands with sudo, nova_compute debug on/off with systemctl restart (not docker restart), GMR via SIGUSR2 into docker logs and the unit journal, real lines of oslo.log, uWSGI, OVS, RabbitMQ, libvirtd, MariaDB; not run: package-install commands, journald fields, HAProxy and OVN logs, a GMR under uWSGI" }
 upstream_refs:
   - https://opendev.org/openstack/oslo.log/src/branch/stable/2026.1/oslo_log/_options.py
   - https://opendev.org/openstack/oslo.log/src/branch/stable/2026.1/oslo_log/formatters.py
@@ -23,7 +24,7 @@ upstream_refs:
   - https://docs.openstack.org/nova/latest/admin/configuration/logs.html
   - https://docs.openstack.org/nova/latest/reference/gmr.html
 authored_by: agent:ozarland-author
-last_verified: 2026-10-26
+last_verified: 2026-10-27
 ---
 
 # Where the OpenStack logs are, and how to read one log line
@@ -52,11 +53,11 @@ containers. On the host, `/var/log/kolla` points to that volume, one directory p
 ([Kolla-Ansible troubleshooting guide](https://docs.openstack.org/kolla-ansible/latest/user/troubleshooting.html)):
 
 ```bash
-# On any node: where the log volume really is
-readlink -f /var/log/kolla
+# On any node: where the log volume really is (sudo: /var/lib/docker is readable by root only)
+sudo readlink -f /var/log/kolla
 # Kolla-Ansible's guide shows /var/lib/docker/volumes/kolla_logs/_data
 
-ls /var/log/kolla/
+sudo ls /var/log/kolla/
 ```
 
 The file names come from the `log_file` and `log_dir` options that Kolla-Ansible 2026.1 writes into each service's
@@ -113,11 +114,12 @@ Things that surprise people on Kolla-Ansible:
 **Kolla-Ansible:** read a service's log on the node where it runs:
 
 ```bash
-tail -f /var/log/kolla/nova/nova-compute.log
-grep -E ' (ERROR|CRITICAL) ' /var/log/kolla/nova/nova-compute.log | tail -20
+# sudo: the files are readable by root only, and so is the Docker socket
+sudo tail -f /var/log/kolla/nova/nova-compute.log
+sudo grep -nE ' [0-9]+ (ERROR|CRITICAL) ' /var/log/kolla/nova/nova-compute.log | tail -20
 # the container engine's view of one container: start-up, crashes, restarts
-docker ps -a --filter name=nova_compute
-docker logs --tail 50 nova_compute          # podman logs on a Podman deployment
+sudo docker ps -a --filter name=nova_compute
+sudo docker logs --tail 50 nova_compute     # podman logs on a Podman deployment
 ```
 
 ### Package installs (distribution packages)
@@ -296,21 +298,22 @@ copied into the container at start (`config_strategy: COPY_ALWAYS` by default). 
 
 ```bash
 # On the host that runs the service (example: nova-compute on one compute)
-grep -n '^debug' /etc/kolla/nova-compute/nova.conf          # expect debug = False; the first match is in [DEFAULT]
-df -h "$(readlink -f /var/log/kolla)"                       # room for the extra log volume (Docker or Podman)
+sudo grep -n '^debug' /etc/kolla/nova-compute/nova.conf     # expect debug = False; the first match is in [DEFAULT]
+sudo df -h "$(sudo readlink -f /var/log/kolla)"             # room for the extra log volume (Docker or Podman)
 ```
 
-> ⚠️ **State-changing.** Edits the service's configuration on this host and restarts its container. The restart
-> interrupts the service for a few seconds: requests in flight to it are lost or retried, and for `nova_compute` the
+> ⚠️ **State-changing.** Edits the service's configuration on this host and restarts its container. The restart can
+> take about a minute (62 s on the lab), because the stop waits up to `docker_graceful_timeout` (60 s by default);
+> the service is unavailable meanwhile: requests in flight to it are lost or retried, and for `nova_compute` the
 > instances keep running (see [nova-compute down, instances still running](../recovery/nova-compute-down-instances-still-running.md)).
 > Do it on one host only. Undo with the commands below, or with the next `kolla-ansible reconfigure`, which rewrites
 > the file from its template.
 
 ```bash
 # first match only: the one in [DEFAULT] (nova.conf also has debug in [glance] and [guestfs])
-sed -i '0,/^debug = False/s//debug = True/' /etc/kolla/nova-compute/nova.conf
-docker restart nova_compute
-grep -c ' DEBUG ' /var/log/kolla/nova/nova-compute.log      # the count grows
+sudo sed -i '0,/^debug = False/s//debug = True/' /etc/kolla/nova-compute/nova.conf
+sudo systemctl restart kolla-nova_compute-container.service
+sudo grep -c ' DEBUG ' /var/log/kolla/nova/nova-compute.log # the count grows
 ```
 
 Back off, as soon as you have what you need:
@@ -318,8 +321,8 @@ Back off, as soon as you have what you need:
 > ⚠️ **State-changing.** Same restart as above.
 
 ```bash
-sed -i '0,/^debug = True/s//debug = False/' /etc/kolla/nova-compute/nova.conf
-docker restart nova_compute
+sudo sed -i '0,/^debug = True/s//debug = False/' /etc/kolla/nova-compute/nova.conf
+sudo systemctl restart kolla-nova_compute-container.service
 ```
 
 To keep debug for a whole service across all hosts, set `<service>_logging_debug: "True"` (for example
@@ -353,11 +356,14 @@ dump a *Guru Meditation report* (GMR): version, configuration, the stack of ever
 **Any:**
 
 ```bash
-kill -USR2 <pid-of-the-service>
+sudo kill -USR2 <pid-of-the-service>
 ```
 
-On Kolla-Ansible, standard error of the service is the container's output, so the report would appear in
-`docker logs <container>`. This has not been checked on a lab yet.
+On Kolla-Ansible, standard error of the service is the container's output, so the report appears in
+`docker logs <container>` and in the journal of its unit (`journalctl -u kolla-<container>-container.service`).
+On a lab, `sudo kill -USR2` on the `nova-compute` process (its host PID from `sudo docker top nova_compute`) wrote a
+report of more than 2000 lines there at once, starting with `====  Guru Meditation  ====`, then `Package`,
+`Threads`, ...; the service kept running.
 
 ## Logs that do not use oslo.log
 
@@ -379,9 +385,23 @@ time without a zone. On a host whose time zone is not UTC, the same event appear
 ## Validity and limits
 
 - Written from the 2026.1 sources of `oslo.log`, `oslo.context`, `oslo.middleware` and Kolla-Ansible, and from the
-  Nova and Kolla-Ansible documentation linked above. **Not yet observed on a lab**: no line on this page was
-  captured from a running platform. A lab request asks for real, redacted samples of each format; they will be
-  added to this page when they arrive.
+  Nova and Kolla-Ansible documentation linked above. Checked on an all-in-one Kolla-Ansible 2026.1 lab (ML2/OVS, no
+  HAProxy, host in UTC) on 2026-10-27: the log directories and file names of the table (plus `nova-metadata.log`,
+  `nova-novncproxy.log`, `privsep-helper.log`, `dnsmasq.log`, `mariadb-bootstrap.log`, `ansible.log`), the commands
+  of *Where the logs are* (with `sudo`), debug on and off for `nova_compute` (`systemctl restart` returned after 62 s),
+  and the GMR. Real lines seen there, redacted:
+
+  ```text
+  2026-10-27 13:15:17.272 7 INFO nova.compute.manager [-] [instance: <server-id>] VM Stopped (Lifecycle Event)
+  [pid: 27|app: 0|req: 175/696] 192.0.2.10 () {28 vars in 305 bytes} [Tue Oct 27 13:20:12 2026] GET / => generated 377 bytes in 3 msecs (HTTP/1.1 200) 3 headers in 91 bytes (1 switches on core 0)
+  2026-10-27T13:15:46.733Z|00844|connmgr|INFO|br-int<->tcp:127.0.0.1:6633: 8 flow_mods in the 4 s starting 42 s ago ...
+  2026-10-27 13:19:25.681480+00:00 [info] <0.395310.0> connection 192.0.2.10:35334 -> 192.0.2.10:5672 - nova-compute ...
+  2026-10-27 13:19:16.682+0000: 5159: error : virQEMUCapsCacheLookupDefault:5959 : invalid argument: ...
+  2026-10-27 13:09:40 5952 [Warning] Aborted connection 5952 to db: 'heat' user: 'heat' host: ...
+  ```
+
+  (`nova-compute.log`, `nova-api-uwsgi.log`, `ovs-vswitchd.log`, `rabbit@<host>.log`, `libvirtd.log`,
+  `mariadb.log`.) The RabbitMQ and libvirtd lines carry their offset (`+00:00`, `+0000`), the MariaDB line does not.
 - File names are those of Kolla-Ansible 2026.1 defaults. Earlier releases ran some APIs differently (no `-uwsgi.log`
   file), and a deployment can override `log_file`, the format strings, or the container names.
 - For package installs, only the Nova file names and unit names come from upstream documentation; the other
@@ -390,10 +410,9 @@ time without a zone. On a host whose time zone is not UTC, the same event appear
   list which inter-service calls do.
 - The HAProxy file name (`haproxy_latest`) comes from the `fluentd` role defaults; the exact file name on disk
   (with fluentd's file output suffix) was not checked.
-- The GMR behaviour inside a Kolla-Ansible container was not checked.
-- Where each instance's QEMU log is visible on a Kolla-Ansible compute: the `nova_libvirt` container does not mount
-  `/var/log/libvirt` from the host in the 2026.1 defaults, so `docker exec nova_libvirt ls /var/log/libvirt/qemu/` is
-  the place to look until a lab confirms it.
+- The GMR was checked for `nova-compute` only, not for a service under uWSGI.
+- Each instance's QEMU log is inside the `nova_libvirt` container: `sudo docker exec nova_libvirt tail
+  /var/log/libvirt/qemu/<instance-name>.log` worked on the lab.
 
 ## Related
 

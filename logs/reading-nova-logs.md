@@ -11,7 +11,8 @@ environment:
   storage: any
   os: any
 risk: read-only
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-27, note: "greps run on an all-in-one's Nova logs (with sudo); real lines of service start, claim and spawn, build and spawn failures, lost conductor heartbeat, scheduler filtering and no candidates, conductor scheduling failure and NoValidHost, API HTTP exception captured from earlier lab tests; not observed: network allocation failure, block device failure, insufficient resources, libvirt connection loss, resource update error, max retries, unmapped host, unexpected API error" }
 upstream_refs:
   - https://opendev.org/openstack/nova/src/branch/stable/2026.1/nova/compute/manager.py
   - https://opendev.org/openstack/nova/src/branch/stable/2026.1/nova/compute/resource_tracker.py
@@ -26,7 +27,7 @@ upstream_refs:
   - https://opendev.org/openstack/nova/src/branch/stable/2026.1/nova/exception.py
   - https://opendev.org/openstack/oslo.messaging/src/branch/stable/2026.1/oslo_messaging/_drivers/amqpdriver.py
 authored_by: agent:ozarland-author
-last_verified: 2026-10-26
+last_verified: 2026-10-27
 ---
 
 # Reading the Nova logs. What normal looks like, and what the common lines mean
@@ -69,7 +70,7 @@ Starting <topic> node (version <version>)
 (`nova/service.py`, `INFO`; `<topic>` is `compute`, `conductor` or `scheduler`). Use it to find restarts:
 
 ```bash
-grep -n "Starting compute node" /var/log/kolla/nova/nova-compute.log | tail -5
+sudo grep -n "Starting compute node" /var/log/kolla/nova/nova-compute.log | tail -5
 ```
 
 A service that started before `nova-conductor` was reachable logs, until the conductor answers
@@ -122,9 +123,9 @@ Sources: `nova/compute/manager.py`, `nova/compute/claims.py`, `nova/compute/reso
 **Kolla-Ansible:** on the compute:
 
 ```bash
-grep -nE ' (ERROR|CRITICAL) ' /var/log/kolla/nova/nova-compute.log | tail -20
-grep -n "<server-id>" /var/log/kolla/nova/nova-compute.log
-grep -nE "Connection event|Connection to libvirt|Lost connection to nova-conductor|Error updating resources" /var/log/kolla/nova/nova-compute.log | tail
+sudo grep -nE ' [0-9]+ (ERROR|CRITICAL) ' /var/log/kolla/nova/nova-compute.log | tail -20
+sudo grep -n "<server-id>" /var/log/kolla/nova/nova-compute.log
+sudo grep -nE "Connection event|Connection to libvirt|Lost connection to nova-conductor|Error updating resources" /var/log/kolla/nova/nova-compute.log | tail
 ```
 
 **Any:** the same `grep` on `/var/log/nova/nova-compute.log`, or `journalctl -u <unit>` piped to `grep`.
@@ -146,7 +147,7 @@ weighing; that is the level to use when you need to know why a host was not chos
 Sources: `nova/scheduler/manager.py`, `nova/filters.py`.
 
 ```bash
-grep -n "Got no allocation candidates\|Filtering removed all hosts" /var/log/kolla/nova/nova-scheduler.log | tail
+sudo grep -n "Got no allocation candidates\|Filtering removed all hosts" /var/log/kolla/nova/nova-scheduler.log | tail
 ```
 
 A request that fails here never reaches a compute: there is nothing in any `nova-compute.log` for it.
@@ -191,10 +192,36 @@ Sources: `nova/api/openstack/wsgi.py`; `oslo_messaging/_drivers/amqpdriver.py` f
 4. **The last line of the traceback** names the exception; the lines just above it name the call that raised it.
 5. **Dependencies:** `MessagingTimeout`, database errors and 401s in several services at once point below Nova.
 
+## Captured on a lab
+
+Kolla-Ansible 22.2.0 (2026.1, Nova 33.0.3) all-in-one, 2026-10-23 to 2026-10-27, redacted. The `ERROR` lines are
+from other lab tests (Glance unreachable, an image larger than the flavor, RabbitMQ down). The exception is on the
+same line as the message, after `: `:
+
+```text
+INFO nova.service [-] Starting compute node (version 33.0.3)
+INFO nova.virt.libvirt.driver [None req-<id> - - - - - -] Connection event '1' reason 'None'
+INFO nova.compute.claims [None req-<id> <user-id> <project-id> - - default default] [instance: <server-id>] Claim successful on node compute-1
+INFO nova.compute.manager [...] [instance: <server-id>] Took 5.49 seconds to spawn the instance on the hypervisor.
+ERROR nova.compute.manager [...] [instance: <server-id>] Failed to build and run instance: nova.exception.GlanceConnectionFailed: Connection to glance host http://192.0.2.10:9292 failed: ...
+ERROR nova.compute.manager [...] [instance: <server-id>] Instance failed to spawn: nova.exception.FlavorDiskSmallerThanImage: Flavor's disk is too small for requested image. Flavor disk is 1073741824 bytes, image is 2147483648 bytes.
+WARNING nova.servicegroup.drivers.db [-] Lost connection to nova-conductor for reporting service status.: oslo_messaging.exceptions.MessagingTimeout: Timed out waiting for a reply to message ID <id>
+INFO nova.servicegroup.drivers.db [-] Recovered from being unable to report status.
+INFO nova.filters [...] Filtering removed all hosts for the request with instance ID '<server-id>'. Filter results: ['ComputeFilter: (start: 1, end: 1)', 'ComputeCapabilitiesFilter: (start: 1, end: 1)', 'ImagePropertiesFilter: (start: 1, end: 1)', ...
+INFO nova.scheduler.manager [...] Got no allocation candidates from the Placement API. This could be due to insufficient resources or a temporary occurrence as compute nodes start up.
+ERROR nova.conductor.manager [...] Failed to schedule instances: oslo_messaging.exceptions.MessagingTimeout: Timed out waiting for a reply to message ID <id>
+INFO nova.api.openstack.wsgi [...] HTTP exception thrown: Instance <name> could not be found.
+```
+
+`Connection event '1' reason 'None'` is the connection to libvirt being established, at every start. With `debug`
+on, the configuration dump at start contains option values such as `CRITICAL`: the error grep above matches the
+level field only (`' [0-9]+ (ERROR|CRITICAL) '`), not those lines. The files are readable by root only, hence
+`sudo`.
+
 ## Validity and limits
 
 - Every message on this page is the message text from Nova 2026.1 (and `oslo.messaging` 2026.1 for
-  `MessagingTimeout`), read in the source files listed above. **None was captured on a lab for this page.** The
+  `MessagingTimeout`), read in the source files listed above; *Captured on a lab* has the real lines seen. The
   lab-verified [vif_plugged runbook](../lifecycle/instance-stuck-in-build-waiting-for-vif-plugged.md) shows the
   `Build of instance … aborted` fault; its `Timeout waiting for …` line uses a tuple form that differs from the 2026.1
   source. A lab request (#59) asks for real samples.
