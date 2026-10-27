@@ -148,14 +148,15 @@ clock that is off therefore shows on fresh tokens, through the issuing node or t
 A rotation (`rotate_keys` in `keystone/common/fernet_utils.py`) promotes the staged key `0` to be the new primary and
 creates a new `0`. Key `0` came from the last push, so it is the same on every node: after one rotation, the new
 primary is already in every other node's set, as their key `0`. Keystone decrypts with every key in the repository
-(`MultiFernet` in `keystone/token/token_formatters.py`, whose docstring says this lets you rotate on one node before
-syncing). So **one missed push is harmless by design**: the lists differ, every token still validates everywhere.
+(`MultiFernet` in `keystone/token/token_formatters.py`), and the `rotate_keys` docstring says this lets you rotate on
+one node in a cluster before syncing. So **one missed push is harmless by design**: the lists differ, every token still validates everywhere.
 
 Tokens break only when a node's primary is missing from another node's set:
 
 - a second rotation on the same node without a push in between: its new primary is its own new `0`, which no other
   node has;
-- rotations on two nodes, each without pushing;
+- rotations on two nodes without pushing, where at least one of them rotates twice (two nodes that each rotate once
+  from the same pushed set promote the same key `0`, so they share a primary);
 - keys created independently: a node rebuilt with `fernet_setup`, a key volume restored from a backup, keys copied by
   hand.
 
@@ -234,8 +235,8 @@ Do this only when *Quick checks* 1 shows a primary key missing from another node
 present everywhere, no push is needed for the 401s: repair the push path (cause 2) and look at the clock (cause 3).
 
 **Choose the source node.** Compare *Quick checks* 1 across nodes, and the rotation lines in each node's
-`keystone.log`. Do not go by the highest key number alone: two nodes that rotated on their own can each have a key
-`3`, with different contents. Take the node whose set the others are closest to and that rotated last, usually the
+`keystone.log`. Do not go by the highest key number alone: once the sets have diverged (a node that rotated twice
+without pushing, a rebuilt node), two nodes can each have a key `3` with different contents. Take the node whose set the others are closest to and that rotated last, usually the
 one most clients have been getting tokens from. Its primary key is the one you keep.
 
 **Repair the push path** if it is broken (cause 2):
