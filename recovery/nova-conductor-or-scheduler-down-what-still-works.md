@@ -171,7 +171,7 @@ Read the last lines of its log first: a container that exits at start-up will ex
 > is fixed. Undo: none needed.
 
 ```bash
-sudo docker restart nova_conductor      # or nova_scheduler
+sudo systemctl restart kolla-nova_conductor-container.service   # or kolla-nova_scheduler-container.service
 ```
 
 If the configuration is at fault, fix it on the deploy host and run `kolla-ansible reconfigure -i <inventory> -t
