@@ -78,6 +78,7 @@ A page written for one deployment method is welcome; variants for other methods 
 | A new instance is ACTIVE but never got an IP address | [DHCP agents down](networking/new-instance-gets-no-ip-dhcp-agents-down.md) |
 | A new instance has an address but no SSH key, default hostname | [Metadata agents down](networking/new-instance-boots-without-metadata.md) |
 | An instance answers from inside its network, not from outside | [Unreachable from outside](networking/instance-unreachable-from-outside.md) |
+| The console of an instance does not open, or fails at once | [Console not available](lifecycle/console-not-available-or-disconnects.md) |
 | An instance stays in BUILD, then ERROR after about 5 minutes | [Waiting for vif_plugged](lifecycle/instance-stuck-in-build-waiting-for-vif-plugged.md) |
 | A resize stays in VERIFY_RESIZE or RESIZE, or ends in ERROR | [Resize not finished](lifecycle/resize-stuck-in-verify-resize-or-failed.md) |
 | "No valid host was found" while computes have room | [No valid host with free capacity](scheduling/no-valid-host-with-free-capacity.md) |
@@ -99,6 +100,7 @@ lab), **documentation** (upstream documentation and source), **production incide
 
 | Page | Components | Releases | Status | Source |
 |---|---|---|---|---|
+| [Instance console (noVNC or SPICE) does not open, fails at once, or shows "invalid or has expired"](lifecycle/console-not-available-or-disconnects.md) | nova, libvirt, haproxy, horizon | 2026.1 | draft | documentation |
 | [Compute disk full. An instance that writes is frozen, while Nova still shows it ACTIVE](lifecycle/compute-disk-full-instance-paused.md) | nova, libvirt, qemu | 2026.1 | lab-verified | lab run |
 | [Instance stuck in BUILD, then ERROR after vif_plugging_timeout](lifecycle/instance-stuck-in-build-waiting-for-vif-plugged.md) | nova, neutron, ovn, ovs | 2026.1 | lab-verified | book, lab run |
 | [Instance goes SHUTOFF by itself, nobody stopped it. The compute's OOM killer killed its QEMU process](lifecycle/instance-shut-off-by-host-oom-killer.md) | nova, libvirt, qemu, placement, linux-kernel | 2026.1 | draft | documentation |
