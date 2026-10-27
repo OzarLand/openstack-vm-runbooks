@@ -30,6 +30,7 @@ These pages explain how to read; the fixes are in the runbooks of the other fold
 | [Reading the systemd journal and the container engine on an OpenStack host](systemd-journal-and-container-engine.md) | journalctl units, priorities, time ranges and boots, the kolla-<container>-container units, restart loops as systemd and Docker show them, Docker and Podman logs, a persistent journal | 2026.1 | draft |
 | [Reading the time synchronisation logs (chrony, systemd-timesyncd), and how clock skew shows in OpenStack logs](time-sync-chrony-and-clock-skew.md) | chronyc tracking and sources, chrony and timesyncd log lines, and the Nova heartbeat, Neutron agent registration and Keystone token expiry lines a clock offset produces | 2026.1 | draft |
 | [Reading the storage logs of a compute. iscsid, multipathd, NFS client messages and Ceph client (librbd) logs](host-storage-logs-iscsi-multipath-nfs-rbd.md) | iscsid and kernel iSCSI lines with error codes and timers, multipathd path and queueing lines, NFS not responding lines, the Ceph client admin socket and log on computes | 2026.1 | draft |
+| [Error messages: scheduling](error-messages-scheduling.md) | No valid host was found (no allocation candidates, a filter returned 0 hosts) and Exceeded maximum number of retries (the computes that tried): meaning, causes, next log, runbook | 2026.1 | draft |
 
 ## Planned
 
