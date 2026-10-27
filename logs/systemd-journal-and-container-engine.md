@@ -41,7 +41,8 @@ On a host that runs OpenStack, three things outside the service logs explain man
 start the services, the journal that records what those units and the kernel said, and, on a containerised deployment,
 the container engine. This page shows how to read each, and how to recognise a service that keeps restarting.
 
-The kernel part of the journal (`journalctl -k`) has its own page: reading the kernel log of a compute.
+The kernel part of the journal (`journalctl -k`) has its own page:
+[reading the kernel log of a compute](kernel-messages-on-computes.md).
 
 ## journalctl: the commands that matter
 
