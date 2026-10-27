@@ -160,11 +160,11 @@ lab), **documentation** (upstream documentation and source), **production incide
 | Page | Components | Releases | Status | Source |
 |---|---|---|---|---|
 | [Where the OpenStack logs are, and how to read one log line](logs/where-openstack-logs-are-and-how-to-read-a-line.md) | nova, neutron, placement, keystone, glance, cinder, rabbitmq, mariadb, haproxy, ovs, ovn, libvirt | 2026.1 | draft | documentation |
-| [Reading the OVN logs with Neutron](logs/reading-ovn-logs.md) | ovn, neutron, ovs | 2026.1 | draft | documentation |
 | [Following one request, instance, port or volume through the logs of every service and host](logs/tracing-one-request-across-services-and-hosts.md) | nova, neutron, placement, cinder, glance, ovs, libvirt | 2026.1 | draft | documentation |
 | [Reading the Nova logs. What normal looks like, and what the common lines mean](logs/reading-nova-logs.md) | nova, placement, rabbitmq, libvirt | 2026.1 | draft | documentation |
 | [Reading the RabbitMQ logs, and the oslo.messaging lines that go with them](logs/reading-rabbitmq-logs.md) | rabbitmq, nova, neutron, cinder | 2026.1 | draft | documentation |
 | [Reading the Neutron logs with ML2/OVS](logs/reading-neutron-logs-ml2-ovs.md) | neutron, ovs, nova, rabbitmq | 2026.1 | draft | documentation |
+| [Reading the OVN logs with Neutron](logs/reading-ovn-logs.md) | ovn, neutron, ovs | 2026.1 | draft | documentation |
 
 ### Recovery
 
