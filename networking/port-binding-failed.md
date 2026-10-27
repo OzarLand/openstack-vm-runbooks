@@ -23,21 +23,24 @@ last_verified: 2026-10-26
 
 ## Symptom
 
-A new instance goes to `ERROR`, or a live migration fails at once, and the `nova-compute` log of the host concerned
-says:
+A new instance goes to `ERROR`, or a live migration is refused at once. The main signal is in the Neutron server's log:
+
+```text
+Failed to bind port <port-id> on host <compute> for vnic_type normal using segments [...]
+```
+
+Nova reports it as:
 
 ```text
 Binding failed for port <port-id>, please check neutron logs for more information.
 ```
 
-The port itself shows that Neutron refused to bind it on that host:
-
-```text
-$ openstack port show <port-id> -c binding_vif_type -c binding_host_id -c binding_vnic_type
-| binding_host_id   | <compute>      |
-| binding_vif_type  | binding_failed |
-| binding_vnic_type | normal         |
-```
+- **Build:** in the `nova-compute` log of the compute that tried, and in `openstack server event show <server-id>
+  <request-id>`. The ports Nova created for the build are deleted on failure: with `--network`, the port is gone
+  afterwards. Only a port created beforehand (`--port`) still shows `binding_vif_type` `binding_failed`.
+- **Live migration:** in the `nova-conductor` log, which binds the ports on the destination before the migration
+  starts (`_bind_ports_on_destination`): the binding error becomes a pre-check error, and the conductor may try another
+  host. Neutron does not keep the failed binding: the port keeps its active binding on the source, `vif_type` `ovs`.
 
 ## Impact
 
@@ -50,7 +53,7 @@ instances whose ports are already bound keep their network.
 Read-only. With admin credentials:
 
 ```bash
-# 1. The port: where Nova asked to bind it, and the result
+# 1. The port, if it still exists (a pre-created port, or the instance's port for a live migration)
 openstack port show <port-id> -c binding_host_id -c binding_vif_type -c binding_vnic_type -c network_id
 
 # 2. The network's type and physical network
@@ -60,11 +63,24 @@ openstack network show <network-id> -c provider:network_type -c provider:physica
 openstack network agent list --host <compute>
 ```
 
-On a controller, the Neutron server's log for the port:
+On a controller, the Neutron server's log for the port, and Nova's side:
 
-**Kolla-Ansible:** `sudo grep <port-id> /var/log/kolla/neutron/neutron-server.log | grep -iE 'bind|refusing'`
+**Kolla-Ansible:**
 
-**Any:** the same `grep` on the `neutron-server` log.
+```bash
+sudo grep <port-id> /var/log/kolla/neutron/neutron-server.log | grep -iE 'bind|refusing'
+sudo grep <port-id> /var/log/kolla/nova/nova-conductor.log        # live migration
+sudo grep <port-id> /var/log/kolla/nova/nova-compute.log          # build, on the compute that tried
+```
+
+**Any:** the same `grep` on the `neutron-server`, `nova-conductor` and `nova-compute` logs.
+
+With ML2/OVN, compare the chassis names with the compute names Nova uses:
+
+```bash
+openstack compute service list --service nova-compute -c Host
+sudo docker exec ovn_sb_db ovn-sbctl --columns=name,hostname list Chassis   # Kolla-Ansible, on an OVN DB host
+```
 
 ## Diagnosis
 
@@ -78,10 +94,11 @@ asks each mechanism driver to bind the port on that host, for one of the network
 Failed to bind port <port-id> on host <compute> for vnic_type normal using segments [...]
 ```
 
-Nova reads `binding_failed` and raises `PortBindingFailed` (`nova/network/neutron.py`). For a build, the build fails
-(the fault names a failed network allocation, or the build is retried elsewhere until `Exceeded maximum number of
-retries`); for a live migration, Nova logs `Binding failed for port <port-id> and host <compute>.` and the migration
-does not start.
+Nova reads `binding_failed` and raises `PortBindingFailed` (`nova/network/neutron.py`). For a build, `nova-compute`
+deletes the ports it created and the build fails (the fault names a failed network allocation, or the build is
+retried elsewhere until `Exceeded maximum number of retries`). For a live migration, `nova-conductor` asks Neutron for
+an inactive binding on the destination; Neutron refuses before saving it, Nova logs `Binding failed for port
+<port-id> and host <compute>.`, and the conductor raises `MigrationPreCheckError`.
 
 ### Why a driver refuses (the server log says which)
 
@@ -94,8 +111,9 @@ does not start.
 | `Network <network> with segment <id> is connected to physical network <physnet>, but agent <host> reported physical networks [...]` (debug level) | ML2/OVS | Same, for the OVS agent's `bridge_mappings` |
 | `Network <network> with segment <id> is type of <type> but agent <host> or mechanism driver only support [...]` (debug level) | ML2/OVS | The agent does not handle that network type (for example `vxlan` with tunnelling not set up on that host) |
 
-The debug-level lines appear only with `debug = True` on the Neutron server; at the default level, the `Failed to
-bind port` error is the only line, and the agent list and network type tell which case it is.
+The dead-agent, no-chassis and OVN physical network lines appear at the default level. The three ML2/OVS lines marked
+debug appear only with `debug = True` on the Neutron server; without it, the agent list and the network type tell
+which case it is.
 
 ## Possible causes
 
@@ -106,10 +124,16 @@ database (OVN), or its clock drifted so that its reports arrive late. Quick chec
 
 ### Cause 2: host names do not match
 
-Nova binds the port to the compute's `host` (by default the system host name), and the agent registers under its own
-`host`. If one uses a short name and the other the fully qualified name, or the host was renamed, Neutron finds no
-agent for the name Nova gives. Kolla-Ansible 2026.1 sets neither for libvirt computes, so both use the host name the
-system reports; a host renamed after deployment is the usual trigger.
+Nova binds the port to the compute's `host` (by default the name the system reports), and Neutron looks for an agent
+under exactly that name. If one side uses a short name and the other the fully qualified name, or the host was
+renamed, Neutron finds no agent for the name Nova gives.
+
+- **ML2/OVS:** Kolla-Ansible 2026.1 sets neither Nova's `host` nor the agent's for libvirt computes: both use the name
+  the system reports. A host renamed after deployment is the usual trigger.
+- **ML2/OVN:** the chassis is found by the `hostname` it registers, which Kolla-Ansible sets in Open vSwitch's
+  `external_ids:hostname` to `openvswitch_hostname`, by default `ansible_facts.fqdn`. If Nova's `host` is the short
+  name, the names differ: `Refusing to bind port ... due to no OVN chassis for host`. Compare the two lists of quick
+  checks.
 
 ### Cause 3: the host has no mapping for the network's physical network
 
@@ -119,8 +143,9 @@ missing one ([provider networks](https://github.com/OzarLand/kolla-ansible-deplo
 
 ### Cause 4: the network type is not handled on that host
 
-A VXLAN or Geneve network on a host where the agent does not handle that type, or a `vnic_type` (`direct` for SR-IOV)
-that no driver on that host supports.
+ML2/OVS only: a VXLAN network on a host where the OVS agent does not handle that type, or a `vnic_type` (`direct` for
+SR-IOV) that no driver on that host supports. ML2/OVN logs `Upgrade allowing bind port ... with unsupported network
+type` and binds anyway.
 
 ## Resolution
 
@@ -129,8 +154,9 @@ that no driver on that host supports.
 Start the agent and fix what kept it from reporting (message bus, OVN southbound, clock: see
 [compute clock skew](../diagnostics/compute-clock-skew.md)).
 
-> ⚠️ **State-changing.** Restarts the agent on that compute; instances keep their network while it restarts
-> ([restarting the OVS agent](restarting-the-ovs-agent-does-not-cut-instances.md)). Undo: none needed.
+> ⚠️ **State-changing.** Restarts the agent on that compute. For the OVS agent, instances keep their network while it
+> restarts ([restarting the OVS agent](restarting-the-ovs-agent-does-not-cut-instances.md)); for `ovn_controller`,
+> that page does not apply and no OzarLand page has measured it yet. Undo: none needed.
 
 **Kolla-Ansible:** `sudo docker restart neutron_openvswitch_agent` (ML2/OVS) or `sudo docker restart ovn_controller`
 (ML2/OVN).
@@ -138,25 +164,43 @@ Start the agent and fix what kept it from reporting (message bus, OVN southbound
 **Any:** restart `neutron-openvswitch-agent` or `ovn-controller`.
 
 With ML2/OVS, the Neutron server retries the binding of the host's `binding_failed` ports when the OVS agent comes back
-alive (`_rebind_on_revive_agent_types` in `neutron/plugins/ml2/plugin.py`). For a failed build, create the instance
-again; for a migration, run it again.
+alive (`_rebind_on_revive_agent_types` in `neutron/plugins/ml2/plugin.py`); ML2/OVN has no such automatic rebind. For
+a failed build, create the instance again; for a migration, run it again.
 
 ### For cause 2: make the names match
 
-Compare `openstack compute service list --service nova-compute` with `openstack network agent list --host <compute>`.
-Restore the host name the services were deployed with, or set the same `host` value for Nova and the agents on that
-compute, then restart them. A renamed compute is otherwise a new compute for Nova and Neutron; renaming it is outside
-this page.
+Compare the name Nova uses (`openstack compute service list --service nova-compute`) with the agent's
+(`openstack network agent list --host <compute>`, and for OVN the chassis `hostname`). Change the **Neutron side** to
+the name Nova already uses, never Nova's `host` on a compute that has instances: changing Nova's `host` makes it a new
+compute for Nova and Placement and orphans the instances on it.
+
+- **ML2/OVS:** set `host = <name Nova uses>` in the OVS agent's configuration on that compute.
+- **ML2/OVN with Kolla-Ansible:** set `openvswitch_hostname: <name Nova uses>` for that host (in `host_vars`), then
+  apply it with the `openvswitch` role.
+
+> ⚠️ **State-changing.** Restarts the Open vSwitch agent, or rewrites `external_ids:hostname` and restarts
+> `ovn_controller`, on that compute: the agent or chassis registers under the new name, and the old agent entry
+> remains to be deleted (`openstack network agent delete <old-agent-id>`). Instances' existing ports keep their
+> binding. Undo: set the previous name back and restart again.
+
+```bash
+kolla-ansible reconfigure -i <inventory> --tags openvswitch,ovn-controller --limit <compute>   # ML2/OVN
+```
 
 ### For cause 3: add the mapping, or keep instances of that network off the host
 
-Add the physical network to that host's mappings (with Kolla-Ansible: `neutron_bridge_name`,
-`neutron_external_interface` and `neutron_physical_networks` for the host, then a reconfigure of Neutron and, for OVN,
-`ovn-controller`), and the switch configuration for it.
+Add the physical network to that host's mappings, and the switch configuration for it. With Kolla-Ansible:
+`neutron_bridge_name`, `neutron_external_interface` and `neutron_physical_networks` for the host. Precondition: on a
+compute, the external bridge exists only if `computes_need_external_bridge` is true (set by
+`enable_neutron_provider_networks: true`, DVR, or OVN distributed floating IPs): the `openvswitch` role creates the
+bridge and attaches `neutron_external_interface` (`post-config.yml`) only then. Without it, with ML2/OVS, the
+`bridge_mappings` point at a missing bridge and `neutron-openvswitch-agent` exits with `Bridge <bridge> for physical
+network <physnet> does not exist. Agent terminated!`: the whole host loses its agent (cause 1).
 
-> ⚠️ **State-changing.** `kolla-ansible reconfigure -i <inventory> --tags neutron,ovn-controller --limit <compute>`
-> changes the bridges and mappings on that compute and restarts its Neutron containers; instances keep their network
-> if the existing mappings are unchanged. Undo: revert the variables and reconfigure again.
+> ⚠️ **State-changing.** `kolla-ansible reconfigure -i <inventory> --tags openvswitch,neutron,ovn-controller --limit
+> <compute>` creates the bridge, attaches the interface, changes the mappings on that compute and restarts its Neutron
+> and Open vSwitch containers; instances keep their network if the existing mappings are unchanged. The interface
+> must carry no IP address. Undo: revert the variables and reconfigure again.
 
 Or, if that host is not meant to carry the network, keep such instances off it (an aggregate and flavor or image
 properties); the scheduler does not check physical networks by default.
@@ -173,7 +217,7 @@ openstack network agent list --host <compute>          # alive, under the name N
 openstack server create --image <image> --flavor <flavor> --network <network> \
   --availability-zone nova:<compute> --wait <test-name>
 openstack port list --server <test-name> -c ID -c Status   # ACTIVE
-openstack port show <port-id> -c binding_vif_type          # ovs (not binding_failed)
+openstack port show <port-id> -c binding_vif_type          # ovs for both drivers (vhostuser with DPDK)
 openstack server delete --wait <test-name>
 ```
 
