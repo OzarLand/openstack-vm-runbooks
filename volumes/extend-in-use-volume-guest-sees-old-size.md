@@ -26,8 +26,11 @@ last_verified: 2026-10-27
 
 One of these, after `openstack volume set --size <new-GB> <volume-id>` on a volume attached to an instance:
 
-- the command is refused: `--os-volume-api-version 3.42 or greater is required to extend in-use volumes.`, or
+- the command is refused: `Failed to set volume size: --os-volume-api-version 3.42 or greater is required to extend
+  in-use volumes.` followed by `One or more of the set operations failed`, or
   `Volume <volume-id> status must be '...' to extend, currently <status>.`;
+- the command is accepted, but the volume keeps its old size and status, with a user message `extend volume:Could not
+  find any available weighted backend.`;
 - the volume goes to `error_extending`;
 - Cinder shows the new size, but inside the instance the disk still has the old size.
 
@@ -45,7 +48,7 @@ Read-only. With admin credentials:
 openstack volume show <volume-id> -c size -c status -c attachments -c os-vol-host-attr:host
 
 # 2. Messages Cinder recorded for the volume (user messages, API 3.3+)
-openstack --os-volume-api-version 3.3 volume message list --resource-uuid <volume-id>
+openstack --os-volume-api-version 3.3 volume message list | grep <volume-id>
 
 # 3. The instance's actions: Nova receives a volume-extended event
 openstack server event list <server-id>
@@ -58,11 +61,16 @@ Logs: the `cinder-volume` service that owns the volume, and the `nova-compute` o
 **Kolla-Ansible:**
 
 ```bash
-sudo grep <volume-id> /var/log/kolla/cinder/cinder-volume.log | grep -iE 'extend' | tail
+sudo grep -E 'Extend volume|Failed to extend|volume-extended' /var/log/kolla/cinder/cinder-volume.log | tail
 sudo grep <volume-id> /var/log/kolla/nova/nova-compute.log | grep -iE 'extend' | tail     # on the compute
+sudo grep <volume-id> /var/log/kolla/cinder/cinder-scheduler.log | tail                   # extend not placed
 ```
 
-**Any:** the same `grep` on the `cinder-volume` and `nova-compute` logs.
+The `cinder-volume` lines `Extend volume completed successfully.`, `Extend volume failed.` and `Failed to extend
+volume.` do not carry the volume ID (only the `Nova event response` line does, as `tag`): match them by time, or by
+the request ID that `volume message list` shows.
+
+**Any:** the same `grep` on the `cinder-volume`, `cinder-scheduler` and `nova-compute` logs.
 
 ## Diagnosis
 
@@ -71,7 +79,10 @@ sudo grep <volume-id> /var/log/kolla/nova/nova-compute.log | grep -iE 'extend' |
 1. **Cinder API** (`cinder/volume/api.py`, `_extend`): an attached (`in-use`) volume can be extended only with volume
    API **3.42** or later (`VOLUME_EXTEND_INUSE`); python-openstackclient refuses before calling the API without it.
    The new size must be larger, and within the quota and the volume type's size limits. The status goes to
-   `extending`.
+   `extending`. The request then goes through `cinder-scheduler`, which checks the backend's capacity; if it finds
+   none (`Filtering removed all hosts for the request with volume ID '<volume-id>'`, `Failed to schedule_extend_volume`
+   in `cinder-scheduler.log`), the volume goes back to its status at its old size, with the user message
+   `extend volume:Could not find any available weighted backend.`; the client command itself succeeded.
 2. **`cinder-volume`** (`cinder/volume/manager.py`, `extend_volume`) asks the backend driver to grow the volume:
    - on failure: `Extend volume failed.` and `Failed to extend volume.` in the log, a user message `Volume Driver
      failed to extend volume.`, and the status `error_extending`;
@@ -83,8 +94,8 @@ sudo grep <volume-id> /var/log/kolla/nova/nova-compute.log | grep -iE 'extend' |
    new size, and the guest sees a larger disk.
    - On failure, `nova-compute` logs `Extend volume failed, volume_id=<id>, reason: <error>`. **Cinder is not told**:
      it shows the new size and `in-use`, while the guest still sees the old size.
-   - If the guest is not running, Nova skips the resize (`Skipping block device resize, guest is not running`); the
-     guest sees the new size at its next start.
+   - If the guest is not running, Nova skips the resize (`Skipping block device resize, guest is not running`, not
+     logged at the default INFO level); the guest sees the new size at its next start.
 
 ### The guest
 
@@ -100,7 +111,10 @@ not in `available` or `in-use`.
 
 ### Cause 2: the backend could not grow the volume (`error_extending`)
 
-The `cinder-volume` log has the driver's error: no space in the pool, a backend limit, a backend unreachable.
+The `cinder-volume` log has the driver's error: a backend limit, a backend unreachable, a backend volume that
+cannot be found. When the pool has too little space for the new size, the scheduler refuses the extend before the
+driver is called: no `error_extending`, the volume keeps its old size and status, and the user message is
+`extend volume:Could not find any available weighted backend.` (see the diagnosis).
 
 ### Cause 3: Cinder grew it, Nova did not refresh it
 
@@ -139,8 +153,11 @@ Then extend again (cause 1).
 
 ### For cause 3: make Nova refresh the device
 
-Bring the instance's `nova-compute` back if it is down, and read the `Extend volume failed` reason. The refresh is
-triggered by Cinder's event, which is not sent again. The simplest ways to make the guest see the new size:
+Bring the instance's `nova-compute` back if it is down, and read the `Extend volume failed` reason. If
+`nova-compute` was only down, the event waits in its message queue: once it is back, look for `Cinder extended
+volume <volume-id>` in its log and check `lsblk` in the guest before anything else. The refresh is triggered by
+Cinder's event, which Cinder does not send again: if the event was lost or the refresh failed, the simplest ways to
+make the guest see the new size:
 
 > ⚠️ **State-changing.** A hard reboot stops the guest abruptly; a detach and attach interrupts its access to that
 > volume (unmount it inside the guest first). Agree it with the owner. Undo: none needed.
@@ -165,12 +182,42 @@ openstack volume show <volume-id> -c size -c status     # the new size, in-use
 
 Inside the guest: `lsblk` shows the new size, `df -h` the grown file system.
 
+## Lab observations
+
+Kolla-Ansible 22.2.0 (2026.1) all-in-one, Cinder LVM (thin) over iSCSI, python-openstackclient 9.0.0, a CirrOS
+instance with a 1 GB data volume, on 2026-10-27:
+
+- Normal path: `Extend volume completed successfully.` 2 s after the command, `Nova event response` 1 s later,
+  `Cinder extended volume <volume-id>; extending it to detect new size` in `nova-compute.log` 1 s after that, then
+  os-brick's `Extend volume for {...}`; the volume was `in-use` at 2 GB and `lsblk` in the guest showed 2 GB.
+- Cause 1: `volume set --size 2` without a microversion printed `Failed to set volume size:
+  --os-volume-api-version 3.42 or greater is required to extend in-use volumes.` and `One or more of the set
+  operations failed`, exit code 1.
+- Extend beyond the thin pool's capacity (500 GB): exit code 0, `CapacityFilter` removed the only backend
+  (`Insufficient free virtual space (376.0GB) to accommodate thin provisioned 496GB volume`), the volume stayed
+  `in-use` at its old size, user message `extend volume:Could not find any available weighted backend.`
+- Cause 2, injected by renaming the backend LV: `error_extending` within 8 s, `Extend volume failed.` (`Failed to
+  find logical volume`) and `Failed to extend volume.`, user message `extend volume:Volume Driver failed to extend
+  volume.`. After the LV was renamed back, `volume set --state in-use` and the extend again worked.
+- Cause 3, `nova-compute` stopped (`systemctl stop kolla-nova_compute-container.service`), then an extend: Cinder
+  showed the new size and `in-use` and logged `Nova event response: {'name': 'volume-extended', ... 'status':
+  'completed', 'code': 200}`; the guest kept the old size. After `systemctl start`, `nova-compute` processed the
+  queued event 18 s later and the guest saw the new size without a reboot. With the event removed from the compute's
+  queue while `nova-compute` was down (to simulate a lost event), the guest kept the old size after the start; `server
+  reboot --hard` (22 s with `--wait`) brought the new size to the guest.
+- Guest shut off during the extend: no `Skipping block device resize` at INFO level; the guest saw the new size at
+  its start.
+
 ## Validity and limits
 
+- Lab-run on Kolla-Ansible 22.2.0 (2026.1), all-in-one, Cinder LVM over iSCSI (see *Lab observations*): causes 1, 2
+  and 3, the capacity refusal and the shut-off guest. Not run: the detach and attach alternative of cause 3, cause 4
+  (no file system was grown in the guest), a refresh failure on the compute (`Extend volume failed`), Ceph RBD and
+  Fibre Channel.
 - Written from Cinder 2026.1 (`cinder/volume/api.py` `_extend`, `cinder/volume/manager.py` `extend_volume` and
   `extend_volume_completion`, `cinder/message/message_field.py`, the 3.42 microversion), Nova 2026.1
   (`nova/compute/manager.py` `extend_volume`, `nova/virt/libvirt/driver.py` `extend_volume`,
-  `nova/virt/libvirt/volume/net.py`) and python-openstackclient 2026.1. Not reproduced on a lab.
+  `nova/virt/libvirt/volume/net.py`) and python-openstackclient 2026.1.
 - Not covered: shrinking, encrypted volumes (Nova handles them differently), multi-attached volumes, and extending a
   root volume of a running instance from the guest's point of view.
 
