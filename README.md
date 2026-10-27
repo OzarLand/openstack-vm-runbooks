@@ -90,6 +90,7 @@ A page written for one deployment method is welcome; variants for other methods 
 | nova-compute says "Possible rename detected, refusing to start!", or logs "Conflicting resource provider name" | [Compute renamed or re-added](scheduling/compute-renamed-or-re-registered-resource-provider-conflict.md) |
 | A boot from volume ends in ERROR ("Failure prepping block device"), or boots nothing | [Instance fails to boot from volume](scheduling/instance-fails-to-boot-from-volume.md) |
 | An instance went SHUTOFF on its own, Nova logged "shutdown by itself" | [Host OOM killer](lifecycle/instance-shut-off-by-host-oom-killer.md) |
+| An attached volume was extended, but the instance still sees the old size (or the extend failed) | [Extending an attached volume](volumes/extend-in-use-volume-guest-sees-old-size.md) |
 | After a compute reboot, instances stay SHUTOFF or have no network | [After a compute reboot](recovery/after-a-compute-reboot-instances-shutoff-or-without-network.md) |
 | A compute is unreachable and its instances are down | [Fence before you evacuate](recovery/compute-host-failure-fence-before-evacuate.md) |
 | `MessagingTimeout` in every service, computes reported down while they run | [RabbitMQ partitioned or blocked](recovery/rabbitmq-partition-or-alarm-rpc-timeouts.md) |
@@ -150,6 +151,7 @@ lab), **documentation** (upstream documentation and source), **production incide
 
 | Page | Components | Releases | Status | Source |
 |---|---|---|---|---|
+| [Extending an attached volume. Refused, error_extending, or the instance still sees the old size](volumes/extend-in-use-volume-guest-sees-old-size.md) | cinder, nova, libvirt, os-brick | 2026.1 | draft | documentation |
 | [Stale volume attachment. The volume is still in-use for an instance that was deleted or evacuated](volumes/stale-volume-attachment-after-instance-deleted-or-evacuated.md) | cinder, nova, libvirt | 2026.1 | draft | documentation |
 | [Volume stuck in attaching, reserved or detaching. The attach or detach never finishes](volumes/volume-stuck-in-attaching-or-detaching.md) | cinder, nova, libvirt | 2026.1 | lab-verified | documentation |
 | [Volume stuck in creating, or in error right after create](volumes/volume-stuck-in-creating-or-error-after-create.md) | cinder, glance, rabbitmq | 2026.1 | draft | documentation |
