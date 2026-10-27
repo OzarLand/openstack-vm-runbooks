@@ -11,14 +11,15 @@ environment:
   storage: any
   os: linux
 risk: state-changing
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-27, note: "cgroup-level OOM kill of one guest's QEMU (memory.max of its libvirt cgroup), not a host-wide OOM: quick checks, libvirt and nova-compute lines, Placement reads, server start, reserved_host_memory_mb override and reconfigure (nova_compute restarted, guest kept) run; undo by removing the override, not by explicit values; not run: host-wide OOM, cause 2 overcommit (ram_allocation_ratio), cause 3, the per-host nova.conf path" }
 upstream_refs:
   - https://docs.openstack.org/nova/2026.1/configuration/config.html#DEFAULT.reserved_host_memory_mb
   - https://docs.openstack.org/nova/2026.1/configuration/config.html#DEFAULT.ram_allocation_ratio
   - https://docs.openstack.org/nova/2026.1/admin/scheduling.html
   - https://github.com/torvalds/linux/blob/master/mm/oom_kill.c
 authored_by: agent:ozarland-author
-last_verified: 2026-10-26
+last_verified: 2026-10-27
 ---
 
 # Instance goes SHUTOFF by itself, nobody stopped it. The compute's OOM killer killed its QEMU process
@@ -51,7 +52,8 @@ OS-EXT-SRV-ATTR:instance_name`):
 ```bash
 # 1. Did the kernel kill a QEMU process? (dmesg -T for readable times)
 sudo dmesg -T | grep -E 'invoked oom-killer|Killed process'
-sudo journalctl -k --since "-2 days" | grep -E 'invoked oom-killer|Killed process'
+sudo journalctl -k --since "-2 days" | grep -E 'invoked oom-killer|Killed process'   # current boot only:
+                                                    # add -b -1 if the compute rebooted since
 
 # 2. The memory of the host now
 free -m
@@ -64,7 +66,10 @@ Out of memory: Killed process <pid> (qemu-system-x86) total-vm:<n>kB, anon-rss:<
 ```
 
 `Memory cgroup out of memory: Killed process ...` instead means a memory limit of a cgroup was reached, not the host's
-memory. The process name may be shortened by the kernel (`qemu-system-x86`, `qemu-kvm`).
+memory; the kernel's `oom-kill:constraint=CONSTRAINT_MEMCG,...,oom_memcg=<cgroup>` line just before it names the
+cgroup (for a guest of Kolla's `nova_libvirt`: `/machine/qemu-<n>-<instance-name>.libvirt-qemu`). The process name
+may be shortened by the kernel (`qemu-system-x86`, `qemu-kvm`). The `<task> invoked oom-killer` line names the task
+whose allocation triggered the kill, not necessarily the one killed.
 
 Then the libvirt log of that guest, which records why QEMU stopped:
 
@@ -213,12 +218,40 @@ openstack resource provider inventory show <rp-uuid> MEMORY_MB   # reserved and 
 On the compute, over the following days: no new `Killed process` line in `dmesg` or `journalctl -k`, and `free -m`
 keeps a margin with every instance running.
 
+## Lab observations
+
+Kolla-Ansible 22.2.0 (2026.1) all-in-one, Ubuntu 24.04 (kernel 6.8), no swap, on 2026-10-27. Injected: a
+cgroup-level OOM of one running `m1.tiny` CirrOS instance, by writing `50M` to `memory.max` of its cgroup
+`/sys/fs/cgroup/machine/qemu-<n>-<instance-name>.libvirt-qemu` (QEMU used about 200 MB). Not a host-wide OOM.
+
+- The kernel killed QEMU at once: `Memory cgroup out of memory: Killed process <pid> (qemu-system-x86)
+  total-vm:2184636kB, anon-rss:177724kB, file-rss:8320kB, shmem-rss:0kB, UID:42436 pgtables:892kB oom_score_adj:0`,
+  preceded by `memory: usage 180904kB, limit 51200kB, failcnt 41` and `oom-kill:constraint=CONSTRAINT_MEMCG,...`.
+  Quick check 1 found it with both commands.
+- The guest's libvirt log (read with `docker exec nova_libvirt tail`) ended with `shutting down, reason=crashed`,
+  0.3 s after the write to `memory.max`.
+- `nova-compute` logged `VM Stopped (Lifecycle Event)` 15 s after QEMU died, then `During _sync_instance_power_state
+  the DB power_state (1) does not match the vm_power_state from the hypervisor (4)` and `Instance shutdown by itself.
+  Calling the stop API. Current vm_state: active, current task_state: None, original DB power_state: 1, current VM
+  power_state: 4`, then `Instance is already powered off in the hypervisor when stop is called.` The instance was
+  `SHUTOFF`, and `openstack server event list` showed a `stop` whose request ID is the one of that log line.
+- The SHUTOFF instance kept its `MEMORY_MB` allocation in Placement. `openstack server start`: `ACTIVE` in 18 s.
+- `reserved_host_memory_mb = 4096` in `/etc/kolla/config/nova/nova-compute.conf` and `kolla-ansible reconfigure
+  --tags nova --limit <compute>`: 4 min 42 s; `nova_compute` was recreated, `nova_libvirt` and the running guest's
+  QEMU process were not; the inventory showed `reserved 4096`, `allocation_ratio 1.0`.
+- Not run: a host-wide OOM (only a cgroup limit), cause 2 (`ram_allocation_ratio` not changed), cause 3, the
+  per-host `<inventory-hostname>/nova.conf` path. The undo was done by removing the override and reconfiguring again
+  (no ratio had been set), not by writing the old values explicitly.
+
 ## Validity and limits
 
 - Written from Nova 2026.1 (`nova/compute/manager.py` `handle_lifecycle_event`, `_sync_instance_power_state`,
   `_stop_unexpected_shutdown_instance`; `reserved_host_memory_mb`, `ram_allocation_ratio`,
   `initial_ram_allocation_ratio`, `sync_power_state_interval`), Kolla-Ansible 2026.1 (`nova.conf.j2` of `nova-cell`),
-  the Linux kernel (`mm/oom_kill.c`) and libvirt (`src/qemu/qemu_process.c`). Not reproduced on a lab.
+  the Linux kernel (`mm/oom_kill.c`) and libvirt (`src/qemu/qemu_process.c`). Reproduced on an all-in-one lab with a
+  cgroup-level OOM of one guest (*Lab observations*): the Nova, libvirt and kernel lines and the start and
+  `reserved_host_memory_mb` resolutions. Not reproduced: a host-wide OOM, its `Out of memory: Killed process` line,
+  and memory overcommit.
 - An out-of-memory inside the guest is a different problem: the guest's own kernel kills a process, the instance stays
   `ACTIVE`.
 - Not covered: hugepages and NUMA-pinned instances, memory ballooning, swap policy on computes, and `oom_score_adj`
