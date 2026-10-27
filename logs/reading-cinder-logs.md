@@ -4,7 +4,7 @@ kind: diagnostic
 status: draft
 openstack_releases: ["2026.1"]
 components: [cinder, nova]
-deployment_methods: [kolla-ansible, any]
+deployment_methods: [kolla-ansible]
 environment:
   topology: multinode
   network: any
@@ -18,6 +18,7 @@ upstream_refs:
   - https://opendev.org/openstack/cinder/src/branch/stable/2026.1/cinder/scheduler/filter_scheduler.py
   - https://opendev.org/openstack/cinder/src/branch/stable/2026.1/cinder/scheduler/host_manager.py
   - https://opendev.org/openstack/cinder/src/branch/stable/2026.1/cinder/scheduler/base_filter.py
+  - https://opendev.org/openstack/cinder/src/branch/stable/2026.1/cinder/scheduler/filters/capacity_filter.py
   - https://opendev.org/openstack/cinder/src/branch/stable/2026.1/cinder/service.py
   - https://opendev.org/openstack/os-brick/src/branch/stable/2026.1/os_brick/initiator/connectors/iscsi.py
 authored_by: agent:ozarland-author
@@ -78,8 +79,8 @@ not in the line with the default format, the request id is).
 | `Manager for service cinder-volume <host>@<backend> is reporting problems, not sending heartbeat. Service will appear "down".` | ERROR | The manager knows its driver is not working, so it stops its heartbeat on purpose: `volume service list` shows it `down`, and the scheduler skips it. | the driver initialization lines above |
 | `Volume <volume-id>: create failed` | ERROR | The create flow failed; the volume goes to `error`. The traceback before it gives the cause (driver error, image copy failure). | the traceback |
 | `Failed to copy image to volume: <reason>` | (exception text) | Creating a volume from an image failed during the image download or conversion. | Glance's log for the image; disk space for the conversion |
-| `Image download <n> MB at <n> MB/s` | (DEBUG) | Speed of an image download into a volume. | — |
-| `Terminate volume connection failed: <error>` | (exception text) | Removing the host's access to the volume at detach time failed on the storage side. | [stuck in detaching](../volumes/volume-stuck-in-attaching-or-detaching.md) |
+| `Image download <n> MB at <n> MB/s` | INFO | Speed of an image download into a volume. | — |
+| `Terminate volume connection failed: <error>` | ERROR (with traceback) | Removing the host's access to the volume at detach time failed on the storage side. | [stuck in detaching](../volumes/volume-stuck-in-attaching-or-detaching.md) |
 | `model server went away` with a traceback, then `Recovered model server connection!` | ERROR | The service could not write its heartbeat to the database, then recovered. | MariaDB/Galera |
 
 Sources: `cinder/volume/manager.py`, `cinder/volume/flows/manager/create_volume.py`, `cinder/service.py`,
@@ -91,11 +92,13 @@ Sources: `cinder/volume/manager.py`, `cinder/volume/flows/manager/create_volume.
 |---|---|---|---|
 | `volume service is down. (host: <host>@<backend>)` | WARNING | A backend's heartbeat is older than `service_down_time` (default 60 s; `report_interval` is 10 s). The scheduler ignores it. | that backend's `cinder-volume.log` |
 | `Filtering removed all hosts for the request with volume ID '<volume-id>'. Filter results: <filter>: (start: <n>, end: <n>), ...` | INFO | Backends were up but the filters removed them all; the filter whose `end` is 0 is the cause (capacity, volume type extra specs, availability zone). | the backend's reported capabilities |
+| `Insufficient free virtual space (<n>GB) to accommodate thin provisioned <n>GB volume on host <host>@<backend>#<pool>.` (`cluster <name>` when the backend is clustered) | WARNING | The capacity filter rejected a thin-provisioned backend: its total capacity less `reserved_percentage`, times `max_over_subscription_ratio`, minus what is already provisioned, is below the size asked. The usual cause of `CapacityFilter: (start: <n>, end: 0)`. Related lines from the same filter: `Insufficient free space for thin provisioning. …` (over-subscription ratio exceeded) and `Insufficient free space for volume creation on host … (requested / avail): <n>/<n>`. | `openstack volume backend pool list --long`; `max_over_subscription_ratio` |
 | `No weighed backend found for volume with properties: <volume type>` | WARNING | No backend left after filtering and weighing. | same |
 | `Failed to schedule_<method>: <error>` (for example `Failed to schedule_create_volume: No valid backend was found. …`) | ERROR | Scheduling failed; the volume goes to `error`. | the lines just above |
 
 Sources: `cinder/scheduler/host_manager.py`, `cinder/scheduler/base_filter.py`,
-`cinder/scheduler/filter_scheduler.py`, `cinder/scheduler/manager.py`, `cinder/exception.py` (`NoValidBackend`).
+`cinder/scheduler/filter_scheduler.py`, `cinder/scheduler/manager.py`, `cinder/scheduler/filters/capacity_filter.py`,
+`cinder/exception.py` (`NoValidBackend`).
 
 ## On the compute: os-brick during attach and detach
 
