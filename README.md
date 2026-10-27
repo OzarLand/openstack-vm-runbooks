@@ -85,6 +85,7 @@ A page written for one deployment method is welcome; variants for other methods 
 | A new instance is ERROR with "Exceeded maximum number of retries" | [The real error is on the computes that tried](scheduling/build-fails-exceeded-maximum-number-of-retries.md) |
 | Placement usage of a compute does not match its instances, or a resource provider cannot be deleted (HTTP 409) | [Placement allocations out of sync](scheduling/placement-allocations-out-of-sync-audit-and-heal.md) |
 | A boot from volume ends in ERROR ("Failure prepping block device"), or boots nothing | [Instance fails to boot from volume](scheduling/instance-fails-to-boot-from-volume.md) |
+| An instance went SHUTOFF on its own, Nova logged "shutdown by itself" | [Host OOM killer](lifecycle/instance-shut-off-by-host-oom-killer.md) |
 | After a compute reboot, instances stay SHUTOFF or have no network | [After a compute reboot](recovery/after-a-compute-reboot-instances-shutoff-or-without-network.md) |
 | A compute is unreachable and its instances are down | [Fence before you evacuate](recovery/compute-host-failure-fence-before-evacuate.md) |
 | `MessagingTimeout` in every service, computes reported down while they run | [RabbitMQ partitioned or blocked](recovery/rabbitmq-partition-or-alarm-rpc-timeouts.md) |
@@ -100,6 +101,7 @@ lab), **documentation** (upstream documentation and source), **production incide
 |---|---|---|---|---|
 | [Compute disk full. An instance that writes is frozen, while Nova still shows it ACTIVE](lifecycle/compute-disk-full-instance-paused.md) | nova, libvirt, qemu | 2026.1 | lab-verified | lab run |
 | [Instance stuck in BUILD, then ERROR after vif_plugging_timeout](lifecycle/instance-stuck-in-build-waiting-for-vif-plugged.md) | nova, neutron, ovn, ovs | 2026.1 | lab-verified | book, lab run |
+| [Instance goes SHUTOFF by itself, nobody stopped it. The compute's OOM killer killed its QEMU process](lifecycle/instance-shut-off-by-host-oom-killer.md) | nova, libvirt, qemu, placement, linux-kernel | 2026.1 | draft | documentation |
 | [Instance stuck in deleting, or in ERROR after a delete. Deleting it again does nothing](lifecycle/instance-stuck-in-deleting.md) | nova, libvirt, cinder, neutron, placement | 2026.1 | draft | documentation |
 | [I need to restart nova_libvirt on a compute. Its instances keep running](lifecycle/restarting-nova-libvirt-does-not-stop-instances.md) | nova, libvirt | 2026.1 | lab-verified | lab run |
 | [Resize or cold migration not finished. Instance in VERIFY_RESIZE, stuck in RESIZE, or in ERROR after a failed resize](lifecycle/resize-stuck-in-verify-resize-or-failed.md) | nova, placement, libvirt | 2026.1 | draft | documentation |
@@ -186,7 +188,6 @@ behind it; open a *Problem solved* issue if you have one.
 1. Live migration fails: pre-check errors, shared storage assumptions, CPU model mismatch.
 2. Floating IP does not answer: where to look between the router, the gateway and the security groups.
 3. Console not available: VNC/SPICE proxy and hypervisor side.
-4. Instance stuck in `deleting` after the compute host was lost (the deletion-specific details beyond the stale-records page).
 
 ## Contributing
 
