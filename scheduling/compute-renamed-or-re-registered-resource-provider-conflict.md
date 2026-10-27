@@ -11,14 +11,15 @@ environment:
   storage: any
   os: any
 risk: destructive
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, multinode (3 controllers, 2 computes)", date: 2026-10-27, note: "on a compute without instances: quick checks; cause 1 simulated with [DEFAULT] host (a system rename did not reach the container) and undone by a restart; cause 2 (both compute_id files removed) resolved with kolla-ansible reconfigure; Verification run. Cause 3 not reproduced (a service delete plus a new compute_id gave Duplicate compute node record instead); its resolution, the second-service delete, the Kolla assert, a real rename or reinstall and the hand-written compute_id not run" }
 upstream_refs:
   - https://docs.openstack.org/nova/2026.1/admin/compute-node-identification.html
   - https://docs.openstack.org/nova/2026.1/admin/troubleshooting/orphaned-allocations.html
   - https://docs.openstack.org/nova/2026.1/cli/nova-manage.html#placement-audit
   - https://docs.openstack.org/osc-placement/latest/
 authored_by: agent:ozarland-author
-last_verified: 2026-10-26
+last_verified: 2026-10-27
 ---
 
 # A compute was renamed, reinstalled or re-added. nova-compute refuses to start, or gets no resource provider
@@ -34,7 +35,9 @@ refuses to start, or starts but never gets a resource provider, so nothing is sc
 One of these in the `nova-compute` log of the compute (**Kolla-Ansible:** `/var/log/kolla/nova/nova-compute.log`).
 The messages are from `nova/compute/manager.py` and `nova/scheduler/client/report.py`.
 
-The service exits at start-up, and the container restarts in a loop:
+The service refuses to start. On the Kolla-Ansible 2026.1 lab, for `Possible rename detected`, `nova-compute` logged
+the exception and kept running, without heartbeat: the container stayed `Up (healthy)`, with no restart loop,
+and the service went `down`. Look in the log, not at the container status:
 
 ```text
 ... nova.exception.InvalidConfiguration: My node <node-uuid> has host '<old-host>' but my host is '<new-host>'; Possible rename detected, refusing to start!
@@ -169,12 +172,20 @@ existing provider is refused with `409 Conflicting resource provider name`. The 
 reinstall with a new name, a change from a short name to an FQDN or back, or a change in DNS or `/etc/hosts` that
 changes what `hostname` returns.
 
+**Kolla-Ansible:** the `nova_compute` container keeps the host name it was created with. On the lab, `hostnamectl
+set-hostname` followed by a restart of the container did not change the name `nova-compute` saw (`docker exec
+nova_compute hostname` still gave the old one). Whether a deploy that recreates the container brings the new name
+in was not tested.
+
 ### Cause 2: the identity file was lost
 
 Same host name, the service exists, but `compute_id` is missing in the container. On Kolla-Ansible, the container
 copies `/etc/kolla/nova-compute/compute_id` into `/var/lib/nova/compute_id` at every start, so removing the
 `nova_compute` volume alone does not cause this: the file in `/etc/kolla/nova-compute/` must be lost too, for
-example after an OS reinstall, and the deploy has not run since.
+example after an OS reinstall, and the deploy has not run since. Then the container itself does not start, before
+`nova-compute` runs: `kolla_start` logs `ERROR MissingRequiredSource: /var/lib/kolla/config_files/compute_id file is
+not found` (`docker logs nova_compute`) and systemd restarts it in a loop. The `No local node identity found`
+message comes from deployments that do not copy the file in.
 
 ### Cause 3: an old provider with the same name
 
@@ -339,6 +350,32 @@ openstack allocation candidate list --resource VCPU=1 --resource MEMORY_MB=512 |
 No more `Error updating resources for node` or `Failed to create resource provider` in the `nova-compute` log at the
 next resource update.
 
+## Lab observations
+
+OpenStack 2026.1, Kolla-Ansible 22.2.0, 3 controllers and 2 computes, Ubuntu 24.04, ML2/OVS, 2026-10-27, on a
+compute without instances.
+
+- Quick checks 1 to 4 ran as written on a healthy compute: one service, one hypervisor whose ID is the content of
+  both `compute_id` files, one provider with that UUID.
+- Cause 1, simulated with `host = <new-host>` in `[DEFAULT]` of the compute's `nova.conf` (the system rename alone
+  did not reach the container, see cause 1): `My node <node-uuid> has host '<old-host>' but my host is
+  '<new-host>'; Possible rename detected, refusing to start!`, logged after `Starting compute node`; the process
+  stayed up, the container `healthy`, no new service record. Removing the line and restarting the container gave
+  the service back `up`.
+- Cause 2, both `compute_id` files removed: the container exits with `MissingRequiredSource` and restarts in a loop.
+  `kolla-ansible reconfigure -i <inventory> -t nova --limit <host>` (2 minutes) ran *Copy the matched hypervisor
+  UUID to compute_id* and the service came back `up`, both files with the old hypervisor ID.
+- Cause 3 not reproduced. `openstack compute service delete` with an allocation of an unknown consumer still on the
+  provider left the provider (`nova-api`: `Failed to delete resource provider with UUID <uuid> from the placement API.
+  Got 409`), as the page says, and also left the compute node record. With a new UUID in `compute_id`,
+  `nova-compute` then refused to start with `Unable to create duplicate record for compute node <host>:<new-uuid>`
+  and `InvalidConfiguration: Duplicate compute node record found for host <host> node <host>`, not with the
+  Placement 409. Recovered by deleting the allocation, writing the old UUID back and running `nova-manage cell_v2
+  discover_hosts` (the service delete had removed the host mapping).
+- Not run: the resolutions of cause 3 (audit, provider delete, heal), the service delete of a second service, the
+  Kolla-Ansible `Found multiple compute services` assert, a real OS reinstall or rename, and the hand-written
+  `compute_id` of *Any*.
+
 ## Validity and limits
 
 - Written from Nova 2026.1 (`nova/compute/manager.py`: `init_host`, `_ensure_existing_node_identity`,
@@ -347,9 +384,9 @@ next resource update.
   `nova/api/openstack/compute/services.py`: service delete), Placement 2026.1
   (`placement/handlers/resource_provider.py`, the duplicate name message), the upstream *Compute Node
   Identification* guide, and Kolla-Ansible 2026.1 (`nova-cell` role, `tasks/config.yml` and `nova-compute.json.j2`).
-  Not reproduced on a lab.
+  Causes 1 and 2 reproduced on a Kolla-Ansible lab, cause 3 not: see *Lab observations*.
 - The log lines are shown with the logger and message from the source; the exception lines are the last line of the
-  traceback that the service prints when it exits. The JSON in the Placement 409 is trimmed.
+  traceback that the service prints (on the lab, the process stayed up after printing it). The JSON in the Placement 409 is trimmed.
 - Not covered: Ironic (no `compute_id`, nodes move between services by design), computes with more than one node,
   and renaming a compute while its instances stay on it, which upstream does not support.
 
