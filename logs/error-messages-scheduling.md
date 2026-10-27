@@ -27,7 +27,8 @@ last_verified: 2026-10-27
 
 This page belongs to the dictionary of frequent OpenStack error messages. For each message: where it appears, what it
 means, the usual causes, the next log to read, and the runbook that fixes it. The messages are the format strings of
-Nova `stable/2026.1`, not captured lines; `<…>` marks a value.
+Nova `stable/2026.1`; `<…>` marks a value. The *Lab observations* section shows the lines captured on a Kolla-Ansible
+2026.1 lab.
 
 The two messages are related: `MaxRetriesExceeded` is a subclass of `NoValidHost` in
 [`nova/exception.py`](https://github.com/openstack/nova/blob/stable/2026.1/nova/exception.py), but they point to
@@ -70,13 +71,18 @@ retries` comes after one or more computes tried and failed.
     scheduler were all used);
   - `Exceeded max scheduling attempts <n> for instance <uuid>. Last exception: <exception>` (the count of attempts
     passed `[scheduler] max_attempts`, 3 by default, in
-    [`conf/scheduler.py`](https://github.com/openstack/nova/blob/stable/2026.1/nova/conf/scheduler.py)).
+    [`conf/scheduler.py`](https://github.com/openstack/nova/blob/stable/2026.1/nova/conf/scheduler.py); Kolla-Ansible
+    2026.1 renders `max_attempts = 10` in `/etc/kolla/nova-scheduler/nova.conf`).
 - **Read next:** the **computes that tried**, not the scheduler. Each failed attempt is logged on its compute as
   `Build of instance <uuid> was re-scheduled: <reason>` (`RescheduledException`), with the real error just before.
-  Find them with `openstack server event show <server-id> <request-id>` (the per-compute tracebacks; see the runbook
-  for the microversion and the admin-only details), then `nova-compute.log` on each. Where the retry record carries
-  it, the scheduler also logs `Error from last host: <host> (node <node>): <exception>` (ERROR,
-  `scheduler/utils.py`).
+  Find them with `openstack server event show <server-id> <request-id>` (the event's `host` names the compute; see
+  the runbook for the microversion and the admin-only details), then `nova-compute.log` on each. On the lab the
+  `compute__do_build_and_run_instance` event of a rescheduled build read `result: Success` with `traceback: null`:
+  the error is in `nova-compute.log`, not in the event. On Kolla-Ansible 2026.1 the `was re-scheduled` text did not
+  appear as a line of its own but as the exception appended to the next WARNING line of the request
+  (`...: nova.exception.RescheduledException: Build of instance <uuid> was re-scheduled: <reason>`); `grep
+  're-scheduled'` finds it. Where the retry record carries it, the **conductor** logs `Error from last host: <host>
+  (node <node>): <exception>` (ERROR, logger `nova.scheduler.utils`, in `nova-conductor.log`).
 - **Usual causes:** the same failure on every compute: port binding or VIF plugging, image download, volume attach,
   libvirt refusing the domain (CPU model, missing feature), disk space. These have their own pages in this dictionary.
 - **Fix:** [Exceeded maximum number of retries. The real error is on the computes that tried](../scheduling/build-fails-exceeded-maximum-number-of-retries.md).
@@ -97,16 +103,59 @@ retries` comes after one or more computes tried and failed.
 3. `Exceeded maximum number of retries`: `openstack server event show` for the computes that tried, then
    `nova-compute.log` on each for `was re-scheduled` and the error before it.
 
+## Lab observations
+
+Kolla-Ansible 22.2.0 (OpenStack 2026.1) all-in-one, one compute, ML2/OVS, logs at INFO, 2026-10-27. Real lines,
+redacted:
+
+- A flavor with more RAM than the host: fault `No valid host was found. ` (empty reason) 4 s after the boot;
+  `nova-scheduler.log`:
+
+  ```text
+  2026-10-27 07:03:41.655 94 INFO nova.scheduler.manager [None req-<request-id> <user-id> <project-id> - - default default] Got no allocation candidates from the Placement API. This could be due to insufficient resources or a temporary occurrence as compute nodes start up.
+  ```
+
+  and `nova-conductor.log`:
+
+  ```text
+  2026-10-27 07:03:42.081 88 ERROR nova.conductor.manager [None req-<request-id> ...] Failed to schedule instances: nova.exception_Remote.NoValidHost_Remote: No valid host was found.
+  2026-10-27 07:03:42.200 88 WARNING nova.scheduler.utils [None req-<request-id> ...] Failed to compute_task_build_instances: No valid host was found.
+  2026-10-27 07:03:42.202 88 WARNING nova.scheduler.utils [None req-<request-id> ...] [instance: <server-id>] Setting instance to ERROR state.: nova.exception_Remote.NoValidHost_Remote: No valid host was found.
+  ```
+
+- A flavor with the extra spec `capabilities:hypervisor_type=s390-none`: fault `No valid host was found. There are
+  not enough hosts available.`; `nova-scheduler.log`:
+
+  ```text
+  2026-10-27 07:03:49.795 101 INFO nova.filters [None req-<request-id> ...] Filter ComputeCapabilitiesFilter returned 0 hosts
+  2026-10-27 07:03:49.802 101 INFO nova.filters [None req-<request-id> ...] Filtering removed all hosts for the request with instance ID '<server-id>'. Filter results: ['ComputeFilter: (start: 1, end: 1)', 'ComputeCapabilitiesFilter: (start: 1, end: 0)']
+  ```
+
+- An image with `hw_machine_type=pc-q35-nonexistent` (a reschedulable failure on the only compute): fault `Exceeded
+  maximum number of retries. Exhausted all hosts available for retrying build failures for instance <uuid>.` 18 s
+  after the boot; nothing in `nova-scheduler.log` at INFO; `nova-compute.log`, then `nova-conductor.log`:
+
+  ```text
+  2026-10-27 07:04:36.725 6 ERROR nova.compute.manager [None req-<request-id> ...] [instance: <server-id>] Failed to build and run instance: nova.exception.InvalidMachineType: 'pc-q35-nonexistent' is not valid/supported machine type, Supported machine types are: [...]
+  2026-10-27 07:04:36.735 6 WARNING neutronclient.v2_0.client [None req-<request-id> ...] The python binding code in neutronclient is deprecated in favor of OpenstackSDK, please use that as this will be removed in a future release.: nova.exception.RescheduledException: Build of instance <server-id> was re-scheduled: 'pc-q35-nonexistent' is not valid/supported machine type, [...]
+  2026-10-27 07:04:39.923 89 ERROR nova.scheduler.utils [None req-<request-id> ...] [instance: <server-id>] Error from last host: compute-1 (node compute-1): ['Traceback (most recent call last):\n', [...]
+  2026-10-27 07:04:39.927 89 WARNING nova.scheduler.utils [None req-<request-id> ...] [instance: <server-id>] Setting instance to ERROR state.: nova.exception.MaxRetriesExceeded: Exceeded maximum number of retries. Exhausted all hosts available for retrying build failures for instance <server-id>.
+  ```
+
+- Not observed: the `Exceeded max scheduling attempts <n>` reason, the DEBUG lines, a reschedule to an alternate
+  compute (one compute only).
+
 ## Validity and limits
 
-- Written from Nova `stable/2026.1` source only. Every message is a format string from that source, not a captured
-  line; the fault message shown by the API can be shortened.
-- Not run on a lab yet (the No valid host runbook linked above is lab-verified; this page is not). A capture of the
-  scheduler's `Filter ... returned 0 hosts` and `Filtering removed all hosts` lines for a flavor that no host
-  satisfies is requested.
+- Written from Nova `stable/2026.1` source; the messages in the sections above are format strings from that source,
+  and the fault message shown by the API can be shortened.
+- Lab-checked on a Kolla-Ansible 2026.1 all-in-one (one compute, INFO logs): the no-allocation-candidates, filter and
+  `Exhausted all hosts` cases, with the lines in *Lab observations*. Not covered: `Exceeded max scheduling attempts`,
+  reschedules across several computes, DEBUG output, other deployment methods.
 - The cells v2 details (`cell0`, super conductor) depend on the deployment's cell layout.
 
 ---
 
-*Provenance: written by agent:ozarland-author, from upstream source code (Nova). Reviewed in its pull request (see the
+*Provenance: written by agent:ozarland-author, from upstream source code (Nova) and a lab run on Kolla-Ansible 2026.1
+(2026-10-27, by the lab reviewer). Reviewed in its pull request (see the
 page history). Checked by a human operator: not yet.*
