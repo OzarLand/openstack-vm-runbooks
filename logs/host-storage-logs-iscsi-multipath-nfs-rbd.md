@@ -4,13 +4,13 @@ kind: diagnostic
 status: draft
 openstack_releases: ["2026.1"]
 components: [nova, cinder, iscsi, multipath, nfs, ceph]
-deployment_methods: [kolla-ansible, any]
+deployment_methods: [kolla-ansible]
 environment:
   topology: any
   network: any
   storage: iscsi, nfs or ceph-rbd volumes attached to instances
   os: any linux with systemd
-risk: read-only
+risk: state-changing
 confirmed_by: []
 upstream_refs:
   - https://github.com/open-iscsi/open-iscsi/blob/2.1.13/README
@@ -29,6 +29,7 @@ upstream_refs:
   - https://github.com/openstack/kolla-ansible/blob/stable/2026.1/ansible/roles/multipathd/templates/multipathd.json.j2
   - https://github.com/openstack/kolla-ansible/blob/stable/2026.1/ansible/group_vars/all/iscsi.yml
   - https://github.com/openstack/kolla-ansible/blob/stable/2026.1/ansible/group_vars/all/multipathd.yml
+  - https://github.com/openstack/kolla-ansible/blob/stable/2026.1/ansible/roles/nova-cell/defaults/main.yml
   - https://github.com/openstack/nova/blob/stable/2026.1/nova/conf/libvirt.py
 authored_by: agent:ozarland-author
 last_verified: 2026-10-27
@@ -43,9 +44,10 @@ client. This page shows where they are and which lines matter.
 
 The kernel's block layer and filesystem errors, and hung tasks, are on the page
 [reading the kernel log of a compute](kernel-messages-on-computes.md). The errors that `os-brick` raises in
-`nova-compute.log` during an attach are covered with the volume error messages.
+`nova-compute.log` during an attach are covered with the volume error messages; for a stuck attach, see
+[volume stuck in attaching or detaching](../volumes/volume-stuck-in-attaching-or-detaching.md).
 
-All commands on this page are read-only.
+All commands on this page are read-only, except the Ceph client logging setup, which carries its own warning.
 
 ## iSCSI: iscsid and the kernel
 
@@ -190,6 +192,21 @@ socket. Changing `ceph.conf` is a configuration change of the compute; on Kolla-
 file that Kolla-Ansible copies into the containers, so make the change in its source and redeploy rather than
 editing inside a container.
 
+> ⚠️ **State-changing.** Adds two settings to the Ceph client configuration of the compute. On Kolla-Ansible, the
+> redeploy that applies them restarts the Nova containers of that compute (including `nova_libvirt`; see the
+> precondition in [restarting nova_libvirt](../lifecycle/restarting-nova-libvirt-does-not-stop-instances.md)). Only
+> QEMU processes started afterwards get the socket and the log file: a running instance picks them up only after a
+> stop and start (or hard reboot), which interrupts its workload. Each QEMU process then writes its own log file, which
+> grows with the client's log level. Undo: remove the two lines, apply the configuration again the same way, and
+> delete the files left in the two directories.
+
+**Kolla-Ansible:** QEMU runs inside the `nova_libvirt` container, so `/var/run/ceph/guests/` and `/var/log/qemu/`
+must exist **inside that container**, owned by the user QEMU runs as. No volume is mounted at those paths by default
+(see `nova_libvirt_default_volumes` in the nova-cell
+[defaults](https://github.com/openstack/kolla-ansible/blob/stable/2026.1/ansible/roles/nova-cell/defaults/main.yml)),
+so the log files are lost when the container is recreated, unless an extra volume is added for them
+(`nova_libvirt_extra_volumes`).
+
 When it is in place:
 
 ```bash
@@ -226,6 +243,8 @@ side, slow requests in the cluster's health.
   (stable/2026.1).
 - Fibre Channel, NVMe-oF and other `os-brick` connectors are not covered.
 - Where Kolla-Ansible keeps the compute's `ceph.conf` for Nova was not detailed here.
+- Written for Kolla-Ansible. The package-install notes (`journalctl -u iscsid`, `journalctl -u multipathd`, the
+  kernel lines) apply elsewhere too, but the page was not checked against another deployment method.
 
 ---
 
