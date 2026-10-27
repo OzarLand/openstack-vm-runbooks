@@ -73,11 +73,12 @@ instances are not affected.
 Read-only.
 
 ```bash
-# 1. Are the Fernet keys the same on every Keystone node? Run on each controller and compare the output.
-sudo docker exec keystone_fernet bash -c 'cd /etc/keystone/fernet-keys && ls && md5sum *'
-#    expected: the same file names (0, 1, 2, ...) and the same checksums on every node.
+# 1. Can every node read every node's tokens? Run on each controller and compare the output.
+sudo docker exec keystone_fernet bash -c 'cd /etc/keystone/fernet-keys && md5sum *'
 #    Key 0 is the staged key, the highest number is the primary key that encrypts new tokens.
-
+#    The deciding test: is each node's primary key (its highest number) present, by checksum, in every other
+#    node's set, under any number, key 0 included? If yes, every node decrypts every token, even if the lists differ.
+#    Different lists alone are not a fault: after one rotation whose push failed they differ, and nothing breaks.
 #    This is the check that decides cause 1. Check 3 cannot, with a fresh token (see below).
 
 # 2. Is the key distribution working? keystone_fernet's health check runs fernet-node-sync.sh --check (key 0
@@ -124,8 +125,10 @@ all Keystone nodes share one token cache. `_validate_token`, which decrypts the 
 default (oslo.cache). Keystone writes the entry when it issues the token. So for 10 minutes, any node answers from
 the cache, whether or not it has the key.
 
-The expiry and revocation checks (`_is_valid_token`) are not cached: each node runs them with its own clock on each
-validation. A clock that is off therefore shows on fresh tokens.
+The expiry check in `_is_valid_token` is not cached: each node compares the token's `expires_at` with its own clock on
+each validation. The revocation check (`check_revocation_v3`) is memoized too, and compares the token's `issued_at`,
+set by the issuing node's clock, with the events' `issued_before`, set by the clock of the node that wrote them. A
+clock that is off therefore shows on fresh tokens, through the issuing node or the validating node.
 
 ### How Kolla-Ansible keeps the keys in sync
 
@@ -142,8 +145,19 @@ validation. A clock that is off therefore shows on fresh tokens.
 - `max_active_keys` is computed so that every key still needed for a valid token is kept:
   `((fernet_token_expiry + fernet_token_allow_expired_window + fernet_key_rotation_interval - 1) // fernet_key_rotation_interval) + 2`.
 
-So the key sets diverge when a rotation happened on one node and its push failed, or when a node got keys that the
-others do not have (rebuilt node, restored volume, keys copied by hand).
+A rotation (`rotate_keys` in `keystone/common/fernet_utils.py`) promotes the staged key `0` to be the new primary and
+creates a new `0`. Key `0` came from the last push, so it is the same on every node: after one rotation, the new
+primary is already in every other node's set, as their key `0`. Keystone decrypts with every key in the repository
+(`MultiFernet` in `keystone/token/token_formatters.py`, whose docstring says this lets you rotate on one node before
+syncing). So **one missed push is harmless by design**: the lists differ, every token still validates everywhere.
+
+Tokens break only when a node's primary is missing from another node's set:
+
+- a second rotation on the same node without a push in between: its new primary is its own new `0`, which no other
+  node has;
+- rotations on two nodes, each without pushing;
+- keys created independently: a node rebuilt with `fernet_setup`, a key volume restored from a backup, keys copied by
+  hand.
 
 A rotation leaves these lines in `/var/log/kolla/keystone/keystone.log` of the node that rotated (logger
 `keystone.common.fernet_utils`):
@@ -178,21 +192,28 @@ password change or a role change, and only for tokens from one node.
 
 | What you see | Cause |
 |---|---|
-| Checksums or key file names differ between nodes (check 1); tokens older than 10 minutes get 404 `Could not recognize Fernet token` on some nodes | Cause 1: Fernet key sets diverged |
-| `keystone_fernet` unhealthy on one node | Cause 1, through cause 2: the push from that node fails, or its key 0 is missing |
+| A node's primary key is missing from another node's set (check 1); tokens older than 10 minutes get 404 `Could not recognize Fernet token` on some nodes | Cause 1: Fernet key sets diverged |
+| Key lists differ, but every node's primary is in every other set | Not a fault: one rotation not yet pushed. Look for another cause, and repair the push (cause 2) before the next rotation |
+| `keystone_fernet` unhealthy on one node | Cause 2: the push from that node fails, or its key 0 is missing. It becomes cause 1 at that node's next rotation |
 | Keys identical, 404 `Failed to validate token` for fresh tokens issued by one node, for one user or project after a change on it | Cause 3: clock behind on the issuing node |
 | Keys identical, every token rejected by one node as `Failed to validate token` | Cause 3: clock ahead on the validating node by more than the token lifetime |
 | Every node answers 404 `Could not recognize Fernet token` for every token | Cause 4: a token issued by a key no node has any more (keys replaced on every node) |
 
 ### Cause 1: Fernet key sets differ
 
-*Quick checks* 1 shows different files or checksums. Tokens issued by a node whose primary key the others do not have
-are rejected by those others once they leave the token cache.
+*Quick checks* 1 shows a node whose primary key is in no other node's set (under any number). Tokens it issued are
+rejected by the others once they leave the token cache. Different lists where every primary is still present
+everywhere are not this cause.
 
 ### Cause 2: the key push fails
 
-`keystone_fernet` is unhealthy, or `keystone_ssh` is not running on a peer. Rotations still happen locally on the
-node whose push fails, so its set drifts further at each of its rotation slots.
+`keystone_fernet` is unhealthy, or `keystone_ssh` is not running on a peer. Tell the two sides apart:
+
+- a node that cannot **send** (its `fernet-push.sh` fails: its SSH key, the network, the peers' `keystone_ssh`):
+  its rotations stay local. One is harmless; the second makes cause 1;
+- a node that cannot **receive** (its own `keystone_ssh` is down): the other nodes' pushes to it fail, but a push
+  from a peer that does reach it still overwrites its set with `rsync --delete`. Its own rotations, pushed to the
+  others, can wipe keys they rotated in the meantime.
 
 ### Cause 3: clock skew on a Keystone node
 
@@ -208,6 +229,9 @@ at the next 401.
 ## Resolution
 
 ### For causes 1 and 2: make every node use one key set
+
+Do this only when *Quick checks* 1 shows a primary key missing from another node's set. If every primary is
+present everywhere, no push is needed for the 401s: repair the push path (cause 2) and look at the clock (cause 3).
 
 **Choose the source node.** Compare *Quick checks* 1 across nodes, and the rotation lines in each node's
 `keystone.log`. Do not go by the highest key number alone: two nodes that rotated on their own can each have a key
@@ -255,8 +279,10 @@ sudo docker exec keystone_fernet /usr/bin/fernet-push.sh
 where `keystone_fernet` runs, not from the node you chose.
 
 > 🛑 **Destructive.** Same loss as above, from a source you do not choose: if that node has the wrong set, it
-> replaces the good one everywhere. Use it only when *Quick checks* 1 shows that the first node of the group is the
-> right source. Same preconditions; no real undo.
+> replaces the good one everywhere. It also re-renders the Keystone configuration and runs the Keystone bootstrap,
+> so it can restart the `keystone`, `keystone_fernet` and `keystone_ssh` containers, with failed requests while
+> they restart. Use it only when *Quick checks* 1 shows that the first node of the group is the right source. Same
+> preconditions; no real undo.
 
 ```bash
 kolla-ansible reconfigure -i <inventory> -t keystone
