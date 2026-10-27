@@ -44,7 +44,7 @@ lists them):
 | ovn-northd | `ovn_northd` | `ovn-northd.log` | controllers |
 | Northbound DB | `ovn_nb_db` | `ovn-nb-db.log` | controllers |
 | Southbound DB | `ovn_sb_db` | `ovn-sb-db.log` | controllers |
-| Southbound relays | `ovn_sb_db_relay` | `ovn-sb-relay-<n>.log` | controllers |
+| Southbound relays | `ovn_sb_db_relay_<n>` | `ovn-sb-relay-<n>.log` | controllers |
 
 Neutron's side is in `/var/log/kolla/neutron/`: `neutron-server.log`, the OVN maintenance worker
 (`neutron_ovn_maintenance_worker`) and, on the chassis, `neutron-ovn-metadata-agent.log`.
@@ -52,7 +52,9 @@ Neutron's side is in `/var/log/kolla/neutron/`: `neutron-server.log`, the OVN ma
 Kolla-Ansible 2026.1 enables **Southbound relays** with OVN by default (`enable_ovn_sb_db_relay`), one relay per 50
 chassis (`ovn_sb_db_relay_compute_per_relay`), listening on ports `1664<n>`. Southbound clients configured with
 `ovn_sb_connection`, ovn-controller among them, connect to a relay, not to the Southbound cluster directly
-(`group_vars/all/ovn.yml`).
+(`group_vars/all/ovn.yml`). neutron-server and ovn-northd are configured with `ovn_sb_connection_no_relay`
+(`ml2_conf.ini.j2`, `ovn-northd.json.j2`): they connect to the Southbound cluster on port 6642, so their connection
+lines name a different target.
 
 **Format.** OVN and OVS daemons write `<date>T<time>.<ms>Z|<sequence>|<module>|<LEVEL>|<message>`, in **UTC**
 (fluentd's parser for these files). `oslo.log` lines in Neutron's logs are in the host's local time: line them up
@@ -76,6 +78,7 @@ OVN daemons use Open vSwitch's reconnect logic for each database connection, and
 | `<target>: connected` | INFO | Connected. |
 | `<target>: connection dropped (<error>)` | WARN | The connection broke: the remote database restarted, the network failed, or a TLS problem. |
 | `<target>: waiting <n> seconds before reconnect` | INFO | Backing off. The interval grows up to the configured maximum. |
+| `<target>: continuing to reconnect in the background but suppressing further logging` | INFO | The backoff reached its maximum; reconnection attempts continue but are no longer logged. Silence after this line does not mean the connection came back: look for `connected`. |
 | `<target>: no response to inactivity probe after <n> seconds, disconnecting` | ERR | The remote side did not answer the keep-alive probe: it is overloaded, stuck, or the network drops packets. A classic sign of an overloaded Southbound database or relay. |
 
 ```bash
@@ -92,6 +95,7 @@ ovn-controller claims the matching logical port. Neutron names the logical switc
 |---|---|---|
 | `Claiming lport <port-id> for this chassis.` | INFO | This chassis takes the port. |
 | `<port-id>: Claiming <mac> <ip> ...` | INFO | The addresses claimed with it. |
+| `Claiming lport <port-id> for this additional chassis.` | INFO | During a live migration the destination usually claims the port as an additional chassis first. |
 | `Changing chassis for lport <port-id> from <old> to <new>.` | INFO | The port moves to this chassis (live migration, or a port bound on two chassis at once). Repeated back and forth between two chassis: both claim it. |
 | `Setting lport <port-id> ovn-installed in OVS` | INFO | The flows for the port are installed locally. |
 | `Setting lport <port-id> up in Southbound` | INFO | ovn-controller marks the port up; Neutron will see it. |
@@ -104,7 +108,7 @@ grep "<port-id>" /var/log/kolla/openvswitch/ovn-controller.log
 ```
 
 No `Claiming lport` line for a new instance's port means ovn-controller never saw the interface with that
-`iface-id`: check `ovs-vsctl --columns=name,external_ids list Interface` on the compute, and libvirt.
+`iface-id`: check `sudo docker exec openvswitch_vswitchd ovs-vsctl --columns=name,external_ids list Interface` on the compute (Kolla-Ansible), and libvirt.
 
 ## ovn-northd
 

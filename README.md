@@ -86,10 +86,13 @@ A page written for one deployment method is welcome; variants for other methods 
 | An instance stays in `deleting`, and deleting it again does nothing | [Stuck in deleting](lifecycle/instance-stuck-in-deleting.md) |
 | A new instance is ERROR with "Exceeded maximum number of retries" | [The real error is on the computes that tried](scheduling/build-fails-exceeded-maximum-number-of-retries.md) |
 | Placement usage of a compute does not match its instances, or a resource provider cannot be deleted (HTTP 409) | [Placement allocations out of sync](scheduling/placement-allocations-out-of-sync-audit-and-heal.md) |
+| The guest does not boot (kernel panic, emergency shell) or is unreachable after a change inside it | [Rescue mode](lifecycle/rescue-mode-repair-an-unbootable-guest.md) |
 | nova-compute says "Possible rename detected, refusing to start!", or logs "Conflicting resource provider name" | [Compute renamed or re-added](scheduling/compute-renamed-or-re-registered-resource-provider-conflict.md) |
+| A boot is refused or aborted: "Flavor's disk is too small for requested image" | [Image larger than the flavor's disk](scheduling/image-larger-than-flavor-disk.md) |
 | A boot from volume ends in ERROR ("Failure prepping block device"), or boots nothing | [Instance fails to boot from volume](scheduling/instance-fails-to-boot-from-volume.md) |
 | An instance went SHUTOFF on its own, Nova logged "shutdown by itself" | [Host OOM killer](lifecycle/instance-shut-off-by-host-oom-killer.md) |
 | After a compute reboot, instances stay SHUTOFF or have no network | [After a compute reboot](recovery/after-a-compute-reboot-instances-shutoff-or-without-network.md) |
+| A volume stays in `deleting` or `error_deleting`, or comes back `available` after a delete | [Volume stuck in deleting](volumes/volume-stuck-in-deleting-or-error-deleting.md) |
 | A compute is unreachable and its instances are down | [Fence before you evacuate](recovery/compute-host-failure-fence-before-evacuate.md) |
 | `MessagingTimeout` in every service, computes reported down while they run | [RabbitMQ partitioned or blocked](recovery/rabbitmq-partition-or-alarm-rpc-timeouts.md) |
 
@@ -109,6 +112,7 @@ lab), **documentation** (upstream documentation and source), **production incide
 | [Instance stuck in deleting, or in ERROR after a delete. Deleting it again does nothing](lifecycle/instance-stuck-in-deleting.md) | nova, libvirt, cinder, neutron, placement | 2026.1 | draft | documentation |
 | [I need to restart nova_libvirt on a compute. Its instances keep running](lifecycle/restarting-nova-libvirt-does-not-stop-instances.md) | nova, libvirt | 2026.1 | lab-verified | lab run |
 | [Resize or cold migration not finished. Instance in VERIFY_RESIZE, stuck in RESIZE, or in ERROR after a failed resize](lifecycle/resize-stuck-in-verify-resize-or-failed.md) | nova, placement, libvirt | 2026.1 | draft | documentation |
+| [The guest does not boot or cannot be reached (broken fstab, kernel, network or SSH configuration). Repair its disk in rescue mode](lifecycle/rescue-mode-repair-an-unbootable-guest.md) | nova, libvirt, glance | 2026.1 | draft | documentation |
 | [Stale records. Instances stuck in BUILD, ERROR or deleting, orphan ports and attachments, phantom allocations](lifecycle/stale-records-stuck-instances-orphan-ports-attachments.md) | nova, placement, neutron, cinder, mariadb | not recorded ([help wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=lifecycle%2Fstale-records-stuck-instances-orphan-ports-attachments.md&title=Release+for+lifecycle%2Fstale-records-stuck-instances-orphan-ports-attachments.md)) | draft | book |
 | [Instance snapshot never finishes. Task state image_pending_upload or image_uploading, image queued or saving](lifecycle/snapshot-stuck-in-image-uploading.md) | nova, glance, libvirt, ceph | 2026.1 | draft | documentation |
 
@@ -117,8 +121,10 @@ lab), **documentation** (upstream documentation and source), **production incide
 | Page | Components | Releases | Status | Source |
 |---|---|---|---|---|
 | [New instance in ERROR with "Exceeded maximum number of retries". The real error is on the computes that tried](scheduling/build-fails-exceeded-maximum-number-of-retries.md) | nova, placement | 2026.1 | draft | documentation |
+| [Boot refused or aborted because the flavor's disk is too small for the image](scheduling/image-larger-than-flavor-disk.md) | nova, glance, cinder | 2026.1 | draft | documentation |
 | [Instance fails to boot from volume. ERROR at build, or ACTIVE with no bootable disk](scheduling/instance-fails-to-boot-from-volume.md) | nova, cinder, glance, libvirt | 2026.1 | draft | documentation |
 | [No valid host was found, although capacity exists](scheduling/no-valid-host-with-free-capacity.md) | nova, placement | 2026.1 | lab-verified | book |
+| [A compute shows disabled or down. Why, what still works on it, and how to bring it back](scheduling/compute-service-disabled-or-forced-down.md) | nova, placement, libvirt | 2026.1 | draft | documentation |
 | [A compute was renamed, reinstalled or re-added. nova-compute refuses to start, or gets no resource provider](scheduling/compute-renamed-or-re-registered-resource-provider-conflict.md) | nova, placement | 2026.1 | draft | documentation |
 | [Placement allocations do not match the instances. Compute looks full or empty, audit and heal](scheduling/placement-allocations-out-of-sync-audit-and-heal.md) | nova, placement | 2026.1 | draft | documentation |
 
@@ -150,6 +156,7 @@ lab), **documentation** (upstream documentation and source), **production incide
 | [Stale volume attachment. The volume is still in-use for an instance that was deleted or evacuated](volumes/stale-volume-attachment-after-instance-deleted-or-evacuated.md) | cinder, nova, libvirt | 2026.1 | draft | documentation |
 | [Volume stuck in attaching, reserved or detaching. The attach or detach never finishes](volumes/volume-stuck-in-attaching-or-detaching.md) | cinder, nova, libvirt | 2026.1 | lab-verified | documentation |
 | [Volume stuck in creating, or in error right after create](volumes/volume-stuck-in-creating-or-error-after-create.md) | cinder, glance, rabbitmq | 2026.1 | draft | documentation |
+| [Volume stuck in deleting, in error_deleting, or back to available after a delete](volumes/volume-stuck-in-deleting-or-error-deleting.md) | cinder, ceph, rabbitmq | 2026.1 | draft | documentation |
 
 ### Diagnostics
 
@@ -167,8 +174,10 @@ lab), **documentation** (upstream documentation and source), **production incide
 |---|---|---|---|---|
 | [Where the OpenStack logs are, and how to read one log line](logs/where-openstack-logs-are-and-how-to-read-a-line.md) | nova, neutron, placement, keystone, glance, cinder, rabbitmq, mariadb, haproxy, ovs, ovn, libvirt | 2026.1 | draft | documentation |
 | [Reading the Keystone logs, and the authentication lines every service writes (401, 503, Fernet)](logs/reading-keystone-and-auth-logs.md) | keystone, memcached, nova, neutron | 2026.1 | draft | documentation |
+| [Reading the Cinder logs. cinder-api, cinder-scheduler, cinder-volume, and os-brick on the compute](logs/reading-cinder-logs.md) | cinder, nova | 2026.1 | draft | documentation |
 | [Following one request, instance, port or volume through the logs of every service and host](logs/tracing-one-request-across-services-and-hosts.md) | nova, neutron, placement, cinder, glance, ovs, libvirt | 2026.1 | draft | documentation |
 | [Reading the MariaDB and Galera logs, and the oslo.db lines that go with them](logs/reading-mariadb-galera-logs.md) | mariadb, proxysql, haproxy, nova, neutron, keystone | 2026.1 | draft | documentation |
+| [Reading the Glance logs, and the image lines in Nova's logs (boot, snapshot)](logs/reading-glance-logs.md) | glance, nova | 2026.1 | draft | documentation |
 | [Reading the Nova logs. What normal looks like, and what the common lines mean](logs/reading-nova-logs.md) | nova, placement, rabbitmq, libvirt | 2026.1 | draft | documentation |
 | [Reading the HAProxy, keepalived and memcached logs in front of the OpenStack APIs](logs/reading-haproxy-keepalived-memcached-logs.md) | haproxy, keepalived, proxysql, memcached, keystone | 2026.1 | draft | documentation |
 | [Reading the RabbitMQ logs, and the oslo.messaging lines that go with them](logs/reading-rabbitmq-logs.md) | rabbitmq, nova, neutron, cinder | 2026.1 | draft | documentation |
@@ -198,7 +207,6 @@ behind it; open a *Problem solved* issue if you have one.
 
 1. Live migration fails: pre-check errors, shared storage assumptions, CPU model mismatch.
 2. Floating IP does not answer: where to look between the router, the gateway and the security groups.
-3. Console not available: VNC/SPICE proxy and hypervisor side.
 
 ## Contributing
 

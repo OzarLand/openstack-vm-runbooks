@@ -150,7 +150,8 @@ Run `openstack console url show <server-id>` again (or reopen the console tab), 
 need longer, raise `[consoleauth] token_ttl` on the **computes**, which create the tokens.
 
 **Kolla-Ansible:** in `/etc/kolla/config/nova/nova-compute.conf`, `[consoleauth] token_ttl = <seconds>`, then
-`kolla-ansible reconfigure -i <inventory> --tags nova --limit <computes>`.
+`kolla-ansible reconfigure -i <inventory> --tags nova --limit <computes>`. The `nova` tag also runs the `nova-cell`
+play on conductor and proxy hosts: `--limit` must name only compute hosts.
 
 > ⚠️ **State-changing.** Restarts `nova_compute` on the computes; running instances are not affected. A longer
 > lifetime also means a leaked console URL stays usable longer. Undo: remove the override and reconfigure again.
@@ -186,6 +187,12 @@ From a controller, check that the compute's VNC port answers (`virsh vncdisplay`
 
 Start `nova-compute` if it is down. If VNC is disabled on that compute (`[vnc] enabled = false`) while the platform
 uses noVNC, enable it in that compute's configuration:
+
+**Kolla-Ansible:** remove the override that disables it (`[vnc] enabled = false` in
+`/etc/kolla/config/nova/nova-compute.conf` or in the per-host file `/etc/kolla/config/nova/<host>/nova.conf`), then
+`kolla-ansible reconfigure -i <inventory> --tags nova --limit <compute>`.
+
+**Any:** set `[vnc] enabled = true` in that compute's `nova.conf` and restart `nova-compute`.
 
 > ⚠️ **State-changing.** Changes the compute's `nova.conf` and restarts `nova-compute`; running instances are not
 > affected, and keep the definition they have until they are rebuilt (below). Undo: revert the change and restart
