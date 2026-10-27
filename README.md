@@ -182,6 +182,7 @@ lab), **documentation** (upstream documentation and source), **production incide
 | [Reading the Glance logs, and the image lines in Nova's logs (boot, snapshot)](logs/reading-glance-logs.md) | glance, nova | 2026.1 | draft | documentation |
 | [Reading the Nova logs. What normal looks like, and what the common lines mean](logs/reading-nova-logs.md) | nova, placement, rabbitmq, libvirt | 2026.1 | draft | documentation |
 | [Reading the HAProxy, keepalived and memcached logs in front of the OpenStack APIs](logs/reading-haproxy-keepalived-memcached-logs.md) | haproxy, keepalived, proxysql, memcached, keystone | 2026.1 | draft | documentation |
+| [Reading the Octavia logs. Health manager, amphora heartbeats, failovers and the worker](logs/reading-octavia-logs.md) | octavia, nova, neutron | 2026.1 | draft | documentation |
 | [Reading the RabbitMQ logs, and the oslo.messaging lines that go with them](logs/reading-rabbitmq-logs.md) | rabbitmq, nova, neutron, cinder | 2026.1 | draft | documentation |
 | [Reading the Placement logs, and the Placement lines in Nova's logs](logs/reading-placement-logs.md) | placement, nova | 2026.1 | draft | documentation |
 | [Reading the Neutron logs with ML2/OVS](logs/reading-neutron-logs-ml2-ovs.md) | neutron, ovs, nova, rabbitmq | 2026.1 | draft | documentation |
