@@ -17,6 +17,9 @@ upstream_refs:
   - https://opendev.org/openstack/octavia/src/branch/stable/2026.1/octavia/amphorae/drivers/health/heartbeat_udp.py
   - https://opendev.org/openstack/octavia/src/branch/stable/2026.1/octavia/amphorae/drivers/haproxy/rest_api_driver.py
   - https://opendev.org/openstack/octavia/src/branch/stable/2026.1/octavia/common/config.py
+  - https://opendev.org/openstack/octavia/src/branch/stable/2026.1/octavia/common/base_taskflow.py
+  - https://opendev.org/openstack/taskflow/src/branch/stable/2026.1/taskflow/conductors/backends/impl_executor.py
+  - https://opendev.org/openstack/kolla-ansible/src/branch/stable/2026.1/ansible/group_vars/all/octavia.yml
   - https://opendev.org/openstack/octavia/src/branch/stable/2026.1/octavia/controller/worker/v2/flows/amphora_flows.py
   - https://opendev.org/openstack/octavia/src/branch/stable/2026.1/octavia/controller/worker/v2/tasks/amphora_driver_tasks.py
   - https://opendev.org/openstack/octavia/src/branch/stable/2026.1/octavia/controller/worker/v2/controller_worker.py
@@ -51,8 +54,8 @@ An amphora sends a heartbeat every `heartbeat_interval` seconds (default 10); th
 | Line (message text) | Level | What it means | Next |
 |---|---|---|---|
 | `Stale amphora's id is: <amphora-id>` | INFO | No heartbeat for `heartbeat_timeout`: a failover of this amphora starts. | the worker log for the failover |
-| `Attempted <n> failovers of amphora`, `Failed at <n> …`, `Cancelled <n> …`, `Successfully completed <n> failovers of amphora` | INFO | Summary of a batch. **Many failovers at once** usually means the controllers stopped receiving heartbeats (management network, health manager overload), not that many amphorae died together. | the management network; `failover_threshold` |
-| `Stale amphora count reached the threshold (<n>). <n> amphorae were set into FAILOVER_STOPPED status.` | ERROR | `[health_manager] failover_threshold` is set and that many amphorae went stale at once: instead of failing them over, Octavia stops (`db/repositories.py`). The protection against a mass failover when the controllers lose the management network. | the management network; then bring the amphorae back once heartbeats are seen again |
+| `Attempted <n> failovers of amphora`, `Failed at <n> …`, `Cancelled <n> …`, `Successfully completed <n> failovers of amphora` | INFO | Summary of a batch. **Many failovers at once** usually means the controllers stopped receiving heartbeats (management network, health manager overload), not that many amphorae died together. | the management network; `failover_threshold`. The failovers themselves run in the worker with jobboard (the Kolla-Ansible default for the amphora provider, `enable_octavia_jobboard`), and inside the health manager without it: their lines are then in `octavia-health-manager.log`. |
+| `Stale amphora count reached the threshold (<n>). <n> amphorae were set into FAILOVER_STOPPED status.` | ERROR | `[health_manager] failover_threshold` is set and that many amphorae went stale at once: instead of failing them over, Octavia stops (`db/repositories.py`). The protection against a mass failover when the controllers lose the management network. | the management network. The amphorae leave `FAILOVER_STOPPED` by themselves once their heartbeats are seen again (`update_failover_stopped()`); no manual step |
 | `Amphora <amphora-id> health message was processed too slowly: <n>s! The system may be overloaded or otherwise malfunctioning. This heartbeat has been ignored and no update was made to the amphora health entry. THIS IS NOT GOOD.` | WARNING | The health manager is too slow: heartbeats are dropped although they arrive. If it lasts, healthy amphorae are declared stale and failed over. | CPU of the health manager; its database |
 | `Health Manager experienced an exception processing a heartbeat message from <address>. Ignoring this packet. Exception: <error>` | WARNING | A heartbeat could not be decoded: wrong `heartbeat_key` (the HMAC key), or a packet that is not a heartbeat. | `[health_manager] heartbeat_key` on controllers and in amphorae |
 | `Amphora <amphora-id> health message reports <n> listeners when <n> expected` | WARNING | The amphora runs a different number of listeners than the database expects (a configuration push did not complete). The heartbeat is then **not** recorded: if the mismatch lasts, the amphora goes stale and is failed over although it still sends heartbeats. | the worker log for that load balancer |
@@ -79,9 +82,22 @@ with `raise_retry_exception=True`):
 | Line (message text) | Level | What it means |
 |---|---|---|
 | `Could not connect to instance. Retrying.` | WARNING | One attempt failed: normal for a few minutes while a new amphora boots. Each attempt raises `AmpConnectionRetry`, and the `AmpRetry` controller runs the task again, up to `[haproxy_amphora] connection_max_retries` (120) times, `connection_retry_interval` (5 s) apart. Each attempt also waits for the request timeout (`rest_request_conn_timeout`, 10 s), so 120 × 5 s is a lower bound. |
-| `Could not connect to amphora, exception caught: <error>` | the exception text, in the worker's failure line and traceback (for a failover: `Amphora <id> failover exception: …` or `LB <id> failover exception: …`, ERROR, `controller_worker.py`) | The retries are used up and the flow reverts: the amphora never answered. It did not boot (Nova), has no management network address (Neutron), or the controllers cannot route to the management network. The create or failover fails. |
+| `Could not connect to amphora, exception caught: <error>` | the text of `AmpConnectionRetry`, at the end of a traceback; where it shows depends on jobboard, see below | The retries are used up and the flow reverts: the amphora never answered. It did not boot (Nova), has no management network address (Neutron), or the controllers cannot route to the management network. The create or failover fails. |
 
-On this path the worker does **not** log `Connection retries … exhausted`: grep for `Could not connect to`.
+On this path the worker does **not** log `Connection retries … exhausted`, and Octavia **hides** most failure records
+of the retry: `retryMaskFilter` (`common/base_taskflow.py`, also installed in `controller_worker.py`) drops every log
+record whose exception is an `AmpConnectionRetry` or a `ComputeWaitTimeoutException` ("We do not need to log retry
+exception information"). So:
+
+- **With jobboard** (Kolla-Ansible's default for the amphora provider): the failover is posted as a job, and the text
+  shows in taskflow's own `Job execution failed (consumption proceeding): <job>` (WARNING, from
+  `taskflow/conductors/backends/impl_executor.py`), whose traceback ends in `AmpConnectionRetry: Could not connect to
+  amphora, exception caught: <error>`;
+- **without jobboard**: the `Amphora <id> failover exception: …` / `LB <id> failover exception: …` ERROR lines and
+  taskflow's task-failure records carry that exception and are dropped; only the repeated `Could not connect to
+  instance. Retrying.` warnings remain.
+
+Grep for `Could not connect to` and `Job execution failed`, not for a failover ERROR.
 
 **An existing amphora (a configuration push, a listener update).** Calls without the retry flag loop inside the
 driver, then give up with:
