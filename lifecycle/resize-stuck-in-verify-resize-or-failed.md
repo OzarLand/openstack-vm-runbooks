@@ -180,7 +180,8 @@ then `kolla-ansible reconfigure -i <inventory> --tags nova`.
 ### For cause 2: restart the service, then check again
 
 Bring back the service that stopped (quick check 4), or the message bus
-([shared dependencies](../diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md)). If the instance
+([RabbitMQ](../recovery/rabbitmq-partition-or-alarm-rpc-timeouts.md),
+[shared dependencies](../diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md)). If the instance
 was in `resize_migrating` on that compute, its restart reverts the instance. Then check quick check 1 again.
 
 If the instance stays in `RESIZE` with the services up, find where its disks are (the `host` field and the migration
