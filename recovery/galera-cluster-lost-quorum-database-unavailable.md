@@ -141,8 +141,10 @@ Before any state-changing step, take a backup. In case A, the cluster still has 
 `kolla-ansible mariadb-backup -i <inventory>` works (see the backup and restore guide) if `enable_mariabackup: "yes"`
 is set in `globals.yml`. Without it, the command ends with `failed=0` and takes no backup (every task is skipped):
 check that a backup file was written. In cases B and C it does not:
-`mariadb-backup` needs a node in a Primary component, so copy each node's `mariadb` Docker volume instead, with its
-container stopped. Then stop new requests at the APIs
+`mariadb-backup` needs a node in a Primary component, so copy each node's `mariadb` Docker volume instead. Stop the
+container first with `sudo systemctl stop kolla-mariadb-container.service` on each node, not `docker stop` (systemd
+starts it again about a minute later, and `mysqld` would write under the copy), check with `sudo docker ps -a` that it
+stays stopped, and only then copy the volume. Then stop new requests at the APIs
 if your procedure allows it ([reopening provisioning](reopening-provisioning-after-control-plane-incident.md)).
 
 ### For cause 1: let the failed node rejoin
@@ -154,12 +156,12 @@ copies what it missed.
 > slows the donor while the copy runs. Undo: `sudo systemctl stop kolla-mariadb-container.service`.
 
 On Kolla-Ansible 2026.1, each container has a systemd unit (`kolla-<container>-container.service`, `Restart=always`,
-`RestartSec=59`): a container stopped with `docker stop` is started again by systemd about a minute later. To keep a
+`RestartSec=59` with the default settings): a container stopped with `docker stop` is started again by systemd about a minute later. To keep a
 node's MariaDB stopped while you repair the host, use `sudo systemctl stop kolla-mariadb-container.service`, and
 `sudo systemctl start kolla-mariadb-container.service` to start it.
 
 ```bash
-sudo docker start mariadb
+sudo systemctl start kolla-mariadb-container.service
 sudo docker exec -it mariadb mariadb -uroot -p -e "SHOW STATUS LIKE 'wsrep_local_state_comment'"   # Joining, then Synced
 ```
 
@@ -186,7 +188,7 @@ sudo docker exec -it mariadb mariadb -uroot -p -e "SET GLOBAL wsrep_provider_pc_
 sudo docker exec -it mariadb mariadb -uroot -p -e "SET GLOBAL wsrep_provider_pc_bootstrap=OFF"
 ```
 
-On the MariaDB 11.4 that Kolla-Ansible 2026.1 ships, the Galera provider options are plugin variables
+Observed on the Kolla-Ansible 2026.1 image (MariaDB 11.4.13): the Galera provider options are plugin variables
 (`wsrep_provider_pc_*`): `SET GLOBAL wsrep_provider_options='pc.bootstrap=YES'` fails with
 `ERROR 1210 (HY000): wsrep_provider_options cannot be changed while the wsrep-provider plugin is loaded`.
 
@@ -204,7 +206,9 @@ alone: the recovery reads the seqno from them.
 > seqno. If a host's seqno cannot be read (its log has no `Recovered position` line), the run may fail and leave
 > MariaDB stopped everywhere: read every host's `/var/log/kolla/mariadb/mariadb.log` before running it again. All
 > database clients are cut off while it runs. Cannot be undone;
-> keep a backup of each host's `mariadb` volume if you can (stopped container, copy of the volume directory).
+> keep a backup of each host's `mariadb` volume if you can: stop the container with
+> `sudo systemctl stop kolla-mariadb-container.service` (not `docker stop`, which systemd undoes), check that it stays
+> stopped, then copy the volume directory.
 
 ```bash
 kolla-ansible mariadb-recovery -i <inventory>
@@ -228,13 +232,15 @@ After a power loss of every controller, the API containers that started while th
 not recover on their own once the cluster is back (observed on a lab: `nova_api`, `nova_metadata`, `placement_api`
 and `neutron_server` stayed `unhealthy`, their uWSGI log said `unable to load app 0` then `no python application
 found`, HAProxy answered `503 No server is available to handle this request`, and `nova_conductor` and
-`nova_scheduler` crash-looped because Placement answered 500). Check every controller with
+`nova_scheduler` crash-looped with `The placement service for <vip>:RegionOne exists but does not have any supported
+versions.`, while the unhealthy uWSGI services answered HTTP 500 to every request). Check every controller with
 `sudo docker ps --filter health=unhealthy` and restart what it lists:
 
 > ⚠️ **State-changing.** Restarts the API containers; requests in flight on that controller fail. Undo: none needed.
 
 ```bash
-sudo docker restart <container> [<container>...]      # for example placement_api nova_api nova_metadata neutron_server
+sudo systemctl restart kolla-<container>-container.service   # for each of them, e.g. placement_api, nova_api,
+                                                              # nova_metadata, neutron_server
 ```
 
 **Any:** the Galera crash recovery guide: find the node with the highest seqno (`grastate.dat`, or
