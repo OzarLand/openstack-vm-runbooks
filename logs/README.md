@@ -13,6 +13,7 @@ These pages explain how to read; the fixes are in the runbooks of the other fold
 | Page | Covers | Releases | Status |
 |---|---|---|---|
 | [Where the OpenStack logs are, and how to read one log line](where-openstack-logs-are-and-how-to-read-a-line.md) | Kolla-Ansible and package installs, the oslo.log line format, request ids, levels, debug on and off | 2026.1 | draft |
+| [Reading the Keystone logs, and the authentication lines every service writes](reading-keystone-and-auth-logs.md) | Keystone's refused logins and key repository lines, keystonemiddleware's 401 and 503 paths, what default log levels hide | 2026.1 | draft |
 | [Following one request, instance, port or volume through the logs of every service and host](tracing-one-request-across-services-and-hosts.md) | Which id links which hop, grep and journalctl recipes across hosts, the port-id chain of network-vif-plugged, time zones and clock offset | 2026.1 | draft |
 | [Reading the MariaDB and Galera logs, and the oslo.db lines that go with them](reading-mariadb-galera-logs.md) | Error log format, WSREP state changes, quorum and membership, IST and SST, client errors, oslo.db exceptions | 2026.1 | draft |
 | [Reading the Nova logs. What normal looks like, and what the common lines mean](reading-nova-logs.md) | nova-api, nova-scheduler, nova-conductor, nova-compute: start-up, periodic lines, common error lines and what to read next | 2026.1 | draft |
