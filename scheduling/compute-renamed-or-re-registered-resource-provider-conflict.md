@@ -196,18 +196,36 @@ sudo hostnamectl set-hostname <old-host>
 ```
 
 **Kolla-Ansible:** check that the inventory uses that name too, then redeploy the compute so that `compute_id` and
-the configuration are written again: `kolla-ansible reconfigure -i <inventory> -t nova --limit <old-host>`.
+the configuration are written again.
+
+> ⚠️ **State-changing.** Rewrites the compute's Nova configuration and `compute_id`, and restarts its Nova containers.
+> Running instances keep running. Precondition: the host name and the inventory are the old ones again. Undo: none
+> needed.
+
+```bash
+kolla-ansible reconfigure -i <inventory> -t nova --limit <old-host>
+```
 
 **Any:** restart `nova-compute`.
 
 If `nova-compute` started under the new name before you noticed, clean up what it left:
 
-- a second compute service with the new name, `down` now, and its compute node and provider. Delete it as in cause
-  3's last step, after checking that no instance is listed under that name
-  (`openstack server list --all-projects --host <new-host>`);
 - on Kolla-Ansible, a `compute_id` that a deploy run under the new name rewrote with a UUID derived from it: the
   `reconfigure` above writes the old hypervisor's ID back once the name and the inventory are the old ones again.
-  Check that `/etc/kolla/nova-compute/compute_id` equals the old hypervisor ID before starting the container.
+  After the reconfigure, check that `/etc/kolla/nova-compute/compute_id` and
+  `sudo docker exec nova_compute cat /var/lib/nova/compute_id` both equal the old hypervisor ID, and that the service
+  is `up`;
+- a second compute service with the new name, `down` now, with its compute node and provider, if any. Delete it after
+  checking that no instance is listed under that name:
+
+> 🛑 **Destructive.** Deletes the second service record, its compute node and its provider, if any. What can be lost:
+> the record of the real compute if the wrong ID is taken. Precondition: the service to delete is the one whose `Host`
+> is the new name, it is `down`, and `openstack server list --all-projects --host <new-host>` is empty. Undo: none.
+
+```bash
+openstack compute service list --service nova-compute --long
+openstack compute service delete <service-id-of-new-host>
+```
 
 If the compute must really have a new name, treat it as a new compute: move its instances off
 ([maintenance](../migration/moving-instances-off-a-host-for-maintenance.md)), delete its compute service (see

@@ -13,7 +13,6 @@ environment:
 risk: state-changing
 confirmed_by:
   - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0 all-in-one, ML2/OVS (hybrid iptables firewall), Open vSwitch 3.7.1", date: 2026-10-27, note: "Kolla-Ansible steps on a disposable lab: log paths and options, restart and error greps, an instance booted and deleted, the Neutron OVS agent restarted, bridge and rconn raised to dbg and back, vlog/reopen; not run: package-install paths, ML2/OVN, DPDK, inactivity-probe and quiesce messages" }
-  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0 all-in-one, ML2/OVS (hybrid iptables firewall), Open vSwitch 3.7.1", date: 2026-10-27, note: "Kolla-Ansible steps on a disposable lab: log paths and options, restart and error greps, an instance booted and deleted, the Neutron OVS agent restarted, bridge and rconn raised to dbg and back, vlog/reopen; not run: package-install paths, ML2/OVN, DPDK, inactivity-probe and quiesce messages" }
 upstream_refs:
   - https://github.com/openvswitch/ovs/blob/v3.7.1/Documentation/ref/ovs-appctl.8.rst
   - https://github.com/openvswitch/ovs/blob/v3.7.1/lib/vlog.man

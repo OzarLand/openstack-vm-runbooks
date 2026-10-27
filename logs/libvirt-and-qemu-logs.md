@@ -13,7 +13,6 @@ environment:
 risk: state-changing
 confirmed_by:
   - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0 all-in-one (libvirt 10.0.0, QEMU 8.2.2)", date: 2026-10-27, note: "Kolla-Ansible steps on a disposable lab: daemon log, runtime debug with virt-admin and its undo, persistent debug with nova_libvirt_logging_debug and its undo, instance log on start, stop, hard reboot, SIGKILL and SIGTERM of QEMU, console log; not run: the package-install (modular daemon) commands, live migration, KVM errors, panic, OOM killer" }
-  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0 all-in-one (libvirt 10.0.0, QEMU 8.2.2)", date: 2026-10-27, note: "Kolla-Ansible steps on a disposable lab: daemon log, runtime debug with virt-admin and its undo, persistent debug with nova_libvirt_logging_debug and its undo, instance log on start, stop, hard reboot, SIGKILL and SIGTERM of QEMU, console log; not run: the package-install (modular daemon) commands, live migration, KVM errors, panic, OOM killer" }
 upstream_refs:
   - https://gitlab.com/libvirt/libvirt/-/blob/v12.8.0/docs/kbase/debuglogs.rst
   - https://gitlab.com/libvirt/libvirt/-/blob/v12.8.0/docs/daemons.rst

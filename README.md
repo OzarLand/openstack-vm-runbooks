@@ -92,6 +92,7 @@ A page written for one deployment method is welcome; variants for other methods 
 | A boot is refused or aborted: "Flavor's disk is too small for requested image" | [Image larger than the flavor's disk](scheduling/image-larger-than-flavor-disk.md) |
 | A boot from volume ends in ERROR ("Failure prepping block device"), or boots nothing | [Instance fails to boot from volume](scheduling/instance-fails-to-boot-from-volume.md) |
 | An instance went SHUTOFF on its own, Nova logged "shutdown by itself" | [Host OOM killer](lifecycle/instance-shut-off-by-host-oom-killer.md) |
+| An attached volume was extended, but the instance still sees the old size (or the extend failed) | [Extending an attached volume](volumes/extend-in-use-volume-guest-sees-old-size.md) |
 | After a compute reboot, instances stay SHUTOFF or have no network | [After a compute reboot](recovery/after-a-compute-reboot-instances-shutoff-or-without-network.md) |
 | A volume stays in `deleting` or `error_deleting`, or comes back `available` after a delete | [Volume stuck in deleting](volumes/volume-stuck-in-deleting-or-error-deleting.md) |
 | A compute is unreachable and its instances are down | [Fence before you evacuate](recovery/compute-host-failure-fence-before-evacuate.md) |
@@ -155,6 +156,7 @@ lab), **documentation** (upstream documentation and source), **production incide
 
 | Page | Components | Releases | Status | Source |
 |---|---|---|---|---|
+| [Extending an attached volume. Refused, error_extending, or the instance still sees the old size](volumes/extend-in-use-volume-guest-sees-old-size.md) | cinder, nova, libvirt, os-brick | 2026.1 | draft | documentation |
 | [Stale volume attachment. The volume is still in-use for an instance that was deleted or evacuated](volumes/stale-volume-attachment-after-instance-deleted-or-evacuated.md) | cinder, nova, libvirt | 2026.1 | draft | documentation |
 | [Volume stuck in attaching, reserved or detaching. The attach or detach never finishes](volumes/volume-stuck-in-attaching-or-detaching.md) | cinder, nova, libvirt | 2026.1 | lab-verified | documentation |
 | [Volume stuck in creating, or in error right after create](volumes/volume-stuck-in-creating-or-error-after-create.md) | cinder, glance, rabbitmq | 2026.1 | draft | documentation |
@@ -182,8 +184,10 @@ lab), **documentation** (upstream documentation and source), **production incide
 | [Reading the Glance logs, and the image lines in Nova's logs (boot, snapshot)](logs/reading-glance-logs.md) | glance, nova | 2026.1 | draft | documentation |
 | [Reading the Nova logs. What normal looks like, and what the common lines mean](logs/reading-nova-logs.md) | nova, placement, rabbitmq, libvirt | 2026.1 | draft | documentation |
 | [Reading the HAProxy, keepalived and memcached logs in front of the OpenStack APIs](logs/reading-haproxy-keepalived-memcached-logs.md) | haproxy, keepalived, proxysql, memcached, keystone | 2026.1 | draft | documentation |
+| [Reading the Octavia logs. Health manager, amphora heartbeats, failovers and the worker](logs/reading-octavia-logs.md) | octavia, nova, neutron | 2026.1 | draft | documentation |
 | [Reading the RabbitMQ logs, and the oslo.messaging lines that go with them](logs/reading-rabbitmq-logs.md) | rabbitmq, nova, neutron, cinder | 2026.1 | draft | documentation |
 | [Reading the Placement logs, and the Placement lines in Nova's logs](logs/reading-placement-logs.md) | placement, nova | 2026.1 | draft | documentation |
+| [Reading the Heat logs. From a failed stack to the service that really failed](logs/reading-heat-logs.md) | heat, nova, neutron, cinder | 2026.1 | draft | documentation |
 | [Reading the Neutron logs with ML2/OVS](logs/reading-neutron-logs-ml2-ovs.md) | neutron, ovs, nova, rabbitmq | 2026.1 | draft | documentation |
 | [Reading the OVN logs with Neutron](logs/reading-ovn-logs.md) | ovn, neutron, ovs | 2026.1 | draft | documentation |
 
@@ -195,10 +199,12 @@ lab), **documentation** (upstream documentation and source), **production incide
 | [The API returns 503, an HAProxy backend is DOWN, or the VIP flaps or sits on two nodes](recovery/api-returns-503-haproxy-backend-down-or-vip-flapping.md) | haproxy, keepalived, keystone, nova, neutron | 2026.1 | draft | documentation |
 | [Compute host unreachable, instances down. Fence before you evacuate](recovery/compute-host-failure-fence-before-evacuate.md) | nova, libvirt, cinder, ceph | 2026.1 | lab-verified | book, lab run |
 | [Requests fail with 401 for tokens that should be valid. Fernet keys differ between Keystone nodes, or a clock is off](recovery/keystone-401-for-every-request-fernet-keys-or-clock.md) | keystone, nova, neutron | 2026.1 | draft | documentation |
+| [Services fail on "Too many connections", "Max connect timeout" or "QueuePool limit". Database connections are exhausted](recovery/database-too-many-connections-or-pool-exhausted.md) | mariadb, proxysql, nova, neutron, keystone | 2026.1 | draft | documentation |
 | [Every API fails on database errors. The Galera cluster lost quorum, or stopped on every node](recovery/galera-cluster-lost-quorum-database-unavailable.md) | mariadb, galera, kolla-ansible, nova, neutron, keystone | 2026.1 | draft | documentation |
 | [nova-compute is down and the compute refuses an SSH login, but the host is alive](recovery/nova-compute-down-host-alive-ssh-refused.md) | nova, libvirt, ssh | 2026.1 | lab-verified | lab run |
 | [nova-compute is down on a compute, but its instances are still running](recovery/nova-compute-down-instances-still-running.md) | nova, libvirt | 2026.1 | lab-verified | lab run |
 | [RPC timeouts in every service, computes reported down. RabbitMQ is partitioned, blocked by an alarm, or a node is missing](recovery/rabbitmq-partition-or-alarm-rpc-timeouts.md) | rabbitmq, oslo.messaging, kolla-ansible, nova, neutron, cinder | 2026.1 | draft | documentation |
+| [nova-conductor or nova-scheduler is down. What still works, what waits, what fails, and where failed builds go (cell0)](recovery/nova-conductor-or-scheduler-down-what-still-works.md) | nova, rabbitmq | 2026.1 | draft | documentation |
 | [Reopening provisioning after a control-plane incident. Stop the APIs, recover, verify, reopen](recovery/reopening-provisioning-after-control-plane-incident.md) | nova, neutron, rabbitmq, mariadb, haproxy | not recorded ([help wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=recovery%2Freopening-provisioning-after-control-plane-incident.md&title=Release+for+recovery%2Freopening-provisioning-after-control-plane-incident.md)) | draft | book |
 
 ## Pages wanted next

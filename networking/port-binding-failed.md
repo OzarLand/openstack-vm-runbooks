@@ -182,7 +182,7 @@ compute for Nova and Placement and orphans the instances on it.
 > name, and the old agent entry remains to be deleted (`openstack network agent delete <old-agent-id>`).
 > ML2/OVN with Kolla-Ansible: the task that sets `external_ids:hostname` (`openvswitch/tasks/post-config.yml`) restarts
 > the **`openvswitch_vswitchd`** container on that compute: every instance there can briefly lose its network. Do it in
-> a maintenance window, or after moving the instances away. The chassis, keyed by its `system-id`, keeps its entry
+> a maintenance window, or after [moving the instances away](../migration/moving-instances-off-a-host-for-maintenance.md). The chassis, keyed by its `system-id`, keeps its entry
 > and takes the new hostname. Instances' existing ports keep their binding. Undo: set the previous name back and
 > apply again (same restart).
 
