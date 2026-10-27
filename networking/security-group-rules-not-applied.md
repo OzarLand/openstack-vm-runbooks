@@ -11,7 +11,8 @@ environment:
   storage: any
   os: any
 risk: state-changing
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one ML2/OVS iptables_hybrid, date: 2026-10-27, note: "causes 1, 2 and 3 reproduced and resolved on ML2/OVS with the iptables hybrid driver (cause 3 with systemctl stop/start of the agent unit, not docker stop); quick checks and iptables view with docker exec -u root; cause 6 read-only check; causes 4, 5, cause 6 resolution, ML2/OVN and the native OVS driver not run" }
 upstream_refs:
   - https://docs.openstack.org/neutron/2026.1/admin/intro-os-networking.html
   - https://docs.openstack.org/neutron/2026.1/admin/config-ovsfwdriver.html
@@ -43,7 +44,7 @@ openstack port list --server <server-id> -c ID -c "Fixed IP Addresses"
 openstack port show <port-id> -c security_group_ids -c port_security_enabled -c allowed_address_pairs
 
 # 2. The rules of each of those groups
-openstack security group rule list <security-group-id> --long
+openstack security group rule list <security-group-id>
 
 # 3. The agents on the instance's compute (ML2/OVS: the Open vSwitch agent; ML2/OVN: the OVN controller)
 openstack network agent list --host <compute>
@@ -88,13 +89,17 @@ ports in that group matches).
 
 To see what is enforced:
 
-**Kolla-Ansible, ML2/OVS:** on the compute, inside the agent's container (a host using nftables may not show what
-the container wrote),
+**Kolla-Ansible, ML2/OVS:** on the compute, inside the agent's container, as root (the container's default user gets
+`Could not fetch rule set generation id: Permission denied (you must be root)`; a host using another iptables
+backend may not show what the container wrote),
 
 ```bash
-sudo docker exec neutron_openvswitch_agent iptables-save | grep -i <first-10-characters-of-port-id>
-sudo docker exec neutron_openvswitch_agent ip6tables-save | grep -i <first-10-characters-of-port-id>
+sudo docker exec -u root neutron_openvswitch_agent iptables-save | grep -i <first-10-characters-of-port-id>
+sudo docker exec -u root neutron_openvswitch_agent ip6tables-save | grep -i <first-10-characters-of-port-id>
 ```
+
+On an Ubuntu 24.04 host, where the host and the container both use `iptables v1.8.10 (nf_tables)`, `sudo
+iptables-save` on the host showed the same chains.
 
 **Kolla-Ansible, ML2/OVN:** on a host running the OVN northbound database,
 
@@ -136,7 +141,7 @@ groups, is allowed by design.
 
 Traffic that should be blocked passes between two instances of the project because both ports use `default`, which
 allows all ingress from its own members (see *How Neutron applies security groups*). Quick checks 1 and 2 show it: an
-`ingress` rule with `default` itself as remote group.
+`ingress` rule with `default` itself as remote group (its own ID in the `Remote Security Group` column).
 
 ## Resolution
 
@@ -169,8 +174,11 @@ openstack port set --enable-port-security --security-group <group> <port-id>
 > below first.
 
 Start the Open vSwitch agent or `ovn-controller` on the compute, or `ovn-northd`
-([port binding failed](port-binding-failed.md), cause 1, for the restarts and their warnings). Once it is back, it
-applies the current rules; check with the commands under *Where the rules are enforced*.
+([port binding failed](port-binding-failed.md), cause 1, for the restarts and their warnings). On Kolla-Ansible
+2026.1, ML2/OVS: `sudo systemctl start kolla-neutron_openvswitch_agent-container.service`. Once it is back, it
+applies the current rules (`Agent has just been revived. Doing a full sync.` in `neutron-openvswitch-agent.log`; on
+the lab the pending rule applied 18 s after the start); check with the commands under *Where the rules are
+enforced*.
 
 ### For causes 4 and 5
 
@@ -197,12 +205,37 @@ From a host allowed by the rule, the traffic passes; from a host not allowed, it
 <instance-address> <port>` from both). On the compute, the port's chains (ML2/OVS) or the port group's ACLs (ML2/OVN)
 show the rule.
 
+## Lab observations
+
+Kolla-Ansible 22.2.0 (OpenStack 2026.1) all-in-one, ML2/OVS with `OVSHybridIptablesFirewallDriver`, 2026-10-27. A
+test instance in a group allowing TCP 22 only, a listener on port 8080 in the guest, tests with `nc -zv` from the
+network's DHCP namespace:
+
+- Symptom: `nc: connect to <instance-address> port 8080 (tcp) timed out: Operation now in progress`, port 22
+  succeeded. The port's chains `neutron-openvswi-i<id>`, `-o<id>`, `-s<id>` ended with `Send unmatched traffic to
+  the fallback chain.` (`-j neutron-openvswi-sg-fallback`).
+- Cause 1: after `security group rule create ... --dst-port 8080 --remote-ip 0.0.0.0/0`, the agent logged `Refresh
+  firewall rules`, `--dport 8080 -j RETURN` appeared in the port's ingress chain, and port 8080 passed 1 s after the
+  command returned. Deleting the rule blocked it again within 3 s.
+- Cause 2: `port set --no-security-group --disable-port-security` let port 8080 through within 5 s with no rule;
+  `port set --enable-port-security --security-group <group>` blocked it again within 3 s.
+- Cause 3: with the agent stopped (`systemctl stop kolla-neutron_openvswitch_agent-container.service`, which took
+  61 s and ended with exit 137), the agent showed `Alive` `XXX` and a new 8080 rule had no effect and no iptables
+  line. After `systemctl start`, the rule applied 18 s later.
+- Cause 6, read-only: `openstack default security group rule list` showed the two ingress templates with remote
+  `PARENT`; the project's `default` group's ingress rules carried its own ID as remote group.
+- Not run: causes 4 and 5, the resolution of cause 6, ML2/OVN and the native OVS driver, the conntrack behaviour on
+  rule removal.
+
 ## Validity and limits
 
 - Written from Neutron 2026.1 (networking guide on security groups, Open vSwitch native firewall guide,
   `neutron/agent/linux/iptables_firewall.py`, `neutron/common/ovn/utils.py`), Kolla-Ansible 2026.1
   (`openvswitch_agent.ini.j2`), python-openstackclient 2026.1, and the default security group rule templates
-  (`neutron/db/securitygroups_db.py`, migration `c33da356b165`). Not reproduced on a lab.
+  (`neutron/db/securitygroups_db.py`, migration `c33da356b165`). Causes 1, 2 and 3 reproduced and resolved on a
+  Kolla-Ansible 2026.1 all-in-one with ML2/OVS and the iptables hybrid driver (*Lab observations*). Not reproduced
+  on a lab: ML2/OVN and the native OVS driver (the `ovn-nbctl acl-list` check, `ovn-northd`/`ovn-controller` for
+  cause 3), causes 4 and 5, the resolution of cause 6.
 - Connections already established: when a rule is removed, the iptables driver deletes the matching conntrack
   entries (`delete_conntrack_state_by_rule` in `iptables_firewall.py`); with other drivers, notably OVN's stateful
   ACLs, a flow conntrack already tracks may keep passing. Not verified on a lab.
