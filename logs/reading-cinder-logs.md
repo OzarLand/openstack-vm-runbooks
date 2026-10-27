@@ -30,7 +30,7 @@ last_verified: 2026-10-26
 A volume operation crosses four logs: `cinder-api` accepts it, `cinder-scheduler` picks a backend, `cinder-volume`
 talks to the storage, and for an attach, `nova-compute` connects the host to the volume through `os-brick`. This page
 says what each logs and what the common lines mean. Messages are quoted from Cinder and os-brick 2026.1. Ceph client
-and iSCSI/multipath system logs are covered on the system-log pages of this folder.
+and iSCSI/multipath system logs are covered on [reading the storage logs of a compute](host-storage-logs-iscsi-multipath-nfs-rbd.md).
 
 Runbooks for the fixes: [stuck in creating or error](../volumes/volume-stuck-in-creating-or-error-after-create.md),
 [stuck in attaching or detaching](../volumes/volume-stuck-in-attaching-or-detaching.md).

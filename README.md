@@ -185,6 +185,7 @@ lab), **documentation** (upstream documentation and source), **production incide
 | [Reading the Octavia logs. Health manager, amphora heartbeats, failovers and the worker](logs/reading-octavia-logs.md) | octavia, nova, neutron | 2026.1 | draft | documentation |
 | [Reading the RabbitMQ logs, and the oslo.messaging lines that go with them](logs/reading-rabbitmq-logs.md) | rabbitmq, nova, neutron, cinder | 2026.1 | draft | documentation |
 | [Reading the Placement logs, and the Placement lines in Nova's logs](logs/reading-placement-logs.md) | placement, nova | 2026.1 | draft | documentation |
+| [Reading the Heat logs. From a failed stack to the service that really failed](logs/reading-heat-logs.md) | heat, nova, neutron, cinder | 2026.1 | draft | documentation |
 | [Reading the Neutron logs with ML2/OVS](logs/reading-neutron-logs-ml2-ovs.md) | neutron, ovs, nova, rabbitmq | 2026.1 | draft | documentation |
 | [Reading the OVN logs with Neutron](logs/reading-ovn-logs.md) | ovn, neutron, ovs | 2026.1 | draft | documentation |
 

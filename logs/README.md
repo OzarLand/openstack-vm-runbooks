@@ -23,6 +23,7 @@ These pages explain how to read; the fixes are in the runbooks of the other fold
 | [Reading the Octavia logs](reading-octavia-logs.md) | Amphora heartbeats, stale amphorae and failover batches, slow heartbeat processing, worker connection retries | 2026.1 | draft |
 | [Reading the RabbitMQ logs, and the oslo.messaging lines that go with them](reading-rabbitmq-logs.md) | Broker log format, Khepri or Mnesia, nodes down and partitions, memory and disk alarms, flow control, connection churn and heartbeats, client reconnect lines | 2026.1 | draft |
 | [Reading the Placement logs, and the Placement lines in Nova's logs](reading-placement-logs.md) | The request line, 409s and their warnings (over capacity, unit constraints, retries), the report client's lines with Placement request ids | 2026.1 | draft |
+| [Reading the Heat logs](reading-heat-logs.md) | Stack and resource failure lines, the ResourceFailure status reason, following the physical id into the service that failed | 2026.1 | draft |
 | [Reading the Neutron logs with ML2/OVS](reading-neutron-logs-ml2-ovs.md) | neutron-server, RPC server and periodic workers, OVS, L3, DHCP and metadata agents: heartbeats, port binding, the vif-plugged notification, common lines | 2026.1 | draft |
 | [Reading the OVN logs with Neutron](reading-ovn-logs.md) | ovn-controller port claims, database connections and probes, ovn-northd's active lock, SB relays, the Neutron OVN driver's binding and status lines | 2026.1 | draft |
 | [Reading the kernel log of a compute (dmesg, journalctl -k)](kernel-messages-on-computes.md) | journalctl -k and dmesg, then the OOM killer, KVM, NIC link flaps, bonding and LACP, over-MTU drops, disk and filesystem errors, conntrack table full, hung tasks | 2026.1 | draft |
@@ -36,6 +37,6 @@ These pages explain how to read; the fixes are in the runbooks of the other fold
 
 ## Planned
 
-1. Per service: Glance, Heat and Octavia (pages in review).
-2. System logs: chrony and clock skew, iSCSI and multipath, NFS and Ceph clients (pages in review).
-3. A dictionary of frequent error messages: what each means, its usual causes, and the next log to read.
+1. Per service: Heat and Octavia (pages in review).
+2. A dictionary of frequent error messages, what each means, its usual causes and the next log to read: messaging
+   and database, scheduling (pages in review).
