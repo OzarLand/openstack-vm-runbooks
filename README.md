@@ -75,6 +75,7 @@ A page written for one deployment method is welcome; variants for other methods 
 | Every API fails, the logs show database errors (`WSREP has not yet prepared node`) | [Galera lost quorum](recovery/galera-cluster-lost-quorum-database-unavailable.md) |
 | VM creation fails everywhere, running instances are fine | [Check the shared dependencies first](diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md) |
 | `openstack token issue` works, but service calls fail with 401 for some tokens, often every other time | [401 with a fresh token: Fernet keys or clock](recovery/keystone-401-for-every-request-fernet-keys-or-clock.md) |
+| An OVN Controller agent is down, or a host has two OVN agents | [ovn-controller down or stale chassis](networking/ovn-controller-down-or-stale-chassis.md) |
 | A new instance is ACTIVE but never got an IP address | [DHCP agents down](networking/new-instance-gets-no-ip-dhcp-agents-down.md) |
 | A new instance has an address but no SSH key, default hostname | [Metadata agents down](networking/new-instance-boots-without-metadata.md) |
 | A build or live migration fails with "Binding failed for port" | [Port binding failed](networking/port-binding-failed.md) |
@@ -142,6 +143,7 @@ lab), **documentation** (upstream documentation and source), **production incide
 | [Instance build or live migration fails with "Binding failed for port". Neutron could not bind the port on that host](networking/port-binding-failed.md) | neutron, nova, ovs, ovn | 2026.1 | draft | documentation |
 | [New instance is ACTIVE but unreachable, it never got an IP address](networking/new-instance-gets-no-ip-dhcp-agents-down.md) | neutron, nova | 2026.1 | lab-verified | lab run |
 | [Every instance on one compute loses the network while Nova shows them ACTIVE (ovs-vswitchd down)](networking/ovs-vswitchd-down-on-compute.md) | neutron, ovs | 2026.1 | draft | lab run |
+| [OVN Controller agent down, or listed twice for one host. ovn-controller stopped, or stale Chassis records](networking/ovn-controller-down-or-stale-chassis.md) | neutron, ovn, ovs | 2026.1 | draft | documentation |
 | [I need to restart the Open vSwitch agent on a compute. Its instances keep their network](networking/restarting-the-ovs-agent-does-not-cut-instances.md) | neutron, ovs | 2026.1 | lab-verified | lab run |
 | [L3 agent dead, instances still reachable, router not moved](networking/router-stuck-on-dead-l3-agent.md) | neutron | 2026.1 | lab-verified | lab run |
 | [Instances of one compute answer ping, but large transfers stall](networking/tunnel-mtu-mismatch-large-packets-dropped.md) | neutron, ovs | 2026.1 | lab-verified | lab run |
