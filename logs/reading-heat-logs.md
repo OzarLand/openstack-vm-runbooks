@@ -19,7 +19,7 @@ upstream_refs:
   - https://opendev.org/openstack/heat/src/branch/stable/2026.1/heat/common/exception.py
   - https://opendev.org/openstack/heat/src/branch/stable/2026.1/heat/common/config.py
 authored_by: agent:ozarland-author
-last_verified: 2026-10-26
+last_verified: 2026-10-27
 ---
 
 # Reading the Heat logs. From a failed stack to the service that really failed
@@ -32,7 +32,9 @@ is then in that service's log. Messages are quoted from Heat 2026.1.
 
 **Kolla-Ansible:** `/var/log/kolla/heat/` (`log_dir` and `log_file = $log_dir/<service>.log` in `heat.conf.j2`):
 `heat-api.log`, `heat-api-cfn.log` and `heat-engine.log`, from the containers `heat_api`, `heat_api_cfn` and
-`heat_engine`. The engine does the work; read `heat-engine.log` first.
+`heat_engine`. The APIs run under uWSGI, and their request lines are in `heat-api-uwsgi.log` and
+`heat-api-cfn-uwsgi.log` (`<service>-uwsgi.log` in the `service-uwsgi-config` role). The engine does the work; read
+`heat-engine.log` first.
 
 **Any:** `/var/log/heat/` or the journal.
 
@@ -58,10 +60,10 @@ service's log.
 | Line (message text) | Level | What it means |
 |---|---|---|
 | `Stack <action> <status> (<name>): <reason>` | INFO | A stack changed state, for example `Stack CREATE FAILED (<name>): Resource CREATE failed: <error>` (the reason is built as `'Resource %s failed: %s'` in `stack.py`). The reason is the same as `stack_status_reason`. |
-| `<ACTION>: <Type> "<name>" [<physical id>] Stack "<stack>" [<stack id>]` with a traceback | INFO | A resource action failed. The traceback's last lines are the client error from the other service (a `novaclient`, `neutronclient`, `cinderclient` or `keystoneauth` exception, with the HTTP status and message). The `[<physical id>]` is the id in the other service: grep it there. |
-| `Timed out waiting for operation to start` | WARNING | The engine that received a request did not start it within `rpc_response_timeout`: engines overloaded or RabbitMQ slow. |
+| `<ACTION>: <Type> "<name>" [<physical id>] Stack "<stack>" [<stack id>]` with a traceback (`<Type>` is the Python class name, for example `Server`, not `OS::Nova::Server`) | INFO | A resource action failed. The traceback's last lines are the client error from the other service (a `novaclient`, `neutronclient`, `cinderclient` or `keystoneauth` exception, with the HTTP status and message). The `[<physical id>]` is the id in the other service: grep it there. |
+| `Timed out waiting for operation to start` | WARNING | The engine that received a request did not start it within `rpc_response_timeout`: engines overloaded or RabbitMQ slow. Logged only by `NotifyEvent.wait()` in `service.py`: suspend, resume, check and restore, and the legacy engine's update and delete. With `convergence_engine` (the default), create, update and delete never log it. |
 | `Unexpected exception in <function>: <message>` | ERROR | An engine thread failed outside a resource; the stack may stay `IN_PROGRESS`. |
-| `Failed to retrieve user_creds` with a traceback | ERROR | The credentials stored for the stack cannot be read; deferred operations (signals, deletes) fail. |
+| `Failed to retrieve user_creds` with a traceback | ERROR | During a stack delete, the credentials stored for the stack could not be read (truncated when saved, or `auth_encryption_key` changed): `_try_get_user_creds()` in `stack.py`. The error is ignored on purpose and **the delete proceeds**; only the clean-up of the stack's Keystone trust is skipped, so the trust may be left behind for manual clean-up (`openstack trust list`). It is not the cause of a `DELETE_FAILED` stack. |
 
 Sources: `heat/engine/stack.py`, `heat/engine/resource.py`, `heat/engine/service.py`.
 
@@ -82,7 +84,7 @@ grep -n "<physical-id>" /var/log/kolla/heat/heat-engine.log
 |---|---|---|
 | `OS::Nova::Server` | the server id | `openstack server show <id> -c fault`, then [the Nova logs](reading-nova-logs.md) |
 | `OS::Neutron::Port`, `OS::Neutron::Net`, … | the Neutron resource id | `neutron-server.log` for that id ([the Neutron logs](reading-neutron-logs-ml2-ovs.md)) |
-| `OS::Cinder::Volume` | the volume id | `openstack volume show <id>`, then the Cinder page of this folder |
+| `OS::Cinder::Volume` | the volume id | `openstack volume show <id>`, then [the Cinder logs](reading-cinder-logs.md) |
 
 Heat calls the other services with its own request context; their logs carry Heat's request id as the global request
 id when Heat passes it, which links the two.
@@ -96,6 +98,7 @@ id when Heat passes it, which links the two.
 ## Related
 
 - [Where the OpenStack logs are, and how to read one log line](where-openstack-logs-are-and-how-to-read-a-line.md)
+- [Reading the Nova logs](reading-nova-logs.md), [the Neutron logs](reading-neutron-logs-ml2-ovs.md), [the Cinder logs](reading-cinder-logs.md): where a failed resource's error continues
 - [Logs index](README.md)
 
 ---
