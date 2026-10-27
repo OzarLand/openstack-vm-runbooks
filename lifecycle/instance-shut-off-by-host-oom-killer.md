@@ -53,7 +53,8 @@ OS-EXT-SRV-ATTR:instance_name`):
 # 1. Did the kernel kill a QEMU process? (dmesg -T for readable times)
 sudo dmesg -T | grep -E 'invoked oom-killer|Killed process'
 sudo journalctl -k --since "-2 days" | grep -E 'invoked oom-killer|Killed process'   # current boot only:
-                                                    # add -b -1 if the compute rebooted since
+                                                    # add -b -1 for the previous boot (needs a persistent
+                                                    # journal; journalctl --list-boots lists them)
 
 # 2. The memory of the host now
 free -m
@@ -230,12 +231,13 @@ cgroup-level OOM of one running `m1.tiny` CirrOS instance, by writing `50M` to `
   preceded by `memory: usage 180904kB, limit 51200kB, failcnt 41` and `oom-kill:constraint=CONSTRAINT_MEMCG,...`.
   Quick check 1 found it with both commands.
 - The guest's libvirt log (read with `docker exec nova_libvirt tail`) ended with `shutting down, reason=crashed`,
-  0.3 s after the write to `memory.max`.
+  0.3 s after the write to `memory.max` (timestamps from the libvirt log and kernel captures).
 - `nova-compute` logged `VM Stopped (Lifecycle Event)` 15 s after QEMU died, then `During _sync_instance_power_state
   the DB power_state (1) does not match the vm_power_state from the hypervisor (4)` and `Instance shutdown by itself.
   Calling the stop API. Current vm_state: active, current task_state: None, original DB power_state: 1, current VM
-  power_state: 4`, then `Instance is already powered off in the hypervisor when stop is called.` The instance was
-  `SHUTOFF`, and `openstack server event list` showed a `stop` whose request ID is the one of that log line.
+  power_state: 4`, then `Instance is already powered off in the hypervisor when stop is called.` (quoted from the
+  `nova-compute` capture). The instance was `SHUTOFF`, and `openstack server event list` showed a `stop` whose
+  request ID is the one of that log line.
 - The SHUTOFF instance kept its `MEMORY_MB` allocation in Placement. `openstack server start`: `ACTIVE` in 18 s.
 - `reserved_host_memory_mb = 4096` in `/etc/kolla/config/nova/nova-compute.conf` and `kolla-ansible reconfigure
   --tags nova --limit <compute>`: 4 min 42 s; `nova_compute` was recreated, `nova_libvirt` and the running guest's

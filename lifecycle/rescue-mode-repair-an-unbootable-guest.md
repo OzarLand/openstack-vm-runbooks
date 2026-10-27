@@ -132,7 +132,9 @@ it.
 ### 2. Repair the original disk
 
 From the rescue system, check first that it runs from the rescue disk (`mount | grep ' / '`, `lsblk`): if `/` is the
-original disk, the rescue booted the broken system; unrescue and use another rescue image. Then find the original
+original disk, the rescue booted the broken system; unrescue and use another rescue image. When the rescue system is
+not reachable, the console log shows the same without SSH (`openstack console log show <server>`; on the lab, CirrOS
+logged `info: initramfs loading root from /dev/vdb1`, the original disk). Then find the original
 root disk with `lsblk` and `blkid`: with legacy rescue it is the second
 disk; with stable device rescue (an image with `hw_rescue_*` properties) it keeps its place, usually the first, and the
 rescue disk is the last. Check its size and file systems before mounting it, and
@@ -178,12 +180,14 @@ ping or SSH, and the console log showed `Starting network: /etc/rc3.d/S40-networ
   `/dev/vdb1`; with `root=/dev/vda1` it loaded `/dev/vda1`, was reachable by SSH with the instance's key, and showed
   the original disk as `vdb`. The repair (mount `/dev/vdb1`, put the file back, unmount) and `openstack server
   unrescue`: `ACTIVE` 7 s after the request, the guest booted from its own disk and answered SSH.
-- Between `Rescuing` and `Attempting rescue` in the `nova-compute` log: 6 s to 59 s (the clean shutdown of the guest).
+- Between `Rescuing` and `Attempting rescue` in the `nova-compute` log: 6 s to 59 s (the clean shutdown of the guest;
+  from the `nova-compute` capture, not the review table).
 - `server rescue` on an instance in `RESCUE`: `409 ... Cannot 'rescue' instance <server-id> while it ...`.
 - Volume-backed instance: without `hw_rescue_*` properties on the image, or with them and
   `--os-compute-api-version 2.86`: `400 ... Instance <server-id> cannot be rescued: Cannot rescue a volume-backed
   instance`. With both properties and 2.87: `RESCUE` in 21 s, `Attempting a stable device rescue` in the log, `vda` the
-  volume and `vdb` the rescue disk. The all-in-one compute reported `COMPUTE_RESCUE_BFV`.
+  volume and `vdb` the rescue disk. The all-in-one compute reported `COMPUTE_RESCUE_BFV` (from the
+  CLI capture of its resource provider traits).
 - The same image with the properties on the local-disk instance (default API version): stable device rescue, original
   `disk` as `vda`, `disk.rescue` as `vdb`.
 - Not run: `--password`, a `rescue_timeout` set, the noVNC console (only its URL), `Host unable to rescue`,
