@@ -1,7 +1,7 @@
 ---
 title: Instance fails to boot from volume. ERROR at build, or ACTIVE with no bootable disk
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [nova, cinder, glance, libvirt]
 deployment_methods: [kolla-ansible, any]
@@ -11,7 +11,8 @@ environment:
   storage: any Cinder backend
   os: any
 risk: destructive
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-26, note: "full procedure on a disposable lab for causes 1 to 5 (min_disk, no backend, cinder-volume stopped, iscsid stopped, blank bootable volume); reconfigure, iscsi deploy and 2.93 rebuild not run" }
 upstream_refs:
   - https://docs.openstack.org/nova/2026.1/user/launch-instance-from-volume.html
   - https://docs.openstack.org/nova/2026.1/configuration/config.html#DEFAULT.block_device_allocate_retries
@@ -19,7 +20,7 @@ upstream_refs:
   - https://docs.openstack.org/cinder/2026.1/admin/image-volume-cache.html
   - https://docs.openstack.org/api-ref/block-storage/v3/#messages-messages
 authored_by: agent:ozarland-author
-last_verified: 2026-10-24
+last_verified: 2026-10-26
 ---
 
 # Instance fails to boot from volume. ERROR at build, or ACTIVE with no bootable disk
@@ -40,13 +41,17 @@ The availability zone between the server and its attached volumes do not match: 
 ```
 
 **2. ERROR during the build.** The instance goes to `ERROR`, after a few seconds or after about three minutes, and
-its fault names the block device step:
+its fault names the volume Nova was waiting for (observed on Nova 2026.1):
 
 ```text
 $ openstack server show <server-id> -c status -c fault
-| fault  | {'code': 500, 'message': 'Build of instance <server-id> aborted: Failure prepping block device.', ...} |
+| fault  | {'code': 500, 'message': 'Build of instance <server-id> aborted: Volume <volume-id> did not finish being created even after we waited 185 seconds or 61 attempts. And its status is creating.', ...} |
 | status | ERROR                                                                                                  |
 ```
+
+The status at the end is `error` when Cinder failed (then after a few seconds: `waited 0 seconds or 1 attempts`),
+`creating` or `downloading` when Cinder was still working after about three minutes. Older releases or other failures
+of the block device step can show `Failure prepping block device.` instead.
 
 The reason after "aborted:" can also be `Block Device Mapping is Invalid: failed to get volume <volume-id>.` (or
 `snapshot`, or `image`), or a quota message from Cinder. When the volume was ready but the compute could not connect
@@ -96,8 +101,8 @@ How to read them:
 | You see | Go to |
 |---|---|
 | The create command was refused, no instance | [Cause 1](#cause-1-the-request-is-refused-by-nova) |
-| Fault `Failure prepping block device.`; the volume is in `error`, or was deleted; check 3 shows a Cinder message | [Cause 2](#cause-2-cinder-could-not-create-the-volume) |
-| Fault `Failure prepping block device.` after about three minutes; the volume is or was `creating` or `downloading` | [Cause 3](#cause-3-the-volume-was-not-ready-in-time) |
+| Fault `… did not finish being created … And its status is error.` (or `Failure prepping block device.`); the volume is in `error`, or was deleted; check 3 may show a Cinder message | [Cause 2](#cause-2-cinder-could-not-create-the-volume) |
+| Fault `… did not finish being created even after we waited <n> seconds or 61 attempts. And its status is creating.` after about three minutes; the volume is or was `creating` or `downloading` | [Cause 3](#cause-3-the-volume-was-not-ready-in-time) |
 | Fault `Exceeded maximum number of retries.`; the volume is `available` | [Cause 4](#cause-4-the-compute-cannot-connect-to-the-volume) |
 | `ACTIVE`, console empty or "No bootable device" | [Cause 5](#cause-5-the-volume-holds-no-bootable-system) |
 
@@ -110,7 +115,7 @@ The build of a volume-backed instance goes through a block device step before th
 Cinder to create it, then checks its status every `block_device_allocate_retries_interval` seconds (3 by default),
 up to `block_device_allocate_retries` + 1 times (61 by default): about three minutes. A volume that is still
 `creating` or `downloading` after that, or that ends in any status other than `available`, aborts the build with
-`Failure prepping block device.`, and Nova does not try another compute. The detailed error is only in the
+`Volume <volume-id> did not finish being created …` as the fault, and Nova does not try another compute. The detailed error is only in the
 `nova-compute` log of the compute that tried:
 
 **Kolla-Ansible:** `/var/log/kolla/nova/nova-compute.log` on the compute named by `OS-EXT-SRV-ATTR:host` (empty on
@@ -122,7 +127,8 @@ What to search for, with the server ID:
 
 - `Volume <volume-id> did not finish being created even after we waited <n> seconds or <n> attempts. And its status is <status>.`:
   the status at the end says whether Cinder was still working (`creating`, `downloading`) or had failed (`error`);
-- `Failure prepping block device`, with the exception before it;
+- `Instance failed block device setup: nova.exception.VolumeNotCreated` (on a lab, `Failure prepping block device`
+  did not appear in the log for causes 2 and 3);
 - `Instance failed to spawn` with an `os_brick` exception: the volume existed, but the compute could not connect to
   it (cause 4); Nova then reschedules the build to another compute.
 
@@ -155,6 +161,8 @@ Nova checks the request before creating anything. Common refusals:
 
 - the volume is smaller than the image's `min_disk` (`Volume is smaller than the minimum size specified in image
   metadata`);
+- `--volume <volume-id>` names a volume whose `bootable` flag is `false`, for example a blank volume
+  (`Block Device <volume-id> is not bootable.`, HTTP 400);
 - no block device has boot index 0 (`Boot sequence for the instance and image/block device mapping combination is
   not valid`);
 - `[cinder] cross_az_attach = False` in Nova and the volume is in another Cinder availability zone than the
@@ -192,9 +200,13 @@ the compute. Nova reschedules the build to other computes; when they all fail th
 
 The instance is `ACTIVE` because Nova attached the volume and started the guest, but there is nothing to boot:
 
-- the volume was created blank, or from an image that is not a bootable disk (`bootable` is `false`, no
-  `volume_image_metadata`);
-- the image's `disk_format` does not match its content, so Cinder wrote a qcow2 file as raw bytes;
+- the volume holds no operating system but is marked bootable (for example a blank volume after
+  `openstack volume set --bootable`; with `bootable` `false`, Nova refuses the request, see cause 1). On a lab the
+  instance was `ACTIVE` and `console log show` was empty;
+- the image's `disk_format` does not match its content, so Cinder wrote it as it is. Cinder 2026.1 checks this and
+  refuses a qcow2 file declared `raw`: the volume goes to `error`
+  (`ImageUnacceptable: … The image format was claimed to be 'raw' but the image data appears to be in a different
+  format.` in `cinder-volume.log`, no user message), which is cause 2, not this one;
 - the image needs firmware or a disk bus the instance does not get (for example a UEFI-only image without
   `hw_firmware_type=uefi`, or a driver missing for the disk bus), which shows as a guest that starts then cannot
   find its root disk.
@@ -274,9 +286,10 @@ kolla-ansible reconfigure -i <inventory> --tags nova
 ### For cause 4
 
 Read-only first: on a compute where the build failed, check that the compute reaches the storage. For an iSCSI
-backend, `iscsid` must run on the compute (`docker ps --filter name=iscsid` on Kolla-Ansible); for Ceph, the
-`nova-compute` log names the RBD error. Fix the host or its configuration (storage network, client key), then retry
-the build once.
+backend, `iscsid` must run on the compute (`sudo docker ps -a --filter name=iscsid` on Kolla-Ansible; without
+`-a` a stopped container is not listed); for Ceph, the `nova-compute` log names the RBD error. Fix the host or its
+configuration (storage network, client key), then retry the build once. On Kolla-Ansible, a stopped `iscsid`
+container is started with `sudo systemctl start kolla-iscsid-container.service`.
 
 On Kolla-Ansible, if no `iscsid` container exists at all, it is not a container to start by hand: Kolla-Ansible
 deploys `iscsid` (`enable_iscsid`) only when an iSCSI backend is enabled (`enable_cinder_backend_iscsi`, which
@@ -362,11 +375,39 @@ openstack volume list --project <project-id> --status available --long
 Volumes left `available` by failed builds are not deleted by this runbook: either reuse them (cause 3), or let their
 owner decide whether to delete them.
 
+## Lab observations
+
+On a lab: OpenStack 2026.1 (Nova 33.0.3), Kolla-Ansible 22.2.0, all-in-one, Cinder LVM (thin) over iSCSI,
+python-openstackclient 9.0.0, `--boot-from-volume` from a cirros image.
+
+- **Cause 1.** An image with `min_disk` 2 and `--boot-from-volume 1`: refused at once with `Volume is smaller than the
+  minimum size specified in image metadata. Volume size is 1073741824 bytes, minimum size is 2147483648 bytes.` A
+  blank volume with `--volume`: refused with `Block Device <volume-id> is not bootable.`
+- **Cause 2.** `--boot-from-volume 500` on a pool with 380 GB of virtual capacity: `ERROR` about 13 s after the request,
+  fault `… did not finish being created even after we waited 0 seconds or 1 attempts. And its status is error.`;
+  check 3 gave `schedule allocate volume:Could not find any available weighted backend.`; `cinder-scheduler.log`
+  named `CapacityFilter` (`Insufficient free virtual space (380.0GB) to accommodate thin provisioned 500GB volume`).
+  The volume stayed in `error` after the instance was deleted. `server volume list` of the ERROR instance was empty.
+- **Cause 3.** `cinder-volume` stopped just before the create: the instance was `ERROR` 3 min 16 s after the request
+  (`waited 185 seconds or 61 attempts. And its status is creating.`), the volume `creating` with its host set. When
+  `cinder-volume` was started again, it took the queued request and created the volume (`available` 27 s after
+  the restart), not `error`. Booting from that volume with `--volume` worked.
+- **Cause 4.** `iscsid` container stopped: `ERROR` about 40 s after the request with `Exceeded maximum number of retries.
+  Exhausted all hosts available for retrying build failures`; `nova-compute.log` showed `Failed to login iSCSI target
+  … (exit code 20)` then `Instance failed to spawn: os_brick.exception.VolumeDeviceNotFound: Volume device not found
+  at .` The volume was left `available` and `bootable`; with `iscsid` started, `--volume` from it booted.
+- **Cause 5.** A blank volume set `--bootable`: `ACTIVE`, console log empty. Deleting the instance (Delete On
+  Termination `False`) left the volume `available`. A qcow2 image uploaded as `raw`: Glance accepted it, Cinder
+  refused it (see cause 5).
+
+Not run: the `block_device_allocate_retries` reconfigure, the `iscsi` deploy, the image or volume property changes and
+the 2.93 rebuild of cause 5, `cross_az_attach`, Ceph.
+
 ## Validity and limits
 
 - Written from Nova 2026.1 (`nova/compute/manager.py`, `nova/virt/block_device.py`, `nova/exception.py`, the
   `block_device_allocate_retries` and `cross_az_attach` options), Cinder 2026.1 (user messages in `cinder/message/message_field.py`) and
-  Kolla-Ansible 2026.1. Not reproduced on a lab yet.
+  Kolla-Ansible 2026.1. Causes 1 to 5 partly reproduced on an all-in-one lab (see Lab observations).
 - The fault messages are quoted from Nova's and Cinder's source; their exact form in `openstack server show` may vary
   with the client and the compute API microversion.
 - Not covered: Ironic bare metal instances, rescue and rebuild of volume-backed instances, encrypted volumes,
