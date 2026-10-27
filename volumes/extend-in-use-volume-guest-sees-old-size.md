@@ -27,8 +27,10 @@ last_verified: 2026-10-27
 One of these, after `openstack volume set --size <new-GB> <volume-id>` on a volume attached to an instance:
 
 - the command is refused: `Failed to set volume size: --os-volume-api-version 3.42 or greater is required to extend
-  in-use volumes.` followed by `One or more of the set operations failed`, or
-  `Volume <volume-id> status must be '...' to extend, currently <status>.`;
+  in-use volumes.` followed by `One or more of the set operations failed`; or, also from the client before any API
+  call, `Volume is in <status> state, it must be available or in-use before size can be extended.` or `New size must
+  be greater than <N> GB`; or, from the API, `Volume <volume-id> status must be '...' to extend, currently
+  <status>.`;
 - the command is accepted, but the volume keeps its old size and status, with a user message `extend volume:Could not
   find any available weighted backend.`;
 - the volume goes to `error_extending`;
@@ -37,7 +39,8 @@ One of these, after `openstack volume set --size <new-GB> <volume-id>` on a volu
 ## Impact
 
 One volume and the instance that uses it. Data is not at risk from the extend itself; a volume in `error_extending`
-cannot be extended, detached or deleted until its status is corrected.
+cannot be extended or detached until its status is corrected (a detached one can still be deleted; an attached one
+cannot).
 
 ## Quick checks
 
@@ -107,12 +110,14 @@ step inside the guest, for its owner.
 ### Cause 1: refused by the API or the client
 
 An `in-use` volume without API 3.42; a size not larger than the current one; a quota or volume type limit; a volume
-not in `available` or `in-use`.
+not in `available` or `in-use`; or a policy that forbids extending attached volumes
+(`volume:extend_attached_volume`).
 
 ### Cause 2: the backend could not grow the volume (`error_extending`)
 
 The `cinder-volume` log has the driver's error: a backend limit, a backend unreachable, a backend volume that
-cannot be found. When the pool has too little space for the new size, the scheduler refuses the extend before the
+cannot be found. When the driver is not initialised, the volume also goes to `error_extending`, but without a user
+message. When the pool has too little space for the new size, the scheduler refuses the extend before the
 driver is called: no `error_extending`, the volume keeps its old size and status, and the user message is
 `extend volume:Could not find any available weighted backend.` (see the diagnosis).
 
@@ -129,12 +134,12 @@ instance's `nova-compute` is down. The guest sees the old disk size.
 
 ### For cause 1: use the right API version, or the right size
 
+> ⚠️ **State-changing.** Grows the volume on the backend; a volume cannot be shrunk afterwards. The project's quota is
+> charged for the new size. Undo: none (create a smaller volume and copy the data, if needed).
+
 ```bash
 openstack --os-volume-api-version 3.42 volume set --size <new-GB> <volume-id>
 ```
-
-> ⚠️ **State-changing.** Grows the volume on the backend; a volume cannot be shrunk afterwards. The project's quota is
-> charged for the new size. Undo: none (create a smaller volume and copy the data, if needed).
 
 ### For cause 2: fix the backend, reset the status, extend again
 
@@ -142,8 +147,9 @@ Fix what the `cinder-volume` log names. The volume's size in Cinder is still the
 what it was before the extend:
 
 > ⚠️ **State-changing.** Changes Cinder's record only; the backend is not touched. Precondition: the backend volume
-> still has its old size and is healthy (check on the backend), and the volume is attached as Cinder says. Undo: set
-> `error_extending` back.
+> still has its old size and is healthy (check on the backend), and the volume is attached as Cinder says. Undo:
+> `cinder reset-state --state error_extending <volume-id>` (`openstack volume set --state` does not accept
+> `error_extending`).
 
 ```bash
 openstack volume set --state in-use <volume-id>       # or available, if it is not attached
@@ -159,8 +165,9 @@ volume <volume-id>` in its log and check `lsblk` in the guest before anything el
 Cinder's event, which Cinder does not send again: if the event was lost or the refresh failed, the simplest ways to
 make the guest see the new size:
 
-> ⚠️ **State-changing.** A hard reboot stops the guest abruptly; a detach and attach interrupts its access to that
-> volume (unmount it inside the guest first). Agree it with the owner. Undo: none needed.
+> ⚠️ **State-changing.** A hard reboot stops the guest abruptly: what it had not yet written to disk is lost. A
+> detach and attach interrupts its access to that volume (unmount it inside the guest first). Agree it with the
+> owner. Undo: none needed.
 
 ```bash
 openstack server reboot --hard <server-id>              # the volume is reattached at its new size
