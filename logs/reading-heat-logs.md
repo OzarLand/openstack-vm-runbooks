@@ -80,8 +80,8 @@ grep -n "<physical-id>" /var/log/kolla/heat/heat-engine.log
 
 | Resource type | Physical id is | Continue with |
 |---|---|---|
-| `OS::Nova::Server` | the server id | `openstack server show <id> -c fault`, then the Nova page of this folder |
-| `OS::Neutron::Port`, `OS::Neutron::Net`, … | the Neutron resource id | `neutron-server.log` for that id |
+| `OS::Nova::Server` | the server id | `openstack server show <id> -c fault`, then [the Nova logs](reading-nova-logs.md) |
+| `OS::Neutron::Port`, `OS::Neutron::Net`, … | the Neutron resource id | `neutron-server.log` for that id ([the Neutron logs](reading-neutron-logs-ml2-ovs.md)) |
 | `OS::Cinder::Volume` | the volume id | `openstack volume show <id>`, then the Cinder page of this folder |
 
 Heat calls the other services with its own request context; their logs carry Heat's request id as the global request
