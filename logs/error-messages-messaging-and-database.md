@@ -138,9 +138,10 @@ How to read the RabbitMQ broker log itself is on
 - **Usual causes:** HAProxy has no healthy database backend, the MariaDB container or service is down, Galera lost
   quorum or a node is not synced, or the connection was idle longer than the server or the proxy allows (2006/2013
   appearing once after a quiet period).
-- **Read next:** HAProxy's state for the database backend, then the MariaDB log on the nodes (Galera state:
-  `wsrep_cluster_status`, `wsrep_local_state_comment`). A page on reading the MariaDB and Galera logs is proposed in
-  #79.
+- **Read next:** HAProxy's state for the database backend
+  ([reading the HAProxy, keepalived and memcached logs](reading-haproxy-keepalived-memcached-logs.md)), then the
+  MariaDB log on the nodes (Galera state: `wsrep_cluster_status`, `wsrep_local_state_comment`), as in
+  [reading the MariaDB and Galera logs](reading-mariadb-galera-logs.md).
 - **Fix:** [Galera lost quorum or stopped everywhere](../recovery/galera-cluster-lost-quorum-database-unavailable.md).
 
 ### `SQL connection failed. <n> attempts left.`
