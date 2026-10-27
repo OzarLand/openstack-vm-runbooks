@@ -140,7 +140,8 @@ appears to be in a different format.`, with no user message in check 2.
 `cinder-volume` stopped or lost RabbitMQ while it was creating the volume. The volume stays `creating` or
 `downloading` until that service starts again, which then sets it to `error`. A clean stop (`systemctl stop` or
 `restart` of the Kolla-Ansible unit) waits for the creation in progress to finish; a crash or a kill does not. On
-Kolla-Ansible the unit restarts a crashed container after about a minute (`Restart=always`, `RestartUSec=59s`).
+Kolla-Ansible the unit restarts a crashed container after `RestartSec` (`Restart=always`; 11 s with the Kolla defaults,
+59 s on the lab, which sets `docker_client_timeout: 600`).
 
 ### Cause 4: the request never reached a service
 
