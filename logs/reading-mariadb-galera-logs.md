@@ -1,7 +1,7 @@
 ---
 title: Reading the MariaDB and Galera logs, and the oslo.db lines that go with them
 kind: diagnostic
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [mariadb, proxysql, haproxy, nova, neutron, keystone]
 deployment_methods: [kolla-ansible, any]
@@ -11,7 +11,8 @@ environment:
   storage: any
   os: any
 risk: read-only
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, Galera (MariaDB 11.4.13, Galera 26.4.27) behind ProxySQL", date: 2026-10-27, note: "read-only commands run (status query without -it); one node cut from the others on port 4567 for 1 min 45 s and rejoined by IST; clean stop/restart of one node from the #80 run. Not seen: crash, whole-cluster quorum loss, bootstrap errors, full SST or SST failure, donor state, errors 1040/1213, any oslo.db line" }
 upstream_refs:
   - https://github.com/codership/galera/tree/release_26.4.27
   - https://github.com/MariaDB/server/tree/mariadb-11.4.13/sql
@@ -21,7 +22,7 @@ upstream_refs:
   - https://docs.openstack.org/kolla-ansible/latest/reference/databases/mariadb-guide.html
   - https://mariadb.com/kb/en/galera-cluster-status-variables/
 authored_by: agent:ozarland-author
-last_verified: 2026-10-26
+last_verified: 2026-10-27
 ---
 
 # Reading the MariaDB and Galera logs, and the oslo.db lines that go with them
@@ -62,7 +63,7 @@ grep -nE '\[(ERROR|Warning)\]' /var/log/kolla/mariadb/mariadb.log | tail -30
 
 The state now, rather than the history, is in the status variables (read-only). On Kolla-Ansible, run the query on
 each database node with `docker exec -it mariadb mariadb -u root -p` (the root password is `database_password` in
-`passwords.yml`):
+`passwords.yml`, on the deploy host; drop `-it` when the command is not run from a terminal):
 
 ```sql
 SHOW GLOBAL STATUS WHERE Variable_name IN
@@ -95,9 +96,9 @@ The states are `SYNCED`, `JOINED`, `DONOR/DESYNCED`, `JOINER`, `PRIMARY`, `OPEN`
 
 | Line (message text) | Level | What it means |
 |---|---|---|
-| `WSREP: Quorum results:` followed by `version = …`, `component = PRIMARY` or `NON-PRIMARY`, `conf_id = …`, `members = <joined>/<total> (joined/total)`, `act_id = …`, … | Note | A new view of the cluster was computed. `component = NON-PRIMARY` means **this node has no quorum**: it refuses queries. `members` says how many nodes it sees. |
+| `WSREP: Quorum results:` followed by `version = …`, `component = PRIMARY` or `NON-PRIMARY`, `conf_id = …`, `members = <joined>/<total> (joined/total)`, `act_id = …`, … | Note | A new view of the cluster was computed. `component = NON-PRIMARY` means **this node has no quorum**: it refuses queries. `members` says how many nodes it sees. On the lab, a node cut from the others logged no `Quorum results` block, only `Received NON-PRIMARY.` (see below). |
 | `WSREP: <self> connection to peer <uuid> with addr <address> timed out, no messages seen in <period>, socket stats: …` | Note | The group communication link to one peer was silent for `gmcast.peer_timeout`. The network between database nodes failed, or the peer is stuck. |
-| `WSREP: <self> suspecting node: <uuid>` / `detected inactive node: <uuid>` | Note | The node suspects, then declares, a peer gone. A new view follows. |
+| `WSREP: <self> suspecting node: <uuid>` / `suspected node without join message, declaring inactive` (or `detected inactive node: <uuid>`) | Note | The node suspects, then declares, a peer gone. A new view follows. On a lab network cut, the second form appeared, and `detected inactive node` did not. |
 | `WSREP: forgetting <uuid> (<address>)` | Note | The peer is removed from the list of known members. |
 | `WSREP: Member <idx>.<segment> (<name>) synced with group.` | Note | That member reached `SYNCED`. |
 | `WSREP: failed to open gcomm backend connection: 110: failed to reach primary view…` | ERROR | At start, the node could not join a primary component within the timeout: no other node with quorum was reachable. |
@@ -105,6 +106,29 @@ The states are `SYNCED`, `JOINED`, `DONOR/DESYNCED`, `JOINER`, `PRIMARY`, `OPEN`
 
 Sources: `gcs/src/gcs_group.cpp`, `gcomm/src/gmcast.cpp`, `gcomm/src/evs_proto.cpp`, `gcs/src/gcs_gcomm.cpp`,
 `galera/src/replicator_smm.cpp` (Galera 26.4.27).
+
+**Captured on a lab** (Kolla-Ansible 2026.1, MariaDB 11.4.13, Galera 26.4.27, 3 nodes). One node cut from the two
+others on port 4567 for 1 min 45 s. The cut node (controller-3) logged no `Quorum results:` block while it had no
+quorum: it logged `view(view_id(NON_PRIM, …))`, `New COMPONENT: primary = no`, `Received NON-PRIMARY.` and `Non-primary
+view`, then `timed out` lines per peer until the network came back:
+
+```text
+2026-10-27 17:44:07 0 [Note] WSREP: (aaaaaaaa-0003, 'tcp://192.0.2.13:4567') connection to peer aaaaaaaa-0001 with addr tcp://192.0.2.11:4567 timed out, no messages seen in PT3S, socket stats: rtt: 13812 rttvar: …
+2026-10-27 17:44:09 0 [Note] WSREP: (aaaaaaaa-0003, 'tcp://192.0.2.13:4567') reconnecting to aaaaaaaa-0001 (tcp://192.0.2.11:4567), attempt 0
+2026-10-27 17:44:09 0 [Note] WSREP: evs::proto(aaaaaaaa-0003, OPERATIONAL, view_id(REG,aaaaaaaa-0001,6)) suspecting node: aaaaaaaa-0001
+2026-10-27 17:44:09 0 [Note] WSREP: evs::proto(aaaaaaaa-0003, OPERATIONAL, view_id(REG,aaaaaaaa-0001,6)) suspected node without join message, declaring inactive
+2026-10-27 17:44:10 0 [Note] WSREP: New COMPONENT: primary = no, bootstrap = no, my_idx = 0, memb_num = 1
+2026-10-27 17:44:10 0 [Note] WSREP: Received NON-PRIMARY.
+2026-10-27 17:44:10 0 [Note] WSREP: Shifting SYNCED -> OPEN (TO: 4315)
+2026-10-27 17:44:10 2 [Note] WSREP: Non-primary view
+2026-10-27 17:44:10 2 [Note] WSREP: Server status change synced -> connected
+```
+
+The two other nodes kept quorum (`component = PRIMARY`, `members = 2/2 (joined/total)` at 17:44:11) and logged the
+cut node under `partitioned`, then `forgetting` (in the run's capture of controller-1). A clean stop of a node (`systemctl stop
+kolla-mariadb-container.service`, same lab) logs no `timed out`, `suspecting` or `inactive` line: the peers log
+`forgetting <uuid>` and a view with the node under `partitioned` in the same second. The status variables on the cut
+node read `wsrep_cluster_status` `non-Primary`, `wsrep_local_state_comment` `Initialized`, `wsrep_ready` `OFF`.
 
 Which recovery applies to which case (one node lost, quorum lost, every node stopped) and how to compare positions
 safely: [Galera cluster lost quorum or stopped on every node](../recovery/galera-cluster-lost-quorum-database-unavailable.md)
@@ -132,6 +156,24 @@ copying the whole database.
 Sources: `gcs/src/gcs_group.cpp`, `galera/src/replicator_str.cpp`, `galera/src/ist.cpp` (Galera);
 `sql/wsrep_sst.cc` (MariaDB).
 
+Captured on a lab, the cut node rejoining 3 s after the network came back, by IST:
+
+```text
+2026-10-27 17:45:53 0 [Note] WSREP: Shifting OPEN -> PRIMARY (TO: 4484)
+2026-10-27 17:45:53 2 [Note] WSREP: Prepared IST receiver for 4316-4484, listening at: tcp://192.0.2.13:4568, waiting for connection to: tcp://192.0.2.13:4568
+2026-10-27 17:45:53 0 [Note] WSREP: Member 1.0 (controller-3) requested state transfer from '*any*'. Selected 2.0 (controller-2)(SYNCED) as donor.
+2026-10-27 17:45:53 0 [Note] WSREP: Shifting PRIMARY -> JOINER (TO: 4484)
+2026-10-27 17:45:53 2 [Note] WSREP: Requesting state transfer: success, donor: 2
+2026-10-27 17:45:53 2 [Note] WSREP: Receiving IST: 169 writesets, seqnos 4316-4484
+2026-10-27 17:45:53 2 [Note] WSREP: IST received: 00000000-0000-4000-8000-000000000001:4484
+2026-10-27 17:45:53 0 [Note] WSREP: Shifting JOINER -> JOINED (TO: 4486)
+2026-10-27 17:45:53 0 [Note] WSREP: Member 1.0 (controller-3) synced with group.
+```
+
+After a restart of the node (same lab), the joiner also logged `Running: 'wsrep_sst_mariabackup --role 'joiner' …'`
+and `SST succeeded for position <uuid>:<seqno>` with its own saved position, then `Receiving IST: 204 writesets`: the
+data came by IST. Read `Receiving IST` before concluding a full SST ran.
+
 A node that keeps cycling between `JOINER` and `OPEN` with a new SST each time usually has an SST that fails, not a
 quorum problem: read the lines before `SST failed`.
 
@@ -146,6 +188,14 @@ quorum problem: read the lines before `SST failed`.
 
 Sources: `sql/share/errmsg-utf8.txt`, `sql/sql_parse.cc`, `sql/wsrep_high_priority_service.cc`, `sql/wsrep_mysqld.cc`
 (MariaDB 11.4.13).
+
+Captured on a lab: a query sent directly to the cut node, and the `Aborted connection` kind seen at node joins
+(not an error):
+
+```text
+ERROR 1047 (08S01) at line 1: WSREP has not yet prepared node for application use
+2026-10-27 13:15:56 12 [Warning] Aborted connection 12 to db: 'unconnected' user: 'unauthenticated' host: 'controller-2' (This connection closed normally without authentication)
+```
 
 ## The oslo.db side, in the OpenStack services
 
@@ -163,7 +213,9 @@ services' tracebacks:
 **Which proxy is in front of the database.** In Kolla-Ansible 2026.1 the default is **ProxySQL**
 (`mariadb_loadbalancer: proxysql`, `enable_proxysql: "{{ enable_mariadb }}"`). It sends writes to one node at a time
 (`mysql_galera_hostgroups` with `max_writers: 1` in `proxysql.yaml.j2`) and logs to
-`/var/log/kolla/proxysql/proxysql.log` on each load balancer node. With `enable_proxysql: false`, HAProxy's `mariadb` backend does the same job: one active server, the others `backup`. Either way, a burst
+`/var/log/kolla/proxysql/proxysql.log` on each load balancer node. On a lab, each ProxySQL logged, 5 to 9 s after
+the network cut of one database node, `[WARNING] Galera: setting host 192.0.2.13:3306 offline because:
+primary_partition=NO` (`MySQL_HostGroups_Manager.cpp`); no `DBConnectionError` reached the services. With `enable_proxysql: false`, HAProxy's `mariadb` backend does the same job: one active server, the others `backup`. Either way, a burst
 of `DBConnectionError` in many services at the same second is usually the active node going away and the proxy
 failing over: read the proxy's log and the database node logs at that second.
 
@@ -179,8 +231,11 @@ failing over: read the proxy's log and the database node logs at that second.
 
 - Every MariaDB and Galera message on this page is quoted from the Galera 26.4.27 and MariaDB 11.4.13 sources; the
   `oslo.db` table also names an older deadlock text that `oslo.db` still matches but MariaDB 11.4 no longer sends.
-  **None was captured on a lab.** The exact Galera build in a Kolla 2026.1 image may be another 26.4 release, with the
-  same messages or close to them. A lab request asks for real samples.
+  The blocks marked "captured on a lab" come from Kolla-Ansible 2026.1 (MariaDB 11.4.13, Galera 26.4.27, ProxySQL,
+  3 database nodes): a clean stop and restart of one node, and a network cut of one node (port 4567) for 1 min 45 s.
+  Not seen on the lab: `failed to open gcomm backend connection`, the `safe_to_bootstrap` error, a full SST, `SST
+  failed`, a donor state, error 1040, 1213 and every `oslo.db` line (ProxySQL kept the services away from the cut
+  node).
 - `connection to peer … timed out` names `gmcast.peer_timeout`; the related `evs.*` timeouts that decide when a node
   is declared inactive are not detailed here.
 - The SST script messages (for `mariabackup`) are not covered.

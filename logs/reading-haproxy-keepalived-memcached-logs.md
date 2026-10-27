@@ -1,7 +1,7 @@
 ---
 title: Reading the HAProxy, keepalived and memcached logs in front of the OpenStack APIs
 kind: diagnostic
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [haproxy, keepalived, proxysql, memcached, keystone]
 deployment_methods: [kolla-ansible, any]
@@ -11,7 +11,8 @@ environment:
   storage: any
   os: any
 risk: read-only
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, HAProxy 2.8.16, keepalived 2.2.8 unicast, ProxySQL", date: 2026-10-27, note: "every read-only command run (log greps from a root shell); real lines from one placement server down, placement down on all controllers (503 NOSRV), a frozen backend (Layer7 timeout), HAProxy stopped on the VIP holder (failover), memcached stopped on one node 40 s (no log trace). Not seen: sC/sH/sQ/cD termination states, Layer7 wrong status, advertisement timeout, VRID conflict, memcached at its limit" }
 upstream_refs:
   - https://opendev.org/openstack/kolla/src/branch/stable/2026.1/docker/keepalived/check_alive.sh
   - https://docs.haproxy.org/3.0/configuration.html
@@ -22,7 +23,7 @@ upstream_refs:
   - https://opendev.org/openstack/kolla-ansible/src/branch/stable/2026.1/ansible/roles/haproxy-config/defaults/main.yml
   - https://opendev.org/openstack/kolla-ansible/src/branch/stable/2026.1/ansible/roles/memcached/templates/memcached.json.j2
 authored_by: agent:ozarland-author
-last_verified: 2026-10-26
+last_verified: 2026-10-27
 ---
 
 # Reading the HAProxy, keepalived and memcached logs in front of the OpenStack APIs
@@ -42,6 +43,19 @@ HAProxy sends its log through syslog. **Kolla-Ansible** points it at fluentd (`l
 the `fluentd` role, see [where the logs are](where-openstack-logs-are-and-how-to-read-a-line.md)), on each load
 balancer node. **Any:** wherever your syslog daemon writes the facility HAProxy logs to.
 
+On a Kolla-Ansible 2026.1 lab the file was `/var/log/kolla/haproxy/haproxy_latest.log`, next to fluentd buffer files
+(`haproxy_latest.<id>.buffer`, `.buffer.meta`) that may hold the latest lines, hence the `haproxy_latest*` globs below.
+Each line is a JSON object with the HAProxy line in `Payload` (inner quotes escaped as `\"`):
+
+```text
+{"Payload":"Oct 27 12:53:14 haproxy[26]: 192.0.2.10:58030 [27/Oct/2026:12:53:14.267] nova_api_front nova_api_back/controller-1 0/0/0/5/5 200 709 - - ---- 2/1/0/0/0 0/0 \"GET /v2.1 HTTP/1.1\"","log_level":"info","Hostname":"controller-1","programname":"haproxy"}
+```
+
+The directory is not readable by other users, and `sudo grep … haproxy_latest*` fails with `No such file or
+directory` because your own shell expands the glob: run the greps below from a root shell (`sudo -i`).
+The image's HAProxy was 2.8.16 (`haproxy -v` in the `haproxy` container, from Ubuntu 24.04), not 3.0; every message
+captured below matches the templates on this page.
+
 The state now is in the stats socket (Kolla-Ansible: `/var/lib/kolla/haproxy/haproxy.sock`, read-only command):
 
 ```bash
@@ -56,7 +70,7 @@ When a health check changes a server's state, HAProxy logs (`src/server.c`, `src
 
 | Line (message text) | Level | What it means |
 |---|---|---|
-| `Server <backend>/<server> is DOWN, reason: <description>, code: <n>, info: "<text>", check duration: <n>ms. <n> active and <n> backup servers left. <n> sessions active, <n> requeued, <n> remaining in queue.` | alert | The health check failed `fall` times in a row. Kolla-Ansible's check is `check inter 2000 rise 2 fall 5`: every 2 s, down after 5 failures (about 10 s), up after 2 successes. `Backup Server …` for a backup member. |
+| `Server <backend>/<server> is DOWN, reason: <description>, code: <n>, info: "<text>", check duration: <n>ms. <n> active and <n> backup servers left. <n> sessions active, <n> requeued, <n> remaining in queue.` | alert | The health check failed `fall` times in a row. Kolla-Ansible's check is `check inter 2000 rise 2 fall 5`: every 2 s, down after 5 failures (on the lab, 4 to 9 s after a stop: see below), up after 2 successes. `Backup Server …` for a backup member. |
 | `Server <backend>/<server> is UP, reason: <description>, check duration: <n>ms. <n> active and <n> backup servers online. <n> sessions requeued, <n> total in queue.` | notice | The server passed `rise` checks and is back. |
 | `<proxy type> <backend> has no server available!` | emergency | The last server of that backend went down. Every request to this API now gets a 503 from HAProxy itself. |
 
@@ -68,8 +82,21 @@ typical busy-workers case), or `Layer7 wrong status` (the HTTP check answered wi
 checks some APIs with `option httpchk GET /healthcheck` and expects 200).
 
 ```bash
-sudo grep -E "is DOWN|is UP|has no server available" /var/log/kolla/haproxy/haproxy_latest* | tail -30
+grep -E "is DOWN|is UP|has no server available" /var/log/kolla/haproxy/haproxy_latest* | tail -30    # as root
 ```
+
+Captured on a lab (Payload only; 192.0.2.x are API addresses). One placement server stopped and started; placement
+stopped on all three controllers; a placement container frozen with `docker pause`:
+
+```text
+Oct 27 13:09:41 haproxy[26]: Server placement_api_back/controller-2 is DOWN, reason: Layer4 connection problem, info: "Connection refused", check duration: 0ms. 2 active and 0 backup servers left. 0 sessions active, 0 requeued, 0 remaining in queue.
+Oct 27 13:10:38 haproxy[26]: Server placement_api_back/controller-2 is UP, reason: Layer7 check passed, code: 200, check duration: 4ms. 3 active and 0 backup servers online. 0 sessions requeued, 0 total in queue.
+Oct 27 13:32:09 haproxy[26]: backend placement_api_back has no server available!
+Oct 27 13:34:28 haproxy[26]: Server placement_api_back/controller-2 is DOWN, reason: Layer7 timeout, check duration: 10001ms. 2 active and 0 backup servers left. 1 sessions active, 0 requeued, 0 remaining in queue.
+```
+
+On that lab, with `check inter 2000 rise 2 fall 5`, a stopped server (connection refused) was marked DOWN 4 to 9 s
+after the stop, in three runs; the frozen one (`Layer7 timeout`) after 59 s.
 
 ### Request lines
 
@@ -103,9 +130,17 @@ Termination states worth knowing (manual section 8.5):
 | `sQ--` | The request waited too long in the queue (`timeout queue`). | 503 |
 | `cD--` / `CD--` | The client went silent or aborted during the transfer. | any |
 
+Captured on a lab, with placement stopped on every controller (`SC--` first while the servers were still marked UP,
+then `<NOSRV>`):
+
+```text
+Oct 27 13:32:01 haproxy[26]: 192.0.2.21:49596 [27/Oct/2026:13:32:01.045] placement_api_front placement_api_back/controller-2 0/2/-1/-1/3 503 217 - - SC-- 1/1/0/0/+3 0/0 "GET /resource_providers/<uuid>..."
+Oct 27 13:32:20 haproxy[26]: 192.0.2.11:34328 [27/Oct/2026:13:32:20.313] placement_api_front placement_api_back/<NOSRV> 0/-1/-1/-1/0 503 217 - - SC-- 2/1/0/0/0 0/0 "GET /resource_classes HTTP/1.1"
+```
+
 ```bash
-# requests that ended in 502, 503 or 504: the status follows the five timers
-sudo grep -E ' -?[0-9]+/-?[0-9]+/-?[0-9]+/-?[0-9]+/-?[0-9]+ 50[234] ' /var/log/kolla/haproxy/haproxy_latest* | tail -20
+# requests that ended in 502, 503 or 504: the status follows the five timers (as root)
+grep -E ' -?[0-9]+/-?[0-9]+/-?[0-9]+/-?[0-9]+/-?[0-9]+ 50[234] ' /var/log/kolla/haproxy/haproxy_latest* | tail -20
 ```
 
 Next step for each: `SC`/`<NOSRV>` → the backend's service and its health; `sH` → the API's own log for the same
@@ -154,17 +189,31 @@ does not mean ProxySQL is down.
 | `(<instance>) Entering FAULT STATE` (`(init)` at start) | A tracked script or interface failed: this node cannot take the VIP. With Kolla-Ansible, usually `check_alive` failing because HAProxy or ProxySQL does not answer (run the checks above). |
 | `Script \`check_alive\` now returning <n>` | The track script's result changed (0 = every check in `/checks` passed, non-zero = at least one failed). Read the next state change. |
 | `VRRP_Script(check_alive) failed (exited with status <n>)` / `VRRP_Script(check_alive) succeeded` | Logged when the result crosses `fall` (2 failures) or `rise` (10 successes): this is when keepalived acts on it. |
-| `(<instance>) Receive advertisement timeout` | A backup node stopped hearing the master's adverts and will take over: the master died, or VRRP traffic between them is lost. |
+| `(<instance>) Receive advertisement timeout` | A backup node stopped hearing the master's adverts and will take over. Logged only with keepalived's detail logging (`-D`, `vrrp_scheduler.c`): Kolla-Ansible runs `keepalived -nld` without it, so on Kolla-Ansible the backup logs only `Entering MASTER STATE`. |
 | `(<instance>) Received advert from <address> with lower priority <n>, ours <n>` | Another node advertises for the same VRID with a lower priority. |
 | `(<instance>) ip address associated with VRID <id> not present in advert from <address>: <address>` | Two VRRP instances with the same `virtual_router_id` but different VIPs on the same network: usually another cluster (or another deployment) reusing the VRID. |
 
 Sources: `keepalived/vrrp/vrrp.c`, `vrrp_scheduler.c`.
 
+Captured on a lab (keepalived 2.2.8, VRID 51), HAProxy stopped on the VIP holder (controller-1) at 13:11:32, started
+at 13:12:01; controller-3 took the VIP, and kept it after controller-1 recovered (`nopreempt`):
+
+```text
+Tue Oct 27 13:11:34 2026: Script `check_alive` now returning 1
+Tue Oct 27 13:11:36 2026: VRRP_Script(check_alive) failed (exited with status 1)
+Tue Oct 27 13:11:36 2026: (kolla_internal_vip_51) Entering FAULT STATE
+Tue Oct 27 13:11:37 2026: (kolla_internal_vip_51) Entering MASTER STATE            <- on controller-3
+Tue Oct 27 13:12:04 2026: Script `check_alive` now returning 0
+Tue Oct 27 13:12:22 2026: VRRP_Script(check_alive) succeeded
+Tue Oct 27 13:12:22 2026: (kolla_internal_vip_51) Entering BACKUP STATE
+```
+
 Two nodes logging `Entering MASTER STATE` without one of them logging `Entering BACKUP STATE` in between means both
 hold the VIP: VRRP adverts are not getting through between them (network, firewall, multicast or unicast peers).
 
 ```bash
-sudo docker logs keepalived 2>&1 | grep -E "Entering (MASTER|BACKUP|FAULT) STATE|now returning|VRRP_Script|advertisement timeout" | tail -20
+sudo docker logs keepalived 2>&1 | grep -E "Entering (MASTER|BACKUP|FAULT) STATE|now returning|VRRP_Script|Received advert" | tail -20
+# "advertisement timeout" only with keepalived -D (not on Kolla-Ansible)
 ```
 
 ## memcached
@@ -182,7 +231,7 @@ defined in memcached's [protocol documentation](https://github.com/memcached/mem
 | `evictions` | Valid items removed to make room. Growing fast with a small `-m`: cached tokens and data do not stay cached. |
 
 ```bash
-# On a memcached node (Kolla-Ansible binds memcached to the API interface address)
+# On a memcached node (Kolla-Ansible binds memcached to the API interface address, not the VIP)
 # Debian/Ubuntu netcat; on RHEL-family hosts use: printf 'stats\r\nquit\r\n' | nc <api-interface-address> 11211
 echo stats | nc -q1 <api-interface-address> 11211 | grep -E 'curr_connections|max_connections|listen_disabled_num|rejected_connections|evictions'
 ```
@@ -191,6 +240,13 @@ Keystone and the services use memcached through `oslo.cache` (`backend = oslo_ca
 `keystone.conf.j2` and `nova.conf.j2`) and `keystonemiddleware` (`memcached_servers`). A memcached node that stops
 answering shows up in those services as slow token validation rather than as a clear error line; the Keystone page
 (to come) covers what to look for there.
+
+On a lab (3 memcached nodes), `stats` on a healthy node gave `max_connections 5000`, `curr_connections 54` (from the run's memcached capture),
+`rejected_connections 0`, `listen_disabled_num 0`, `evictions 0` (the `evictions` pattern also matches
+`slab_reassign_evictions_nomem`), and `docker logs memcached` held only the start line (`Running command:
+'/usr/bin/memcached -v -l <address> -p 11211 -c 5000 -U 0 -m 256'`). With one of the three memcached nodes stopped for
+about 40 s, no OpenStack log on the controllers had a line mentioning memcache or port 11211, and `openstack server
+list` took 1.9 to 3.0 s, as after the restart: one node lost out of three left no trace to read.
 
 ## Reading an API outage in order
 
@@ -204,10 +260,13 @@ answering shows up in those services as slow token validation rather than as a c
 ## Validity and limits
 
 - Messages are quoted from HAProxy 3.0 and the keepalived and memcached sources and documentation named above. The
-  HAProxy and keepalived versions in a Kolla 2026.1 image come from its base distribution and may differ; these
-  messages have been stable across recent versions, but the exact text was not checked against the image.
-  **No line was captured on a lab.** A lab request asks for real samples.
-- The HAProxy log file name under `/var/log/kolla/haproxy/` was not checked (see the first page of this folder).
+  blocks marked "captured on a lab" come from Kolla-Ansible 2026.1 on Ubuntu 24.04 images (HAProxy 2.8.16, keepalived
+  2.2.8, unicast VRRP, ProxySQL, 3 controllers). Not seen on the lab: `sC--`, `sH--`, `sQ--`, `cD--`, `Layer7
+  wrong status`, the advert priority and VRID-conflict lines, a memcached at its connection limit. A 502 `SH--` was
+  seen in another run on the same lab, during a RabbitMQ alarm. `Receive advertisement timeout` is logged only with
+  keepalived's detail logging (`-D`, `vrrp_scheduler.c` in v2.2.8); Kolla-Ansible's keepalived runs `-nld` without
+  it, so the line does not appear on Kolla-Ansible.
+- The HAProxy log file name was checked on the lab only (`haproxy_latest.log` plus fluentd buffer files).
 - The `grep` patterns on HAProxy request lines assume the default `option httplog` format; a custom `log-format`
   changes the fields.
 - Client-side symptoms of a memcached failure in Keystone and `keystonemiddleware` are not detailed here.
