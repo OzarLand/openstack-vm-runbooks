@@ -135,7 +135,8 @@ sudo docker exec keepalived bash -c 'echo "show stat" | socat unix-connect:/var/
 
 # 4. Which API answers 503, and when: every request is logged (option httplog). A 503 that HAProxy produced
 #    itself, with no server left, shows <NOSRV> as the server and termination flags starting with SC.
-sudo grep -h -e "<NOSRV>" -e " 503 " /var/log/kolla/haproxy/haproxy_latest* | tail -20
+#    The status code follows the timers field (Tq/Tw/Tc/Tr/Ta), so match it there, not a byte count or a timer.
+sudo grep -h -E -e "<NOSRV>" -e "/[0-9]+ 503 " /var/log/kolla/haproxy/haproxy_latest* | tail -20
 
 # 5. The last HAProxy and keepalived events
 sudo grep -h -e "is DOWN" -e "is UP" -e "no server available" /var/log/kolla/haproxy/haproxy_latest* | tail -20
@@ -175,8 +176,8 @@ configuration manual, section 8.2.3); a 503 from the service itself names a real
 
 The `vrrp_instance` in `keepalived.conf` has every node in `state BACKUP` with `nopreempt`, priorities 1, 2, 3 by
 the node's position in the `loadbalancer` group, advertisements every second (`advert_int 1`), and
-`track_script check_alive`. `/check_alive.sh`, from the Kolla `keepalived` image, runs every script in `/checks` every 2 s
-and fails if any of them fails. Kolla-Ansible puts two there by default:
+`track_script check_alive`. Keepalived calls `/check_alive.sh`, from the Kolla `keepalived` image, every 2 s; that
+script runs each script in `/checks` and fails if any of them fails. Kolla-Ansible puts two there by default:
 
 - `check_alive_haproxy.sh`: `echo "show info" | socat unix-connect:/var/lib/kolla/haproxy/haproxy.sock stdio`;
 - `check_alive_proxysql.sh`: `SELECT 1` on ProxySQL's admin socket (ProxySQL is enabled by default in 2026.1,
@@ -188,7 +189,7 @@ to leave FAULT. So a stuck ProxySQL moves the VIP as surely as a stuck HAProxy. 
 
 ```bash
 sudo docker exec keepalived /checks/check_alive_haproxy.sh; echo $?
-sudo docker exec keepalived /checks/check_alive_proxysql.sh; echo $?
+sudo docker exec keepalived /checks/check_alive_proxysql.sh >/dev/null; echo $?
 # 0 is healthy, 1 is the failing daemon. /check_alive.sh itself prints "Keepalived check script <path> failed." for each.
 ```
 
