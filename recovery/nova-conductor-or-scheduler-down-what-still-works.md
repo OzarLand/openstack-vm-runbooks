@@ -221,8 +221,10 @@ Choose the state from the power state: `active` if the guest runs (`Running`), o
 it (a plain start is refused from `error`: `start` accepts only a stopped instance). When a stop timed out, the
 compute has often powered the guest off already: setting `active` would leave a record that says it runs. Resetting
 the state is an admin action (`os_compute_api:os-admin-actions:reset_state` is admin-only by default).
-A hard reboot is refused while the `task_state` is set (`409 ... Cannot 'reboot' instance <server-id> while it is in
-task_state powering-on`): reset the state first. `openstack server set --state` asks for confirmation
+On the lab, a hard reboot was refused with the `task_state` at `powering-on` (`409 ... Cannot 'reboot' instance
+<server-id> while it is in task_state powering-on`): reset the state first. A hard reboot is accepted only with no
+`task_state` or one of `task_states.ALLOW_REBOOT` (`rebooting`, `reboot_pending`, `reboot_started`, `resuming`,
+`rebooting_hard`, `unpausing`, `pausing`, `suspending`). `openstack server set --state` asks for confirmation
 (python-openstackclient 10.5.0); `--auto-approve` skips the question, and without a terminal the command fails.
 
 > ⚠️ **State-changing.** Changes the instance record only (its `vm_state`, and clears `task_state`); nothing happens
