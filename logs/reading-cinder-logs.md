@@ -11,7 +11,8 @@ environment:
   storage: any
   os: any
 risk: read-only
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-27, note: "Cinder LVM over iSCSI (tgtd), no multipath: normal create, start-up, cinder-volume stopped (scheduler lines), queued delete after restart, LVM lvremove in use, attach and detach (os-brick) captured; not observed: driver init failure, heartbeat stop, create failed, image copy failure, terminate connection failure, DB loss, capacity filter lines, os-brick failure lines" }
 upstream_refs:
   - https://opendev.org/openstack/cinder/src/branch/stable/2026.1/cinder/volume/manager.py
   - https://opendev.org/openstack/cinder/src/branch/stable/2026.1/cinder/volume/flows/manager/create_volume.py
@@ -22,7 +23,7 @@ upstream_refs:
   - https://opendev.org/openstack/cinder/src/branch/stable/2026.1/cinder/service.py
   - https://opendev.org/openstack/os-brick/src/branch/stable/2026.1/os_brick/initiator/connectors/iscsi.py
 authored_by: agent:ozarland-author
-last_verified: 2026-10-26
+last_verified: 2026-10-27
 ---
 
 # Reading the Cinder logs. cinder-api, cinder-scheduler, cinder-volume, and os-brick on the compute
@@ -51,8 +52,9 @@ id, which Cinder logs as the global request id for calls Nova makes;
 volume id for the lines that put it in their message text (scheduler, `Volume <id>: create failed`, Nova's lines).
 
 ```bash
-# Kolla-Ansible, on the controllers and storage nodes
-grep -h "<volume-id>" /var/log/kolla/cinder/cinder-*.log | sort
+# Kolla-Ansible, on the controllers and storage nodes (the directory is readable by root only, so the glob must be
+# expanded by a root shell)
+sudo sh -c 'grep -h "<volume-id>" /var/log/kolla/cinder/cinder-*.log' | sort
 openstack volume service list          # cinder-scheduler and cinder-volume (<host>@<backend>) up or down
 ```
 
@@ -118,12 +120,77 @@ Sources: `os_brick/initiator/connectors/iscsi.py`, `os_brick/exception.py`.
 
 ```bash
 # On the compute
-grep -n "os_brick" /var/log/kolla/nova/nova-compute.log | grep -E "WARNING|ERROR" | tail -20
-grep -n "<volume-id>" /var/log/kolla/nova/nova-compute.log      # Nova's attach/detach lines for this volume
+sudo grep -n "os_brick" /var/log/kolla/nova/nova-compute.log | grep -E "WARNING|ERROR" | tail -20
+sudo grep -n "<volume-id>" /var/log/kolla/nova/nova-compute.log      # Nova's attach/detach lines for this volume
 ```
 
 Nova logs `Attaching volume <volume-id> to <mountpoint>` and `Detaching volume <volume-id>` (INFO,
 `nova/compute/manager.py`) around these lines.
+
+## Captured on a lab
+
+Kolla-Ansible 22.2.0 (2026.1, Cinder 28.0.1) all-in-one, LVM (thin) over iSCSI with tgtd, backend `lvm-1`, Nova
+`volume_use_multipath` off, 2026-10-27. Request, user and project ids replaced.
+
+A normal create, `cinder-volume.log`. The two `create_volume` lines carry the volume id; `Created volume
+successfully.` does not:
+
+```text
+INFO cinder.volume.flows.manager.create_volume [None req-<request-id> <id> <id> - - - -] Volume <volume-id>: being created as raw with specification: {'status': 'creating', 'volume_name': 'volume-<volume-id>', 'volume_size': 1}
+INFO cinder.volume.flows.manager.create_volume [None req-<request-id> <id> <id> - - - -] Volume volume-<volume-id> (<volume-id>): created successfully
+INFO cinder.volume.manager [None req-<request-id> <id> <id> - - - -] Created volume successfully.
+```
+
+Start-up after `systemctl restart kolla-cinder_volume-container.service` (19 s to the last line):
+
+```text
+INFO cinder.service [-] Starting cinder-volume node (version 28.0.1)
+INFO cinder.volume.manager [None req-<request-id> - - - - - -] Starting volume driver LVMVolumeDriver (3.0.0)
+INFO cinder.volume.manager [None req-<request-id> - - - - - -] Driver initialization completed successfully.
+INFO cinder.volume.manager [None req-<request-id> - - - - - -] Initializing RPC dependent components of volume driver LVMVolumeDriver (3.0.0)
+INFO cinder.volume.manager [None req-<request-id> - - - - - -] Driver post RPC initialization completed successfully.
+```
+
+`cinder-volume` stopped, then a create (`cinder-scheduler.log`; the volume goes to `error` with no host). For a
+create the last line is `Failed to run task ...`, not `Failed to schedule_create_volume`; `Failed to schedule_<method>`
+was seen for an extend (`Failed to schedule_extend_volume: Cannot place volume <volume-id> on <host>@lvm-1#lvm-1.`):
+
+```text
+WARNING cinder.scheduler.host_manager [...] volume service is down. (host: controller-1@lvm-1)
+INFO cinder.scheduler.base_filter [...] Filtering removed all hosts for the request with volume ID '<volume-id>'. Filter results: AvailabilityZoneFilter: (start: 0, end: 0), ...
+WARNING cinder.scheduler.filter_scheduler [...] No weighed backend found for volume with properties: {'id': '<type-id>', 'name': '__DEFAULT__', ...
+ERROR cinder.scheduler.flows.create_volume [...] Failed to run task cinder.scheduler.flows.create_volume.ScheduleCreateVolumeTask;volume:create: No valid backend was found. No weighed backends ...
+```
+
+After the restart of a stopped `cinder-volume`, with a delete queued:
+
+```text
+INFO cinder.manager [None req-<request-id> - - - - - -] Initiating service 2 cleanup
+INFO cinder.manager [None req-<request-id> - - - - - -] Service 2 cleanup completed.
+INFO cinder.volume.drivers.lvm [None req-<request-id> <id> <id> - - - -] Successfully deleted volume: <volume-id>
+INFO cinder.volume.manager [None req-<request-id> <id> <id> - - - -] Deleted volume successfully.
+```
+
+A delete that the LVM driver could not run (the logical volume open on the host; the volume goes to `error_deleting`):
+
+```text
+ERROR oslo_messaging.rpc.server [None req-<request-id> <id> <id> - - - -] Exception during message handling: oslo_concurrency.processutils.ProcessExecutionError: Unexpected error while running command.
+ERROR oslo_messaging.rpc.server Command: sudo cinder-rootwrap /etc/cinder/rootwrap.conf lvremove --config activation { retry_deactivation = 1} devices { ignore_suspended_devices = 1} -f cinder-volumes/volume-<volume-id>
+ERROR oslo_messaging.rpc.server Stderr: '  Logical volume cinder-volumes/volume-<volume-id> in use.\n'
+```
+
+An attach, `nova-compute.log` (the detach logged no `os_brick` line at INFO). The `nvmeof` WARNING and the `lightos`
+INFO line come from os-brick probing every connector and are harmless on an iSCSI-only host; `No active sessions.` is
+logged before the first login of the host:
+
+```text
+INFO nova.compute.manager [...] [instance: <server-id>] Attaching volume <volume-id> to /dev/vdb
+WARNING os_brick.initiator.connectors.nvmeof [...] Could not find nvme_core/parameters/multipath: FileNotFoundError: [Errno 2] No such file or directory: '/sys/module/nvme_core/parameters/multipath'
+INFO os_brick.initiator.connectors.lightos [...] Current host hostNQN nqn.2014-08.org.nvmexpress:uuid:<uuid> and IP(s) are [...]
+INFO os_brick.initiator.connectors.iscsi [...] Trying to connect to iSCSI portal 192.0.2.10:3260
+WARNING os_brick.initiator.connectors.iscsi [...] iscsiadm stderr output when getting sessions: iscsiadm: No active sessions.
+INFO nova.compute.manager [...] [instance: <server-id>] Detaching volume <volume-id>
+```
 
 ## Reading a volume problem in order
 
@@ -135,8 +202,10 @@ Nova logs `Attaching volume <volume-id> to <mountpoint>` and `Detaching volume <
 
 ## Validity and limits
 
-- Every message is quoted from Cinder and os-brick 2026.1. **None was captured on a lab.** A lab request asks for
-  real samples.
+- The tables quote Cinder and os-brick 2026.1. The lines under *Captured on a lab* are real (all-in-one, LVM over
+  iSCSI, 2026-10-27); not observed on the lab: `Failed to initialize driver.`, `is reporting problems, not sending
+  heartbeat`, `create failed`, `Failed to copy image to volume`, `Terminate volume connection failed`, `model server
+  went away`, the capacity filter's `Insufficient ...` lines and the os-brick failure lines.
 - Driver-specific messages (Ceph RBD, LVM, vendor drivers) are not listed; each driver logs its own.
 - Only the iSCSI connector of os-brick is detailed.
 
