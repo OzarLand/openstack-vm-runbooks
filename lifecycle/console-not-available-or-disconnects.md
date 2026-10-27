@@ -188,15 +188,16 @@ From a controller, check that the compute's VNC port answers (`virsh vncdisplay`
 Start `nova-compute` if it is down. If VNC is disabled on that compute (`[vnc] enabled = false`) while the platform
 uses noVNC, enable it in that compute's configuration:
 
-**Kolla-Ansible:** remove the override that disables it (`[vnc] enabled = false` in
-`/etc/kolla/config/nova/nova-compute.conf` or in the per-host file `/etc/kolla/config/nova/<host>/nova.conf`), then
-`kolla-ansible reconfigure -i <inventory> --tags nova --limit <compute>`.
-
-**Any:** set `[vnc] enabled = true` in that compute's `nova.conf` and restart `nova-compute`.
-
 > ⚠️ **State-changing.** Changes the compute's `nova.conf` and restarts `nova-compute`; running instances are not
 > affected, and keep the definition they have until they are rebuilt (below). Undo: revert the change and restart
 > again.
+
+**Kolla-Ansible:** remove the override that disables it (`[vnc] enabled = false`), wherever it is:
+`/etc/kolla/config/global.conf`, `/etc/kolla/config/nova.conf`, `/etc/kolla/config/nova/nova-compute.conf`, or the
+per-host `/etc/kolla/config/nova/<inventory-hostname>/nova.conf`; then
+`kolla-ansible reconfigure -i <inventory> --tags nova --limit <compute>`.
+
+**Any:** set `[vnc] enabled = true` in that compute's `nova.conf` and restart `nova-compute`.
 
 If the guest has no VNC device, its definition will only change when Nova rebuilds it: a hard reboot regenerates the
 domain from the flavor and image.
