@@ -174,6 +174,7 @@ lab), **documentation** (upstream documentation and source), **production incide
 |---|---|---|---|---|
 | [Where the OpenStack logs are, and how to read one log line](logs/where-openstack-logs-are-and-how-to-read-a-line.md) | nova, neutron, placement, keystone, glance, cinder, rabbitmq, mariadb, haproxy, ovs, ovn, libvirt | 2026.1 | draft | documentation |
 | [Reading the Keystone logs, and the authentication lines every service writes (401, 503, Fernet)](logs/reading-keystone-and-auth-logs.md) | keystone, memcached, nova, neutron | 2026.1 | draft | documentation |
+| [Error messages: authentication and policy. 401 requires authentication, 403 policy, service credentials, Keystone unreachable](logs/error-messages-authentication-and-policy.md) | keystone, nova, neutron, cinder, glance | 2026.1 | draft | documentation |
 | [Reading the Cinder logs. cinder-api, cinder-scheduler, cinder-volume, and os-brick on the compute](logs/reading-cinder-logs.md) | cinder, nova | 2026.1 | draft | documentation |
 | [Following one request, instance, port or volume through the logs of every service and host](logs/tracing-one-request-across-services-and-hosts.md) | nova, neutron, placement, cinder, glance, ovs, libvirt | 2026.1 | draft | documentation |
 | [Reading the MariaDB and Galera logs, and the oslo.db lines that go with them](logs/reading-mariadb-galera-logs.md) | mariadb, proxysql, haproxy, nova, neutron, keystone | 2026.1 | draft | documentation |
