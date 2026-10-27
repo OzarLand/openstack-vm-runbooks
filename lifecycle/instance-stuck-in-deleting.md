@@ -1,7 +1,7 @@
 ---
 title: Instance stuck in deleting, or in ERROR after a delete. Deleting it again does nothing
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [nova, libvirt, cinder, neutron, placement]
 deployment_methods: [kolla-ansible, any]
@@ -11,7 +11,8 @@ environment:
   storage: any
   os: any
 risk: destructive
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-26, note: "causes 1, 4 and 5 on a disposable lab: delete stuck with nova-compute paused or stopped, resumed by the restart; cause 4 reproduced with the service down from a lost heartbeat (unit stopped), local delete, guest reaped 54 s after the return; the forced-down command (--down) and its undo (--up --enable) not run; lock 409 for a member, admin bypass; causes 2 and 3 not run" }
 upstream_refs:
   - https://docs.openstack.org/nova/2026.1/reference/vm-states.html
   - https://docs.openstack.org/python-openstackclient/2026.1/cli/command-objects/server.html
@@ -139,7 +140,11 @@ At start-up, `nova-compute` resumes every delete left in `deleting` on its host 
 > ⚠️ **State-changing.** Restarts `nova-compute` on that compute; running instances are not affected, operations in
 > progress on that compute fail. Undo: none needed.
 
-**Kolla-Ansible:** `sudo docker restart nova_compute`
+**Kolla-Ansible:** `sudo systemctl restart kolla-nova_compute-container.service`
+
+Not `docker restart nova_compute`: it bypasses the container's systemd unit, which then fails and re-attaches 59 s
+later. Stopping `nova_compute` can take up to 60 s (the unit's `ExecStop` is `docker stop nova_compute -t 60`). On a lab, `docker restart` of a **paused**
+`nova_compute` only unpaused it: the old process then ran the queued delete before being killed.
 
 **Any:** restart the `nova-compute` service.
 
@@ -210,9 +215,9 @@ openstack server delete <server-id>
 ```
 
 When the host comes back, its `nova-compute` finds the guest of a deleted instance. With the default
-`[DEFAULT] running_deleted_instance_action = reap`, every `running_deleted_instance_poll_interval` (1800 s by default)
-it logs `Destroying instance with name label '<name>' which is marked as DELETED but still present on host.` and
-destroys it. Check afterwards that no guest and no leftover disk of that instance remain on the host
+`[DEFAULT] running_deleted_instance_action = reap`, every `running_deleted_instance_poll_interval` (1800 s by default,
+and once shortly after `nova-compute` starts: 54 s on a lab) it logs
+`Destroying instance with name label '<name>' which is marked as DELETED but still present on host.` and destroys it. Check afterwards that no guest and no leftover disk of that instance remain on the host
 (`virsh list --all`, the instances directory).
 
 ### For cause 5: unlock or allow termination
@@ -234,11 +239,36 @@ comes back that the guest is gone there too. For ports, volumes or allocations l
 [stale records](stale-records-stuck-instances-orphan-ports-attachments.md) and
 [stale volume attachment](../volumes/stale-volume-attachment-after-instance-deleted-or-evacuated.md).
 
+## Lab observations
+
+On a lab: OpenStack 2026.1 (Nova 33.0.3), Kolla-Ansible 22.2.0, all-in-one, python-openstackclient 9.0.0.
+
+- **Cause 1, compute paused.** `docker pause nova_compute`, then delete: `task_state` `deleting`, status `ACTIVE`, the
+  guest running, no `Terminating instance`; a second delete logged `Instance is already in deleting state, ignoring
+  this request` in `nova-api.log`.
+- **Cause 1, compute stopped before the request.** `systemctl stop` of the unit (60 s), delete while the service was
+  still `up`, then `systemctl start`: `Service started deleting the instance during the previous run, but did not
+  finish. Restarting the deletion now.` 9 s after the start, and the instance was gone 24 s after it.
+- **Cause 4.** Unit stopped, service `down` 51 s later, delete: `instance's host <compute> is down, deleting from
+  database` (WARNING), ports and allocation removed at once, **the guest still running**. After `systemctl start`,
+  the first `running_deleted_instance` run, 54 s later, logged `Destroying instance with name label '<name>' which is
+  marked as DELETED but still present on host.`, destroyed and undefined the domain and deleted its files.
+- **Cause 5.** A member user's delete of its locked instance: `409 … Instance <id> is locked`. The admin's delete of
+  the same locked instance went through, as the page says.
+- On Kolla-Ansible, `docker stop nova_compute` is undone by the systemd unit after 59 s, before Nova's 60 s
+  `service_down_time`: stop the unit to reproduce cause 4.
+
+Not run: causes 2 and 3, `disable_terminate`, `server set --state error`, and the forced-down command of cause 4
+(`compute service set ... --down`) with its undo (`--up --enable`): cause 4 was reproduced with the service down
+from a lost heartbeat (unit stopped).
+
 ## Validity and limits
 
 - Written from Nova 2026.1 (`nova/compute/api.py` `_delete`, `_local_delete`; `nova/compute/manager.py`
   `terminate_instance`, `_shutdown_instance`, `_init_instance`; `nova/virt/libvirt/driver.py` `_destroy`) and
-  python-openstackclient 2026.1. Not reproduced on a lab.
+  python-openstackclient 2026.1. Causes 1, 4 and 5 reproduced on an all-in-one lab (see Lab observations); causes 2
+  and 3 not. Cause 4 was reproduced with the service down from a lost heartbeat (unit stopped); the forced-down
+  command (`--down`) and its undo (`--up --enable`) were not run.
 - Not covered: soft delete (`reclaim_instance_interval`, instances in `SOFT_DELETED`), Ironic instances, and down
   cells.
 

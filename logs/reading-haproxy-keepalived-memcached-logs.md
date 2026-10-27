@@ -13,6 +13,7 @@ environment:
 risk: read-only
 confirmed_by: []
 upstream_refs:
+  - https://opendev.org/openstack/kolla/src/branch/stable/2026.1/docker/keepalived/check_alive.sh
   - https://docs.haproxy.org/3.0/configuration.html
   - https://github.com/haproxy/haproxy/tree/v3.0.0/src
   - https://github.com/acassen/keepalived/tree/master/keepalived/vrrp
@@ -133,12 +134,16 @@ deployment `/checks` holds:
 - `check_alive_proxysql.sh`: runs `SELECT 1` on ProxySQL's admin socket, because ProxySQL is enabled by default
   (`enable_proxysql: "{{ enable_mariadb }}"`).
 
-So a failing `check_alive` means **HAProxy or ProxySQL** does not answer. Run each check by hand to know which:
+So a failing `check_alive` means **HAProxy or ProxySQL** does not answer. The wrapper prints, for each check, whether it
+succeeded or failed (`Keepalived check script <path> succeeded.` / `… failed.`), so run it by hand to know which:
 
 ```bash
-sudo docker exec keepalived /checks/check_alive_haproxy.sh; echo $?
-sudo docker exec keepalived /checks/check_alive_proxysql.sh; echo $?
+sudo docker exec keepalived /check_alive.sh; echo $?
+sudo docker exec keepalived ls /checks        # which checks exist on this deployment
 ```
+
+`check_alive_proxysql.sh` exists only when ProxySQL is enabled: without it, a "no such file" when calling it by hand
+does not mean ProxySQL is down.
 
 ### Lines
 

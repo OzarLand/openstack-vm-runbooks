@@ -163,8 +163,7 @@ services' tracebacks:
 **Which proxy is in front of the database.** In Kolla-Ansible 2026.1 the default is **ProxySQL**
 (`mariadb_loadbalancer: proxysql`, `enable_proxysql: "{{ enable_mariadb }}"`). It sends writes to one node at a time
 (`mysql_galera_hostgroups` with `max_writers: 1` in `proxysql.yaml.j2`) and logs to
-`/var/log/kolla/proxysql/proxysql.log` on each load balancer node. With `enable_proxysql: false` (or an external
-database), HAProxy's `mariadb` backend does the same job: one active server, the others `backup`. Either way, a burst
+`/var/log/kolla/proxysql/proxysql.log` on each load balancer node. With `enable_proxysql: false`, HAProxy's `mariadb` backend does the same job: one active server, the others `backup`. Either way, a burst
 of `DBConnectionError` in many services at the same second is usually the active node going away and the proxy
 failing over: read the proxy's log and the database node logs at that second.
 
