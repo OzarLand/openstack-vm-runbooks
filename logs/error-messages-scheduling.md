@@ -51,7 +51,8 @@ retries` comes after one or more computes tried and failed.
 - **Read next:** `nova-scheduler.log` for the request id of the failed boot (`openstack server event list
   <server-id>`). Look for:
   - `Got no allocation candidates from the Placement API` → the request does not fit any resource provider in
-    Placement (resources, traits, aggregates, or computes not registered);
+    Placement (resources, traits, aggregates, or computes not registered); see
+    [reading the Placement logs](reading-placement-logs.md) and [reading the Nova logs](reading-nova-logs.md);
   - `Filter <name> returned 0 hosts` (INFO) → that filter removed the last hosts. The INFO line `Filtering removed all
     hosts for the request with instance ID '<uuid>'. Filter results: <results>` lists which filters ran and how many
     hosts each left (the DEBUG version lists the hosts) ([`nova/filters.py`](https://github.com/openstack/nova/blob/stable/2026.1/nova/filters.py)).
