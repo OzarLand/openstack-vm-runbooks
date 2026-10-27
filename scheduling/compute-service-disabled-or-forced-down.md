@@ -47,8 +47,9 @@ $ openstack compute service list --service nova-compute --long
 
 What the operator notices first is usually one of:
 
-- builds never land on that compute, and the scheduler log has, at debug level only,
-  `<host-state> is disabled, reason: <reason>`;
+- builds never land on that compute. The scheduler excludes it through the `COMPUTE_STATUS_DISABLED` trait before
+  the filters run; the ComputeFilter debug line `<host-state> is disabled, reason: <reason>` shows only when the
+  trait is missing or out of sync;
 - the scheduler log has, at warning level, `<host-state> has not been heard from in a while` (ComputeFilter, from
   `nova/scheduler/filters/compute_filter.py`);
 - a resize, cold migration or volume detach of one of its instances fails with `Service is unavailable at this time.`
@@ -82,6 +83,7 @@ sudo docker ps --filter name=nova_compute --filter name=nova_libvirt --format '{
 sudo tail -n 50 /var/log/kolla/nova/nova-compute.log
 
 # 3. Is the disabled trait set on its resource provider? Nova excludes it from scheduling through this trait.
+#    <node-uuid> is the provider's UUID: openstack resource provider list --name <hypervisor-hostname>
 openstack resource provider trait list <node-uuid> | grep COMPUTE_STATUS_DISABLED
 
 # 4. Did libvirt drop? The libvirt driver logs the event it reacts to
@@ -98,7 +100,7 @@ openstack server migration list --host <host> --type evacuation
 
 - A reason starting with `AUTO: ` was set by the libvirt driver itself (`DISABLE_PREFIX` in
   `nova/virt/libvirt/driver.py`). It disables the service when its connection to libvirt drops
-  (`Connection to libvirt lost: <reason>`, from `nova/virt/libvirt/host.py`), and enables it again by itself when the
+  (`Connection to libvirt lost: <reason>`, or just `Connection to libvirt lost`, from `nova/virt/libvirt/host.py`), and enables it again by itself when the
   connection comes back. It never overrides a reason that does not start with `AUTO: `.
 - Any other reason, or none, was set through the API: an operator, a script, a maintenance tool.
 - Disabling also adds the `COMPUTE_STATUS_DISABLED` trait to the compute's resource provider, so the scheduler's
@@ -120,16 +122,18 @@ openstack server migration list --host <host> --type evacuation
 
 `nova/compute/api.py` does a *local delete* when the instance's compute service is not up: it removes the instance
 from the database, its ports and volume attachments, and its allocations, but nothing on the compute. When
-`nova-compute` runs again there, its periodic task finds the guest it no longer knows and applies
-`[DEFAULT] running_deleted_instance_action` (default `reap`, every `running_deleted_instance_poll_interval`,
-1800 s by default): `Destroying instance with name label '<instance-name>' which is marked as DELETED but still
-present on host.` Until then the guest runs, without Nova knowing it.
+`nova-compute` runs again there, its periodic task `_cleanup_running_deleted_instances` finds the guest it no longer
+knows and applies `[DEFAULT] running_deleted_instance_action` (default `reap`): `Destroying instance with name label
+'<instance-name>' which is marked as DELETED but still present on host.` The task runs at once when `nova-compute`
+starts (`run_immediately=True`), then every `running_deleted_instance_poll_interval` (1800 s by default): a
+returning host destroys such a guest within about a minute of starting. While `nova-compute` stays down, the guest
+runs, without Nova knowing it.
 
 ## Possible causes
 
 | What you see | Cause |
 |---|---|
-| `disabled`, reason `AUTO: Connection to libvirt lost: ...`, state `up` | Cause 1: libvirt dropped; the service re-enables itself when it comes back |
+| `disabled`, reason `AUTO: Connection to libvirt lost` or `AUTO: Connection to libvirt lost: ...`, state `up` | Cause 1: libvirt dropped; the service re-enables itself when it comes back |
 | `disabled`, another reason, state `up` | Cause 2: disabled on purpose (maintenance, fencing) and never re-enabled |
 | `down`, `Forced Down` `False` | Cause 3: no heartbeat |
 | `down`, `Forced Down` `True` | Cause 4: forced down, usually after a host failure, and never set back up |
@@ -162,17 +166,20 @@ reports again, do not delete its instances: each delete would be a local delete.
 
 ### For cause 4: set it back up only after its evacuations are cleaned up
 
-Nova refuses `--up` while evacuations from that host are still `done`:
-`Unable to force up host <host> as `done` evacuation migration records remain associated with the host. Ensure the
-compute service has been restarted, allowing these records to move to `completed` before retrying this request.`
-(`nova/api/openstack/compute/services.py`). `nova-compute` moves them to `completed` when it starts on the repaired
+Nova refuses `--up` while evacuations from that host are still `done` (`nova/api/openstack/compute/services.py`):
+
+```text
+Unable to force up host <host> as `done` evacuation migration records remain associated with the host. Ensure the compute service has been restarted, allowing these records to move to `completed` before retrying this request.
+```
+ `nova-compute` moves them to `completed` when it starts on the repaired
 host, after destroying the local copies of the evacuated instances (`Destroying instance as it has been evacuated
 from this host but still exists in the hypervisor`).
 
 > ⚠️ **State-changing.** Lets Nova consider the service alive again from its heartbeat. Precondition: the host is
 > repaired, `nova-compute` runs and has reported (`Updated At` recent), and `openstack server migration list --host
-> <host> --type evacuation` shows no `done` record. Undo: `openstack compute service set --down <host>
-> nova-compute`, only if the host is fenced again.
+> <host> --type evacuation` shows no `done` record. Undo: none. Forcing the service down again is step 2 of
+> [fence before you evacuate](../recovery/compute-host-failure-fence-before-evacuate.md), with its precondition:
+> on a host that is not fenced, it allows local deletes and evacuations of instances that are alive.
 
 ```bash
 openstack compute service set --up <host> nova-compute
