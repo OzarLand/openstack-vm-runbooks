@@ -144,8 +144,9 @@ records for its instances) instead of failing.
 
 With the conductor down, every compute is `down` for Nova. Deleting an instance then is a *local delete*: Nova
 removes the record, its ports, attachments and allocations, but the guest keeps running on its compute until
-`nova-compute` finds it and applies `[DEFAULT] running_deleted_instance_action` (`reap` by default, checked every
-1800 s). Avoid deletes until the conductor is back and the computes are `up`.
+`nova-compute` finds it and applies `[DEFAULT] running_deleted_instance_action` (`reap` by default). With the
+conductor down, the computes cannot run that check either; it runs again at the next `nova-compute` start and every
+`running_deleted_instance_poll_interval` (1800 s) after. Avoid deletes until the conductor is back and the computes are `up`.
 
 ## Possible causes
 
