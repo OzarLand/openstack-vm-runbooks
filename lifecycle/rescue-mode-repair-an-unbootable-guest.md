@@ -1,7 +1,7 @@
 ---
 title: The guest does not boot or cannot be reached (broken fstab, kernel, network or SSH configuration). Repair its disk in rescue mode
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [nova, libvirt, glance]
 deployment_methods: [kolla-ansible, any]
@@ -11,13 +11,14 @@ environment:
   storage: local instance disks; volume-backed instances with the stable device rescue
   os: any
 risk: state-changing
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-27, note: "CirrOS guest made unreachable (dhcpcd removed): legacy rescue with the own image booted the original disk by label, a rescue image with root=/dev/vda1 worked, repair and unrescue restored SSH; stable device rescue of a volume-backed instance (2.87, hw_rescue_device and hw_rescue_bus) and of a local-disk instance; not run: --password, rescue_timeout set, Host unable / not supported / Driver Error messages, guests other than CirrOS" }
 upstream_refs:
   - https://docs.openstack.org/nova/2026.1/user/rescue.html
   - https://docs.openstack.org/nova/2026.1/configuration/config.html#DEFAULT.rescue_timeout
   - https://docs.openstack.org/python-openstackclient/2026.1/cli/command-objects/server.html
 authored_by: agent:ozarland-author
-last_verified: 2026-10-26
+last_verified: 2026-10-27
 ---
 
 # The guest does not boot or cannot be reached (broken fstab, kernel, network or SSH configuration). Repair its disk in rescue mode
@@ -104,7 +105,10 @@ instance without warning when it expires, possibly while you have its disk mount
 
 Choose the rescue image: the instance's own image works for most Linux guests; a dedicated rescue image is safer when
 the guest finds its root file system by label or UUID: with the instance's own image, the rescue disk is a copy of
-the same image, so both disks carry the same label and UUID, and the rescue system may mount the wrong one.
+the same image, so both disks carry the same label and UUID, and the rescue system may mount the wrong one. A
+dedicated image helps only if its root is found otherwise than by that label (a different label alone is not enough
+when the guest's initramfs looks for a fixed label, as CirrOS does; see *Lab observations*). Whatever the image, check
+which disk the rescue system runs from before changing anything (step 2).
 
 > ⚠️ **State-changing.** Stops the guest (clean shutdown first) and boots the rescue system instead; the instance's
 > users lose it until the unrescue. Its disks are not changed by the rescue itself. Undo:
@@ -116,7 +120,9 @@ openstack server rescue --image <rescue-image> <server-id>          # another im
 openstack server rescue --password <password> <server-id>          # a password for the rescue system, if the driver
                                                                      # and image support setting it
 openstack --os-compute-api-version 2.87 server rescue --image <image-with-hw_rescue-properties> <server-id>
-                                                                     # volume-backed instance (stable device rescue)
+                                                                     # volume-backed instance (stable device rescue);
+                                                                     # python-openstackclient 9.0.0 already
+                                                                     # negotiates a later version without the option
 openstack server show <server-id> -c status                         # RESCUE
 ```
 
@@ -125,7 +131,11 @@ it.
 
 ### 2. Repair the original disk
 
-From the rescue system, find the original root disk with `lsblk` and `blkid`: with legacy rescue it is the second
+From the rescue system, check first that it runs from the rescue disk (`mount | grep ' / '`, `lsblk`): if `/` is the
+original disk, the rescue booted the broken system; unrescue and use another rescue image. When the rescue system is
+not reachable, the console log shows the same without SSH (`openstack console log show <server>`; on the lab, CirrOS
+logged `info: initramfs loading root from /dev/vdb1`, the original disk). Then find the original
+root disk with `lsblk` and `blkid`: with legacy rescue it is the second
 disk; with stable device rescue (an image with `hw_rescue_*` properties) it keeps its place, usually the first, and the
 rescue disk is the last. Check its size and file systems before mounting it, and
 fix the cause: the `fstab` line, the boot entry, free space, the network or SSH configuration.
@@ -156,11 +166,40 @@ openstack console log show --lines 50 <server-id>      # a normal boot, ending a
 
 Then reach the instance as its users do (SSH, its service port).
 
+## Lab observations
+
+Kolla-Ansible 22.2.0 (2026.1) all-in-one, local qcow2 instance disks, Cinder LVM, python-openstackclient 9.0.0, on
+2026-10-27. A CirrOS 0.6 instance made unreachable by moving `/sbin/dhcpcd` away and rebooting: `ACTIVE`, no answer to
+ping or SSH, and the console log showed `Starting network: /etc/rc3.d/S40-network: line 10: /sbin/dhcpcd: not found`.
+
+- `openstack server rescue <server-id>` (own image): `RESCUE` 16 s after the request; `vda` was `disk.rescue`, `vdb`
+  the original `disk`. But the rescue system booted the broken system: its console log showed
+  `info: initramfs loading root from /dev/vdb1` (both disks labelled `cirros-rootfs`), and it was as unreachable as
+  before.
+- A rescue image with its root relabelled and `LABEL=rescue-rootfs` on the kernel command line still loaded root from
+  `/dev/vdb1`; with `root=/dev/vda1` it loaded `/dev/vda1`, was reachable by SSH with the instance's key, and showed
+  the original disk as `vdb`. The repair (mount `/dev/vdb1`, put the file back, unmount) and `openstack server
+  unrescue`: `ACTIVE` 7 s after the request, the guest booted from its own disk and answered SSH.
+- Between `Rescuing` and `Attempting rescue` in the `nova-compute` log: 6 s to 59 s (the clean shutdown of the guest;
+  from the `nova-compute` capture, not the review table).
+- `server rescue` on an instance in `RESCUE`: `409 ... Cannot 'rescue' instance <server-id> while it ...`.
+- Volume-backed instance: without `hw_rescue_*` properties on the image, or with them and
+  `--os-compute-api-version 2.86`: `400 ... Instance <server-id> cannot be rescued: Cannot rescue a volume-backed
+  instance`. With both properties and 2.87: `RESCUE` in 21 s, `Attempting a stable device rescue` in the log, `vda` the
+  volume and `vdb` the rescue disk. The all-in-one compute reported `COMPUTE_RESCUE_BFV` (from the
+  CLI capture of its resource provider traits).
+- The same image with the properties on the local-disk instance (default API version): stable device rescue, original
+  `disk` as `vda`, `disk.rescue` as `vdb`.
+- Not run: `--password`, a `rescue_timeout` set, the noVNC console (only its URL), `Host unable to rescue`,
+  `is not supported` and `Driver Error` messages, guests other than CirrOS.
+
 ## Validity and limits
 
 - Written from Nova 2026.1 (*Rescue an instance* user guide, `nova/compute/api.py` `rescue` and `unrescue`,
   `nova/compute/manager.py` `rescue_instance` and `_poll_rescued_instances`, `nova/virt/libvirt/blockinfo.py`,
-  `nova/exception.py`, `rescue_timeout`) and python-openstackclient 2026.1. Not reproduced on a lab.
+  `nova/exception.py`, `rescue_timeout`) and python-openstackclient 2026.1. Reproduced on an all-in-one lab with
+  CirrOS guests: legacy rescue of a local-disk instance, stable device rescue of a volume-backed and a local-disk
+  instance (*Lab observations*); other guest operating systems were not tested.
 - The repair inside the guest depends on its operating system; this page does not cover Windows guests, encrypted
   root file systems, or LVM inside the guest.
 - Not covered: drivers other than libvirt, and rescuing an instance in `ERROR` whose disk is not on its host (see
