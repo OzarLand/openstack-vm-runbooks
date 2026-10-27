@@ -1,7 +1,7 @@
 ---
 title: Placement allocations do not match the instances. Compute looks full or empty, audit and heal
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [nova, placement]
 deployment_methods: [kolla-ansible, any]
@@ -11,14 +11,15 @@ environment:
   storage: any
   os: any
 risk: destructive
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, multinode (3 controllers, 2 computes)", date: 2026-10-27, note: "the three causes injected by hand with osc-placement on a disposable lab (orphan consumer, stale second provider, deleted allocation); quick checks, saving, audit, audit --delete, allocation unset, heal_allocations (one instance, --force, delete then heal) and Verification run; the undo from the saved JSON, heal of every instance, No valid host and a real evacuation not run" }
 upstream_refs:
   - https://docs.openstack.org/nova/2026.1/admin/troubleshooting/orphaned-allocations.html
   - https://docs.openstack.org/nova/2026.1/cli/nova-manage.html#placement-audit
   - https://docs.openstack.org/nova/2026.1/cli/nova-manage.html#placement-heal-allocations
   - https://docs.openstack.org/osc-placement/latest/
 authored_by: agent:ozarland-author
-last_verified: 2026-10-26
+last_verified: 2026-10-27
 ---
 
 # Placement allocations do not match the instances. Compute looks full or empty, audit and heal
@@ -121,10 +122,11 @@ $ echo $?
 
 $ nova-manage placement heal_allocations --dry-run --verbose
 Running batches of 50 until complete
-Looking for instances in cell: <cell-uuid>(cell1)
-Found 12 candidate instances.
-[dry-run] Create allocations for instance <server-id>: {...}
-...
+Looking for instances in cell: <cell-uuid>
+Found 4 candidate instances.
+The allocation of instance <server-id> is up-to-date. Nothing to be healed.
+[dry-run] Create allocations for instance <server-id>: {"allocations": {"<rp-uuid>": {"resources": {"VCPU": 1, "MEMORY_MB": 512, "DISK_GB": 1}}}, "project_id": "<project-id>", "user_id": "<user-id>", "consumer_generation": null}
+Processed 0 instances.
 ```
 
 ## Diagnosis
@@ -340,13 +342,34 @@ At the next resource update (by default every 60 seconds, `[DEFAULT] update_reso
 lines quoted in *Symptom* for these consumers. If builds failed with `No valid host`, create a test instance and
 check that it is scheduled.
 
+## Lab observations
+
+On a Kolla-Ansible 22.2.0 lab (2026.1, 3 controllers, 2 computes), the three causes were injected by hand with
+osc-placement 4.9.1: an allocation for a made-up consumer on compute-1 (cause 1), a second provider (compute-2) added
+to the allocation of an instance running on compute-1 (cause 2), and the allocation of an instance on compute-2
+deleted (cause 3).
+
+- Within 20 s, the resource trackers logged, then repeated at each update until the repair, the `INFO ... is not
+  found in the database` line on compute-1 and the `WARNING ... has been moved to another host` line on compute-2,
+  as quoted in *Symptom*. Nothing was logged for the instance without allocation.
+- `audit --verbose` listed causes 1 and 2 (return code 3); `heal_allocations --dry-run --verbose` proposed cause 3
+  (return code 4, `Processed 0 instances.`). The cell was printed as its UUID only.
+- `audit --verbose --delete --resource_provider <rp-uuid>` removed the cause 1 allocation (return code 4);
+  `allocation unset --provider` left only the compute-1 part; `heal_allocations --verbose --instance` created the
+  missing one (return code 0). `--force` (`Force flag passed for instance <server-id>`, `Successfully updated
+  allocations`) and `allocation delete` followed by a heal also worked, return code 0.
+- Verification: `audit` returned 0 with no output, the dry-run grep printed nothing, each instance had one allocation
+  on its compute; the log lines stopped.
+
 ## Validity and limits
 
 - Written from Nova 2026.1: `nova/cmd/manage.py` (`PlacementCommands.audit` and `heal_allocations`, their messages
   and return codes), `nova/compute/resource_tracker.py` (`_remove_deleted_instances_allocations`),
   `nova/compute/manager.py` (`_destroy_evacuated_instances`), `nova/scheduler/manager.py`, and the upstream
-  *Orphaned resource allocations* guide. Kolla-Ansible 2026.1 `nova.conf.j2` for the `nova_api` container. Not
-  reproduced on a lab.
+  *Orphaned resource allocations* guide. Kolla-Ansible 2026.1 `nova.conf.j2` for the `nova_api` container. Run on a
+  lab with the causes injected by hand in Placement (see *Lab observations*), not produced by a real evacuation,
+  failed move or database restore. Not run: the undo with `allocation set` from the saved JSON, `heal_allocations`
+  over every instance, the `No valid host` symptom, the `resource provider delete` refusal.
 - The `nova-compute` log lines are shown with the logger and message from the source; the timestamp, process and
   request id prefix depends on your logging configuration.
 - `audit` matches consumers against instances and active migrations only. A consumer created by another service
