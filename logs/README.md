@@ -34,6 +34,6 @@ These pages explain how to read; the fixes are in the runbooks of the other fold
 
 ## Planned
 
-1. Per service: Glance, Heat and Octavia (pages in review).
-2. System logs: chrony and clock skew, iSCSI and multipath, NFS and Ceph clients (pages in review).
-3. A dictionary of frequent error messages: what each means, its usual causes, and the next log to read.
+1. Per service: Heat and Octavia (pages in review).
+2. A dictionary of frequent error messages, what each means, its usual causes and the next log to read: messaging
+   and database, scheduling (pages in review).

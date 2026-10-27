@@ -74,9 +74,11 @@ grep -nE "storage media is full|exceeds the storage quota|too large|Insufficient
 | `Download image error` with a traceback | ERROR | nova-compute | A download through a special handler (the RBD handler when `[glance] enable_rbd_download` is on) failed; Nova falls back to downloading through the Glance API. |
 | `Successfully transferred using <scheme>` | INFO | nova-compute | A special-handler download (for example `rbd`) succeeded. |
 | `Error during RBD image export: <error>` | ERROR | nova-compute | Exporting an image from Ceph RBD to a local file failed (`CouldNotFetchImage`). |
-| `Image signature verification failed for image <image-id>` | ERROR | nova-compute | With signature verification on, the downloaded data did not match. |
-| `Beginning live snapshot process` / `Beginning cold snapshot process` | INFO | nova-compute | A snapshot started (live: the instance keeps running; cold: it is paused or stopped meanwhile). |
-| `Snapshot extracted, beginning image upload` | INFO | nova-compute | The disk was copied locally; the upload to Glance starts. The time between this line and the next is the upload. |
+| `Image signature verification failed` (followed by `for image <image-id>` or `for image: <image-id>`, depending on the path) | ERROR | nova-compute | With signature verification on, the downloaded data did not match. |
+| `Beginning live snapshot process` / `Beginning cold snapshot process` | INFO | nova-compute | A snapshot started (live: the instance keeps running; cold: a running instance is suspended, a managed save, and resumed afterwards). |
+| `Snapshot extracted, beginning image upload` | INFO | nova-compute | The disk was copied locally; the upload to Glance starts. The time between this line and the next is the upload. With Ceph RBD ephemeral disks, Nova takes a direct snapshot in Ceph instead and never logs this line: its absence is normal there. |
+| `Performing standard snapshot because direct snapshot failed: <error>` | WARNING | nova-compute | The direct (RBD) snapshot was refused (`ImageUnacceptable`, `Forbidden`); Nova falls back to extracting and uploading the disk. |
+| `Failed to snapshot image` with a traceback | ERROR | nova-compute | The snapshot failed; the traceback names the cause. (`Failed to snapshot image because it was deleted`, WARNING: the image was deleted in Glance during the snapshot.) |
 | `Snapshot image upload complete` | INFO | nova-compute | Done. |
 
 Sources: `nova/image/glance.py`, `nova/virt/libvirt/driver.py`. All with `[instance: <uuid>]` where an instance is
