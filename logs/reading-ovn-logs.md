@@ -31,7 +31,7 @@ node) programs Open vSwitch from it. A port that never comes up has stopped at o
 has its own log. Messages are quoted from OVN 25.09.5, the Open vSwitch library (`lib/reconnect.c`, 3.6.0) that OVN
 daemons use for their database connections, and Neutron 2026.1.
 
-ML2/OVS deployments have their own page in this folder (the Neutron ML2/OVS page).
+ML2/OVS deployments: [reading the Neutron logs with ML2/OVS](reading-neutron-logs-ml2-ovs.md).
 
 ## Where the logs are
 
@@ -158,6 +158,7 @@ stopped; if Nova timed out, see [waiting for vif_plugged](../lifecycle/instance-
 
 ## Related
 
+- [Reading the Neutron logs with ML2/OVS](reading-neutron-logs-ml2-ovs.md)
 - [Waiting for vif_plugged](../lifecycle/instance-stuck-in-build-waiting-for-vif-plugged.md)
 - [Where the OpenStack logs are, and how to read one log line](where-openstack-logs-are-and-how-to-read-a-line.md)
 - [Logs index](README.md)
