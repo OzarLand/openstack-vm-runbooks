@@ -13,7 +13,6 @@ environment:
 risk: destructive
 confirmed_by:
   - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, RabbitMQ 4.2.9 with Khepri", date: 2026-10-27, note: "read-only quick checks on every node; cause 1 (one node stopped 29 s, systemctl), cause 2 (one node cut from the two others on port 25672 for 2.5 min) and cause 3 (memory alarm with set_vm_memory_high_watermark absolute 10MB, 4.5 min) injected and undone; cause 4 seen with nova_conductor/nova_scheduler stopped (#103 run); verification run. Not run: the partition recovery (stop and start of the untrusted side, healed by itself), a disk alarm, rabbitmq-reset-state, Mnesia" }
-  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, RabbitMQ 4.2.9 with Khepri", date: 2026-10-27, note: "read-only quick checks on every node; cause 1 (one node stopped 29 s, systemctl), cause 2 (one node cut from the two others on port 25672 for 2.5 min) and cause 3 (memory alarm with set_vm_memory_high_watermark absolute 10MB, 4.5 min) injected and undone; cause 4 seen with nova_conductor/nova_scheduler stopped (#103 run); verification run. Not run: the partition recovery (stop and start of the untrusted side, healed by itself), a disk alarm, rabbitmq-reset-state, Mnesia" }
 upstream_refs:
   - https://docs.openstack.org/kolla-ansible/2026.1/reference/message-queues/rabbitmq.html
   - https://www.rabbitmq.com/docs/4.2/partitions
