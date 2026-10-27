@@ -1,7 +1,7 @@
 ---
 title: Stale volume attachment. The volume is still in-use for an instance that was deleted or evacuated
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [cinder, nova, libvirt]
 deployment_methods: [kolla-ansible, any]
@@ -11,7 +11,8 @@ environment:
   storage: any Cinder backend
   os: any
 risk: destructive
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-26, note: "deletion case, full procedure on a disposable lab: stale attachment produced by cinder-api down during the deletion, removed with volume attachment delete; evacuation case not run (one compute)" }
 upstream_refs:
   - https://docs.openstack.org/nova/2026.1/admin/manage-volumes.html
   - https://docs.openstack.org/nova/2026.1/cli/nova-manage.html#volume-attachment-commands
@@ -20,7 +21,7 @@ upstream_refs:
   - https://docs.openstack.org/python-openstackclient/2026.1/cli/command-objects/volume-attachment.html
   - https://bugs.launchpad.net/nova/+bug/2004555
 authored_by: agent:ozarland-author
-last_verified: 2026-10-24
+last_verified: 2026-10-26
 ---
 
 # Stale volume attachment. The volume is still in-use for an instance that was deleted or evacuated
@@ -39,7 +40,7 @@ $ openstack volume show <volume-id> -c status -c attachments
 | status      | in-use                                         |
 | attachments | [{'server_id': '<server-id>', ...}]            |
 $ openstack server show <server-id>
-No server with a name or ID of '<server-id>' exists.
+No Server found for <server-id>
 ```
 
 ## Impact
@@ -57,6 +58,8 @@ With admin credentials:
 openstack volume show <volume-id> -c status -c attachments
 cinder --os-volume-api-version 3.27 attachment-list --all-tenants 1 --volume-id <volume-id>
 openstack --os-volume-api-version 3.27 volume attachment show <attachment-id>   # Properties: the connector, with the host
+#    On an iSCSI backend (LVM) its Properties also hold the CHAP auth_username and auth_password in clear text:
+#    redact them before you paste the output into a ticket or a chat.
 #    Not "openstack volume attachment list --volume-id": with python-openstackclient 9.0.0 the filter is ignored
 #    and every attachment of the cloud is listed. Check the Volume ID column before you delete anything.
 
@@ -99,6 +102,13 @@ For the deletion case, the `nova-api` and `nova-compute` logs at the time of the
 not tell Cinder: Cinder unreachable, or the compute down while the instance was deleted.
 
 What Nova 2026.1 did on a lab, which narrows down when this happens:
+
+- `cinder-api` down during a normal deletion: Nova deleted the instance anyway, in about 15 seconds, and left the
+  attachment in Cinder. This reproduces the symptom. `nova-compute.log` shows three `keystoneauth.session` warnings
+  `Failure: Unable to establish connection to http://<cinder-api>:8776/v3/attachments/<attachment-id>`, then
+  `Ignoring unknown exception for volume <volume-id>: Connection to cinder host failed: …`. Nova had already
+  disconnected the volume on the host (no iSCSI session left); the target stayed exported by the backend until
+  the attachment was deleted.
 
 - `cinder-volume` down during a normal deletion: the instance stayed `deleting` (7 minutes in the longest run), and
   the deletion and the detach finished once `cinder-volume` was back. No stale attachment.
@@ -260,7 +270,12 @@ instance's guest sees its disk.
 On a lab: OpenStack 2026.1, Kolla-Ansible 22.2.0, all-in-one (one compute), Cinder LVM over iSCSI,
 python-openstackclient 9.0.0.
 
-- **Deletion case.** Real outages did not leave a stale attachment (see Diagnosis). The symptom was produced by
+- **Deletion case, real outage.** `cinder-api` stopped (`systemctl stop kolla-cinder_api-container.service`) while the
+  instance was deleted: the instance was gone in about 15 seconds, the volume stayed `in-use` with one `attached`
+  record, `nova-manage volume_attachment show` answered `No volume Block Device Mapping with id <volume-id>.`, and
+  `volume attachment delete` (cause 1) made the volume `available` in about 2 seconds, with the backend's iSCSI target
+  removed. Outages of `cinder-volume` or of the compute did not leave a stale attachment (see Diagnosis).
+- **Deletion case, synthetic.** The symptom was also produced by
   creating a Cinder attachment that Nova did not know (`volume attachment create --connect` with the host's
   connector, then `volume attachment complete`) and deleting the instance:
   - the volume stayed `in-use`, attached to the deleted server;
