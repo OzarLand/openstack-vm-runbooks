@@ -67,10 +67,10 @@ The useful URIs: `GET /allocation_candidates?...` (the scheduler asks where the 
 | Status on the request line | Placement's own line (message text) | Level | What it means |
 |---|---|---|---|
 | 409 on `PUT /allocations/...` | `Over capacity for <rc> on resource provider <rp>. Needed: <n>, Used: <n>, Capacity: <n>` | WARNING | The claim does not fit: `Capacity` is `(total - reserved) * allocation_ratio`. Another instance took the room between scheduling and claim, or the inventory changed. |
-| 409 (or 400) on `PUT /allocations/...` | `Allocation for <rc> on resource provider <rp> violates min_unit, max_unit, or step_size. Requested: <n>, min_unit: <n>, max_unit: <n>, step_size: <n>` | WARNING | The flavor asks for more of one resource than a single provider allows in one allocation (`max_unit`). |
+| 409 on `PUT /allocations/...` | `Allocation for <rc> on resource provider <rp> violates min_unit, max_unit, or step_size. Requested: <n>, min_unit: <n>, max_unit: <n>, step_size: <n>` | WARNING | The flavor asks for more of one resource than a single provider allows in one allocation (`max_unit`). |
 | 409 on allocations or inventories | `Exceeded retry limit of <n> on allocations write` | WARNING | Concurrent writes to the same providers kept conflicting (`allocation_conflict_retry_count`, default 10). |
 | 200 on `PUT .../inventories` | `Resource provider <uuid> is now over-capacity for <rc>` | WARNING | A compute reported less capacity than is already allocated (allocation ratio lowered, reserved raised, disk shrank). Existing instances stay; new claims on that resource fail. |
-| 409 on allocations | — (in Nova: `consumer generation conflict`) | — | Two writers updated the same consumer's allocations; the second must re-read. Nova retries some of these. |
+| 409 on allocations, body detail `consumer generation conflict` | — | — | Two writers updated the same consumer's allocations; the second must re-read. Nova retries some of these; when it gives up it raises `AllocationUpdateFailed` or `AllocationMoveFailed`, which is what its log shows. |
 | 500 | `Placement API unexpected error: <exception>` with a traceback | ERROR | An unhandled exception, often the database underneath. |
 
 Sources: `placement/objects/allocation.py`, `placement/objects/resource_provider.py`, `placement/fault_wrap.py`,
@@ -93,7 +93,7 @@ Source: `nova/scheduler/manager.py`. What to do next: [No valid host with free c
 ### nova-compute (the report client)
 
 The compute's resource tracker talks to Placement through Nova's report client (`nova/scheduler/client/report.py`).
-Its error lines start with **Placement's request id in brackets**, which you can grep in `placement-api.log`:
+Most of its error lines start with **Placement's request id in brackets**, which you can grep in `placement-api.log`:
 
 | Line (message text) | Level | What it means |
 |---|---|---|
@@ -101,10 +101,10 @@ Its error lines start with **Placement's request id in brackets**, which you can
 | `[<placement-req-id>] Failed to retrieve resource provider tree from placement API for UUID <uuid>. Got <status>: <error text>.` and the other `[<id>] Failed to retrieve …` lines | ERROR | A read from Placement failed. |
 | `[<placement-req-id>] Created resource provider record via placement API for resource provider with UUID <uuid> and name <name>.` | INFO | The compute registered itself (first start, or after its provider was deleted). |
 | `Failed to save allocation for <consumer>. Got HTTP <status>: <text>` | WARNING | An allocation write from the compute side (for example during a move) was refused. |
-| `Unable to post allocations for consumer <uuid> (<status> <text>)` / `Unable to delete allocation for <type> <uuid>: (<status> <text>)` | WARNING or ERROR | An allocation could not be written or removed; leftovers become phantom usage. |
+| `Unable to post allocations for consumer <uuid> (<status> <text>)` / `Unable to delete allocation for <type> <uuid>: (<status> <text>)` | WARNING | An allocation could not be written or removed; leftovers become phantom usage. |
 | `Placement API service is not responding.` | WARNING (ERROR at client start) | Nova cannot connect to Placement: the inventory is not refreshed while it lasts. |
 | `Placement service credentials do not work.` | WARNING (ERROR at client start) | The `[placement]` credentials in `nova.conf` are refused by Keystone. |
-| `The placement API endpoint was not found.` | ERROR | No Placement endpoint in the catalog for the configured interface and region. |
+| `The placement API endpoint was not found.` | ERROR when the client is created, otherwise a rate-limited WARNING | No Placement endpoint in the catalog for the configured interface and region. |
 
 Sources: `nova/scheduler/client/report.py`.
 
