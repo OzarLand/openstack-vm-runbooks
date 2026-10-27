@@ -201,7 +201,8 @@ less /var/log/qemu/qemu-guest-<qemu-pid>.log
 ```
 
 Without that configuration, a stalled Ceph cluster shows on the compute only indirectly: the guest's own I/O errors or
-hang (its console log), QEMU pausing the instance on I/O errors (see the libvirt and QEMU logs page), and on the Ceph
+hang (its console log), QEMU pausing the instance on I/O errors (see
+[the libvirt and QEMU logs](libvirt-and-qemu-logs.md)), and on the Ceph
 side, slow requests in the cluster's health.
 
 ## A short reading order for "an instance with a volume froze or got I/O errors"

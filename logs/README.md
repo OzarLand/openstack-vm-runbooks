@@ -20,6 +20,7 @@ These pages explain how to read; the fixes are in the runbooks of the other fold
 | [Reading the kernel log of a compute (dmesg, journalctl -k)](kernel-messages-on-computes.md) | journalctl -k and dmesg, then the OOM killer, KVM, NIC link flaps, bonding and LACP, over-MTU drops, disk and filesystem errors, conntrack table full, hung tasks | 2026.1 | draft |
 | [Reading the libvirt and QEMU logs of a compute, and the guest console log](libvirt-and-qemu-logs.md) | libvirtd and virtqemud logs, filters and debug on and off, the per-instance QEMU log (start, migration, shutdown reasons, QEMU and KVM messages), the guest console log | 2026.1 | draft |
 | [Reading the Open vSwitch logs (ovs-vswitchd, ovsdb-server) and changing their levels with ovs-appctl](open-vswitch-logs.md) | Where the logs are, the vlog line format, messages about ports, controller and database connections and an overloaded daemon, ovs-appctl vlog/list and vlog/set | 2026.1 | draft |
+| [Reading the storage logs of a compute. iscsid, multipathd, NFS client messages and Ceph client (librbd) logs](host-storage-logs-iscsi-multipath-nfs-rbd.md) | iscsid and kernel iSCSI lines with error codes and timers, multipathd path and queueing lines, NFS not responding lines, the Ceph client admin socket and log on computes | 2026.1 | draft |
 
 ## Planned
 
