@@ -70,7 +70,7 @@ The worker configures an amphora through the amphora agent's REST API (`amphorae
 | `Connection retries (currently set to <n>) exhausted.  The amphora is unavailable. Reason: <error>` | ERROR | The amphora never answered: it did not boot (Nova), has no management network address (Neutron), or the controllers cannot route to the management network. The create or failover fails. |
 
 When an amphora build fails in Nova or Neutron, the worker's traceback names the Nova or Neutron error; continue
-with Nova's logs for the amphora's server id (the Nova page of this folder).
+with [Nova's logs](reading-nova-logs.md) for the amphora's server id.
 
 ## Reading an Octavia problem in order
 
@@ -88,6 +88,7 @@ with Nova's logs for the amphora's server id (the Nova page of this folder).
 
 ## Related
 
+- [Reading the Nova logs](reading-nova-logs.md)
 - [Where the OpenStack logs are, and how to read one log line](where-openstack-logs-are-and-how-to-read-a-line.md)
 - [Logs index](README.md)
 
