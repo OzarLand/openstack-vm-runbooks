@@ -29,6 +29,7 @@ upstream_refs:
   - https://github.com/openstack/nova/blob/stable/2026.1/nova/virt/libvirt/driver.py
   - https://github.com/openstack/nova/blob/stable/2026.1/nova/compute/manager.py
   - https://github.com/openstack/nova/blob/stable/2026.1/nova/virt/event.py
+  - https://github.com/openstack/nova/blob/stable/2026.1/nova/db/main/api.py
   - https://github.com/openstack/kolla-ansible/blob/stable/2026.1/ansible/roles/nova-cell/templates/libvirtd.conf.j2
   - https://github.com/openstack/kolla-ansible/blob/stable/2026.1/ansible/roles/nova-cell/templates/qemu.conf.j2
   - https://github.com/openstack/kolla-ansible/blob/stable/2026.1/ansible/roles/nova-cell/defaults/main.yml
@@ -174,8 +175,11 @@ daemon, after which the configured timeout applies again. Delete the debug file 
 
 > ⚠️ **State-changing.** Restarts the libvirt daemon of the compute. While it restarts, libvirt operations on this
 > compute (start, stop, new instances, migrations) wait. Precondition: no migration is in progress to or from the
-> compute: `openstack server migration list --host <compute>`, on a controller with admin credentials, shows none in
-> `queued`, `preparing`, `running` or `post-migrating` (filtering on `--status running` alone misses the others), and on Kolla-Ansible `nova_libvirt` runs in the host's PID and cgroup namespaces (quick check 3 of
+> compute: `openstack server migration list --host <compute>`, on a controller with admin credentials, shows none
+> whose status is other than `confirmed`, `reverted`, `error`, `failed`, `completed`, `cancelled` or `done` (Nova's
+> own definition of in progress, `migration_get_in_progress_by_host_and_node`; it covers `accepted`, `queued`,
+> `preparing`, `running`, `post-migrating`, and `pre-migrating`, `migrating` and `finished` for cold migrations and
+> resizes; filtering on `--status running` alone misses most of them), and on Kolla-Ansible `nova_libvirt` runs in the host's PID and cgroup namespaces (quick check 3 of
 > [restarting nova_libvirt](../lifecycle/restarting-nova-libvirt-does-not-stop-instances.md) prints `host host`);
 > otherwise every instance of the compute can stop or a migration can fail. Undo: revert the setting and restart again,
 > under the same precondition.
