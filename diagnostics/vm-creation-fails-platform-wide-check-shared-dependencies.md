@@ -1,7 +1,7 @@
 ---
 title: VM creation fails platform-wide while instances keep running. Check the shared dependencies first
 kind: diagnostic
-status: lab-verified
+status: draft
 openstack_releases: ["2026.1"]
 components: [nova, neutron, rabbitmq, mariadb, memcached, haproxy, keystone]
 deployment_methods: [any]
@@ -94,7 +94,8 @@ SHOW STATUS LIKE 'wsrep_flow_control_paused';    -- fraction of time replication
 
 **Kolla-Ansible:** `sudo docker exec mariadb mariadb -uroot -p<database_password> -e "SHOW STATUS LIKE 'wsrep%'"` on a
 controller (the 2026.1 image has no `mysql` command; `-it` fails when there is no terminal; the password is
-`database_password` in `/etc/kolla/passwords.yml` on the deploy host). Run it
+`database_password` in `/etc/kolla/passwords.yml` on the deploy host; `-p<password>` on the command line puts it in
+the process list and the shell history: clear the history line, or run it from a root-only script). Run it
 on every node: a node in `non-Primary` while the others are `Primary` is a node that lost quorum.
 
 ### RabbitMQ
@@ -129,7 +130,7 @@ of a failed boot. Typical confirmations: `AMQP server on ... is unreachable`, `M
 | Cause | How to tell |
 |---|---|
 | RabbitMQ network partition | `cluster_status` lists partitions (Mnesia), or, with Khepri, the nodes disagree on the running nodes while *Network Partitions* stays `(none)`; RPC timeouts in every service; agents report up but nothing moves |
-| RabbitMQ memory or disk alarm | `check_alarms`; publishers block: reads answer, but every compute goes `down` and every agent dead, and a create hangs until the load balancer gives up (502 after 60 s on Kolla-Ansible) |
+| RabbitMQ memory or disk alarm | `check_alarms`; publishers block: reads answer, but every compute can go `down` (both did on that lab) and every agent dead, and a create hangs until the load balancer gives up (502 after 60 s, seen in the lab run of [RabbitMQ partition or alarm](../recovery/rabbitmq-partition-or-alarm-rpc-timeouts.md) on a two-compute Kolla-Ansible lab) |
 | Galera node out of Primary, or whole cluster non-Primary | `wsrep_cluster_status`; services log WSREP errors |
 | Galera flow control stalled | `wsrep_flow_control_paused` near 1; everything slow, nothing failing outright |
 | Certificate expired, Fernet keys inconsistent | Every API call fails authentication; dated exactly |

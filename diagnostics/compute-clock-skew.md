@@ -59,7 +59,14 @@ Run on each host (controllers and computes):
 ```bash
 # 1. Is the clock synchronised, and is a time service running?
 timedatectl
+```
 
+> ⚠️ **State-changing when systemd-timesyncd is only stopped.** Check 2 then starts systemd-timesyncd over D-Bus: it
+> steps the clock, and the offset can no longer be measured. Precondition: measure the offset first with the `date`
+> comparison below, and skip check 2 when `timedatectl` shows `NTP service: inactive`. Undo: `sudo systemctl stop
+> systemd-timesyncd` stops the service, but does not undo the step.
+
+```bash
 # 2. Details of the synchronisation (systemd-timesyncd). Not read-only if the service is only stopped: see below.
 timedatectl timesync-status
 #    with chrony instead:
@@ -160,7 +167,8 @@ its first synchronisation.
 
 > ⚠️ **State-changing.** Starts time synchronisation on this host; the clock jumps by the offset (on the lab, 300 s
 > forward). Affects this host only: its log timestamps jump, and timers of its services see the jump. Precondition:
-> a reachable time source. Undo: stop the service (the clock then drifts again).
+> a reachable time source. Undo: `sudo systemctl disable --now systemd-timesyncd` (the step enables it across
+> reboots; the clock then drifts again).
 
 ```bash
 sudo systemctl start systemd-timesyncd
