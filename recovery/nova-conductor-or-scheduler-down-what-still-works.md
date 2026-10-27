@@ -51,9 +51,9 @@ database.
 
 ### nova-scheduler down on every controller
 
-- New instances stay in `BUILD` / `scheduling` for about a minute (`rpc_response_timeout`), then go to `ERROR`. Their fault is the
-  exception's class name, not `No valid host` (`exception_to_dict` in `nova/compute/utils.py` keeps only the class
-  name of a non-Nova exception):
+- New instances stay in `BUILD` / `scheduling` for about a minute (`rpc_response_timeout`), then go to `ERROR`.
+  Their fault is the exception's class name, not `No valid host` (`exception_to_dict` in `nova/compute/utils.py`
+  keeps only the class name of a non-Nova exception):
 
   ```text
   $ openstack server show <server-id> -c status -c fault
@@ -79,7 +79,7 @@ database.
 | `openstack server list`, `show`, API reads | work (nova-api reads the databases itself) | work |
 | New instances | wait in `BUILD`, finish when conductor is back | fail after about `rpc_response_timeout` (60 s), `ERROR` in cell0 |
 | Resize, cold migration, live migration without a host, evacuate | wait in the queue | wait, then fail |
-| Start, stop, reboot of existing instances | sent to the compute, which needs the conductor for its database updates: they time out after `rpc_response_timeout` and can leave a `task_state` set (clear it with `openstack server set --state active` or `--state error` once the conductor is back, then repeat the action) | work |
+| Start, stop, reboot of existing instances | sent to the compute, which needs the conductor for its database updates: they time out after `rpc_response_timeout` and can leave a `task_state` set (see *Resolution*, *A task state left set*) | work |
 | Compute services | reported `down` after `service_down_time` (60 s) | stay `up` |
 | Danger | deleting an instance while its compute is reported `down` is a local delete (see Diagnosis) | none beyond failed requests |
 
@@ -128,7 +128,8 @@ prepares this call with `timeout=CONF.long_rpc_timeout` (1800 s) and `call_monit
 (60 s). With a call monitor, oslo.messaging raises `MessagingTimeout` as soon as no heartbeat has come for
 `call_monitor_timeout`, and only a scheduler that picked up the message sends heartbeats. `long_rpc_timeout` bounds a
 call that a live scheduler is working on. So with no scheduler consuming, a build fails after about 60 s: the
-conductor logs `Failed to schedule instances` and buries the instance in cell0 (`_bury_in_cell0` in `nova/conductor/manager.py`): it creates the instance record
+conductor logs `Failed to schedule instances` and buries the instance in cell0 (`_bury_in_cell0` in
+`nova/conductor/manager.py`): it creates the instance record
 in the cell0 database with `vm_state` `error` and the exception as fault.
 
 ### cell0, where failed builds live
@@ -148,7 +149,8 @@ With the conductor down, every compute is `down` for Nova. Deleting an instance 
 removes the record, its ports, attachments and allocations, but the guest keeps running on its compute until
 `nova-compute` finds it and applies `[DEFAULT] running_deleted_instance_action` (`reap` by default). With the
 conductor down, the computes cannot run that check either; it runs again at the next `nova-compute` start and every
-`running_deleted_instance_poll_interval` (1800 s) after. Avoid deletes until the conductor is back and the computes are `up`.
+`running_deleted_instance_poll_interval` (1800 s) after. Avoid deletes until the conductor is back and the computes
+are `up`.
 
 ## Possible causes
 
@@ -201,6 +203,29 @@ openstack server show <server-id> -c OS-EXT-SRV-ATTR:host -c fault -c created
 openstack server delete <server-id>
 ```
 
+### A task state left set
+
+A start, stop or reboot sent while the conductor was down can leave the instance with a `task_state` (`powering-off`,
+`rebooting`...) that nothing clears. Once the conductor is back, check what the guest really does:
+
+```bash
+openstack server show <server-id> -c status -c OS-EXT-STS:power_state -c OS-EXT-STS:task_state
+```
+
+Choose the state from the power state: `active` if the guest runs (`Running`), otherwise `error`, then start it or
+hard-reboot it. When a stop timed out, the compute has often powered the guest off already: setting `active` would
+leave a record that says it runs.
+
+> ⚠️ **State-changing.** Changes the instance record only (its `vm_state`, and clears `task_state`); nothing happens
+> to the guest. Precondition: the conductor is back and the power state has been checked as above. Undo: set the
+> other state with the same command.
+
+```bash
+openstack server set --state active <server-id>     # the guest runs
+openstack server set --state error <server-id>      # the guest is off, then:
+openstack server reboot --hard <server-id>
+```
+
 ## Verification
 
 > ⚠️ **State-changing.** The last two commands create and delete a test instance. Needs quota, an image, a flavor
@@ -218,8 +243,10 @@ openstack server delete --wait <test-name>
 ## Validity and limits
 
 - Written from Nova 2026.1: `nova/conductor/api.py` (`wait_until_ready`), `nova/conductor/manager.py`
-  (`schedule_and_build_instances`, `_bury_in_cell0`), `nova/compute/utils.py` (`exception_to_dict`), `nova/scheduler/rpcapi.py` (`select_destinations` with
-  `long_rpc_timeout` and `call_monitor_timeout`), `nova/servicegroup/drivers/db.py`, `nova/conf/rpc.py`, `nova/conf/api.py`
+  (`schedule_and_build_instances`, `_bury_in_cell0`), `nova/compute/utils.py` (`exception_to_dict`),
+  `nova/scheduler/rpcapi.py` (`select_destinations` with
+  `long_rpc_timeout` and `call_monitor_timeout`), `nova/servicegroup/drivers/db.py`, `nova/conf/rpc.py`,
+  `nova/conf/api.py`
   (`list_records_by_skipping_down_cells`), `nova/compute/api.py` (local delete), and Kolla-Ansible 2026.1 (`nova`
   and `nova-cell` role defaults: `nova_scheduler`, `nova_conductor`, `nova_super_conductor` only with
   `enable_cells`). The MessagingTimeout text is oslo.messaging's. Not reproduced on a lab.
@@ -232,7 +259,8 @@ openstack server delete --wait <test-name>
 ## Related
 
 - [RPC timeouts caused by RabbitMQ](rabbitmq-partition-or-alarm-rpc-timeouts.md)
-- [Control plane down: what still works for running instances](../diagnostics/control-plane-down-what-still-works-for-instances.md)
+- [Control plane down: what still works for running
+  instances](../diagnostics/control-plane-down-what-still-works-for-instances.md)
 - [No valid host was found, although capacity exists](../scheduling/no-valid-host-with-free-capacity.md): the other
   common way into cell0.
 
