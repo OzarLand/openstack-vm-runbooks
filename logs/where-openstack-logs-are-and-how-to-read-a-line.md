@@ -116,7 +116,7 @@ Things that surprise people on Kolla-Ansible:
 ```bash
 # sudo: the files are readable by root only, and so is the Docker socket
 sudo tail -f /var/log/kolla/nova/nova-compute.log
-sudo grep -E ' (ERROR|CRITICAL) ' /var/log/kolla/nova/nova-compute.log | tail -20
+sudo grep -nE ' [0-9]+ (ERROR|CRITICAL) ' /var/log/kolla/nova/nova-compute.log | tail -20
 # the container engine's view of one container: start-up, crashes, restarts
 sudo docker ps -a --filter name=nova_compute
 sudo docker logs --tail 50 nova_compute     # podman logs on a Podman deployment
@@ -302,8 +302,9 @@ sudo grep -n '^debug' /etc/kolla/nova-compute/nova.conf     # expect debug = Fal
 sudo df -h "$(sudo readlink -f /var/log/kolla)"             # room for the extra log volume (Docker or Podman)
 ```
 
-> ⚠️ **State-changing.** Edits the service's configuration on this host and restarts its container. The restart
-> interrupts the service for a few seconds: requests in flight to it are lost or retried, and for `nova_compute` the
+> ⚠️ **State-changing.** Edits the service's configuration on this host and restarts its container. The restart can
+> take about a minute (62 s on the lab), because the stop waits up to `docker_graceful_timeout` (60 s by default);
+> the service is unavailable meanwhile: requests in flight to it are lost or retried, and for `nova_compute` the
 > instances keep running (see [nova-compute down, instances still running](../recovery/nova-compute-down-instances-still-running.md)).
 > Do it on one host only. Undo with the commands below, or with the next `kolla-ansible reconfigure`, which rewrites
 > the file from its template.
@@ -355,7 +356,7 @@ dump a *Guru Meditation report* (GMR): version, configuration, the stack of ever
 **Any:**
 
 ```bash
-kill -USR2 <pid-of-the-service>
+sudo kill -USR2 <pid-of-the-service>
 ```
 
 On Kolla-Ansible, standard error of the service is the container's output, so the report appears in

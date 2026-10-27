@@ -84,7 +84,9 @@ dedicated line, only the 404 to the caller. That string is the one to look for i
 # Kolla-Ansible, on each controller
 sudo grep -c "Authorization failed" /var/log/kolla/keystone/keystone.log
 sudo grep "Authorization failed" /var/log/kolla/keystone/keystone.log | sed -E 's/.* from ([^:]+): .*/\1/' | sort | uniq -c | sort -rn | head
-#   who gets refused most (the address after "from"; the exception follows it on the line)
+#   who gets refused most (the address after "from"; the exception follows it on the line).
+#   A line with no ": <exception>" after the address is printed whole, and an IPv6 address
+#   is cut at its first ":"; read those lines by eye.
 ```
 
 ## In the other services: keystonemiddleware
