@@ -1,7 +1,7 @@
 ---
 title: Requests fail with 401 for tokens that should be valid. Fernet keys differ between Keystone nodes, or a clock is off
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [keystone, nova, neutron]
 deployment_methods: [kolla-ansible]
@@ -11,14 +11,15 @@ environment:
   storage: any
   os: any
 risk: destructive
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, multinode, 3 controllers (keystone x3, HAProxy), HTTP endpoints", date: 2026-10-27, note: "causes 1, 2 and 3 (clock behind with a revocation event, clock ahead by 2 days) injected on a disposable lab; Quick checks 1, 2, 3, the keystone_ssh repair (systemctl), the backups, fernet-push.sh from a chosen node and Verification run; kolla-ansible reconfigure -t keystone not run; cause 4 not set up on its own; chronyc makestep not run (systemd-timesyncd host, timedatectl set-ntp true used); no TLS backend" }
 upstream_refs:
   - https://docs.openstack.org/keystone/2026.1/admin/fernet-token-faq.html
   - https://docs.openstack.org/keystone/2026.1/admin/tokens-overview.html
   - https://docs.openstack.org/keystonemiddleware/latest/middlewarearchitecture.html
   - https://docs.openstack.org/kolla-ansible/2026.1/reference/shared-services/keystone-guide.html
 authored_by: agent:ozarland-author
-last_verified: 2026-10-26
+last_verified: 2026-10-27
 ---
 
 # Requests fail with 401 for tokens that should be valid. Fernet keys differ between Keystone nodes, or a clock is off
@@ -48,18 +49,26 @@ Commands that go through keystoneauth print `The request you have made requires 
 (Request-ID: req-<request-id>)`. With several Keystone nodes behind HAProxy, the failure is often intermittent: the
 same command works, then fails, then works, depending on which node validated the token. With diverged keys, a
 client that gets a new token (most CLI runs do) works for 10 minutes, then the same token fails on some nodes.
+Intermittent is not the rule: on a three-controller lab, a token 11 minutes old from the node with the diverged key
+got 401 on 8 Nova calls out of 8 through the VIP, in 3 seconds.
 
 On the service side, `keystonemiddleware.auth_token` logs one warning per rejected token (in
 `/var/log/kolla/nova/nova-api.log`, `/var/log/kolla/neutron/neutron-server.log` and so on):
 
 ```text
-WARNING keystonemiddleware.auth_token [...] Authorization failed for token
+WARNING keystonemiddleware.auth_token [...] Authorization failed for token: …auth_token._exceptions.InvalidToken: Token authorization failed
 ```
 
 That is the only line at the default log levels. The INFO lines that follow it in the source (`Identity response:
 {"error": {"code": 404, "message": "Could not recognize Fernet token", ...}}` or `... "Failed to validate
 token" ...`) are hidden by oslo.log's default `keystonemiddleware=WARN`, and Keystone logs a `404` on token
-validation at DEBUG only. To see which of the two it is, use *Quick checks* 3.
+validation at DEBUG only. To see which of the two it is, use *Quick checks* 3. Keystone does log a request whose own
+`X-Auth-Token` it cannot read (as in *Quick checks* 3), in `/var/log/kolla/keystone/keystone.log`:
+
+```text
+INFO keystone.server.flask.request_processing.middleware.auth_context [...] Invalid user token
+WARNING keystone.server.flask.application [...] Authorization failed. The request you have made requires authentication. from <address>: keystone.exception.Unauthorized: [...]
+```
 
 ## Impact
 
@@ -83,9 +92,11 @@ sudo docker exec keystone_fernet bash -c 'cd /etc/keystone/fernet-keys && md5sum
 
 # 2. Is the key distribution working? keystone_fernet's health check runs fernet-node-sync.sh --check (key 0
 #    present and owned by keystone) and fernet-push.sh --check (an rsync dry run to the other nodes).
-sudo docker ps --filter name=keystone --format '{{.Names}} {{.Status}}'
+sudo docker ps -a --filter name=keystone --format '{{.Names}} {{.Status}}'
 #    keystone_fernet "(unhealthy)": key 0 missing or with the wrong owner, or the push to the other nodes fails
-#    (keystone_ssh down, SSH key, network).
+#    (keystone_ssh down, SSH key, network). A node whose keystone_ssh is down stays healthy itself: its peers,
+#    which cannot push to it, turn unhealthy (on the lab, within 90 s of the stop). Without -a, a stopped
+#    keystone_ssh is not listed at all.
 
 # 3. Which node rejects the token? Validate one token against each Keystone backend directly, bypassing HAProxy
 #    (needs admin credentials in the environment). The token must be older than the token cache TTL
@@ -96,12 +107,20 @@ for n in <controller-1-api-address> <controller-2-api-address> <controller-3-api
   echo "$n $(curl -s -o /dev/null -w '%{http_code}' -H "X-Auth-Token: $TOKEN" -H "X-Subject-Token: $TOKEN" \
     http://$n:5000/v3/auth/tokens)"
 done
-#    expected: 200 everywhere. A 404 on one node is the problem. The body says why (drop -o /dev/null to see it):
-#    "Could not recognize Fernet token" (that node does not have the key) or "Failed to validate token"
-#    (expired or revoked, as seen by that node's clock). Use https:// if kolla_enable_tls_backend is set.
+#    expected: 200 everywhere. A 401 on one node is the problem: the token is also the caller (X-Auth-Token), so a
+#    node that cannot read it refuses the request itself, "The request you have made requires authentication".
+#    To get the 404 and its reason, send a fresh admin token as X-Auth-Token and keep the old one as
+#    X-Subject-Token (drop -o /dev/null to see the body): "Could not recognize Fernet token" (that node does not
+#    have the key) or "Failed to validate token" (expired or revoked, as seen by that node's clock).
+#    Only the first answer for a token is reliable: a node that validates it writes it back to the shared cache
+#    for another 600 s, and every node asked after it answers 200 from the cache. On the lab, this loop as written
+#    gave 200 on the three nodes with diverged keys. Put the node you suspect first, or repeat the check with
+#    another aged token and another node first. Use https:// if kolla_enable_tls_backend is set.
 
 # 4. Clocks of the Keystone nodes
 chronyc tracking | grep -e "System time" -e "Leap status"
+#    Hosts that use systemd-timesyncd (the Ubuntu default) have no chronyc:
+timedatectl show -p NTPSynchronized --value     # yes / no
 date -u +%FT%TZ
 ```
 
@@ -155,7 +174,9 @@ still validates everywhere.
 Tokens break only when a node's primary is missing from another node's set:
 
 - a second rotation on the same node without a push in between: its new primary is its own new `0`, which no other
-  node has;
+  node has. With three nodes and the default interval (`max_active_keys = 3`), that rotation also purges the key
+  that is still the other nodes' primary (`Excess key to purge: /etc/keystone/fernet-keys/1` in its log), so the
+  node rejects their tokens too: the failure goes both ways (seen on the lab);
 - rotations on two nodes without pushing, where at least one of them rotates twice (two nodes that each rotate once
   from the same pushed set promote the same key `0`, so they share a primary);
 - keys created independently: a node rebuilt with `fernet_setup`, a key volume restored from a backup, keys copied by
@@ -243,14 +264,17 @@ primary key is the one you keep.
 
 **Repair the push path** if it is broken (cause 2):
 
-> ⚠️ **State-changing.** Starts the SSH endpoint that receives the keys on that node. Undo: `sudo docker stop
-> keystone_ssh`.
+> ⚠️ **State-changing.** Starts the SSH endpoint that receives the keys on that node. Undo: `sudo systemctl stop
+> kolla-keystone_ssh-container.service`.
 
 ```bash
-sudo docker start keystone_ssh       # on each peer where it is stopped
+sudo systemctl start kolla-keystone_ssh-container.service    # on each peer where it is stopped
 ```
 
-Then check that `keystone_fernet` becomes healthy on the source node.
+On Kolla-Ansible 2026.1 each container runs under a systemd unit. `sudo docker start keystone_ssh` also starts the
+container, but leaves `kolla-keystone_ssh-container.service` inactive (seen on the lab); `systemctl start` then
+attaches the unit to the running container. Then check that `keystone_fernet` becomes healthy on the source node (10
+seconds on the lab).
 
 **Back up every node's keys**, into a directory only root can read:
 
@@ -308,8 +332,17 @@ skew.
 sudo chronyc makestep
 ```
 
-Tokens issued by that node while it was behind stay rejected after a revocation event until they expire or real time
-catches up; users who hit it get a new token by authenticating again.
+On a host with systemd-timesyncd instead of chrony (no `chronyc`), turn NTP back on; timesyncd steps the clock at
+its first synchronisation (on the lab, 2 seconds after the command, for a clock 300 seconds behind):
+
+```bash
+sudo timedatectl set-ntp true
+timedatectl show -p NTPSynchronized --value     # yes
+```
+
+Tokens issued by that node while it was behind stay rejected after a revocation event until they expire (on the lab,
+still `404 Failed to validate token` on every node after the fix); users who hit it get a new token by
+authenticating again.
 
 ### For cause 4: nothing to fix on Keystone
 
@@ -334,6 +367,31 @@ for i in 1 2 3 4 5 6; do openstack server list --limit 1 -f value -c ID >/dev/nu
 The `Authorization failed for token` warnings stop in the service logs, apart from clients that still hold old
 tokens and authenticate again.
 
+## Lab observations
+
+On Kolla-Ansible 22.2.0 (2026.1), three controllers behind HAProxy, Ubuntu 24.04, HTTP internal endpoints:
+
+- **Causes 2 then 1**: `keystone_ssh` stopped on controller-1 (`systemctl stop`), then Kolla's `fernet-rotate.sh`
+  run twice by hand on controller-3; both pushes failed (`ssh: connect to host <controller-1> port 8023: Connection
+  refused`). After the first rotation the lists differed but every token validated everywhere, also 10 minutes
+  later. After the second, controller-3 held `{0, 2, 3}` and the others `{0, 1}`. A fresh token from controller-3
+  validated on the three nodes (cache); 618 seconds later, *Quick checks* 3 gave 401 on controller-1 and -2 and 200
+  on controller-3, and a controller-1 token got 401 on controller-3. With a fresh caller token the 404 read `Could
+  not recognize Fernet token`. Nova through the VIP: 401 on 8 calls out of 8.
+- `keystone_fernet` turned unhealthy on controller-2 and -3 (the senders), not on controller-1.
+- **Resolution**: `keystone_ssh` back, keys backed up, `fernet-push.sh` from controller-3 (rotated last): identical
+  sets at once, `keystone_fernet` healthy, *Verification* passed (6 CLI runs out of 6 through the VIP, tokens
+  issued after the push 200 on every node after 10 minutes). A controller-1 token issued 24 seconds before the push
+  got `404 Could not recognize Fernet token` on every node once out of the cache: the loss the push warning
+  describes.
+- **Cause 3**: controller-2 set 300 seconds behind, then the test user's password changed through controller-1: a
+  fresh token for that user from controller-2 got `404 Failed to validate token` on the three nodes, one from
+  controller-1 got 200. Then controller-2 set 2 days ahead: it refused every token (401 when the token is also the
+  caller), the other two accepted them.
+- Not run: `kolla-ansible reconfigure -i <inventory> -t keystone` (the second push method); cause 4 was not set up
+  on its own (only seen on the token issued before the push); `chronyc makestep` (no chrony on the lab hosts:
+  `timedatectl set-ntp true` instead); TLS on the backends (`kolla_enable_tls_backend`).
+
 ## Validity and limits
 
 - Written from Keystone 2026.1 (`keystone/token/token_formatters.py`, `keystone/token/providers/fernet/core.py`,
@@ -343,7 +401,9 @@ tokens and authenticate again.
   keystoneauth1 for the client messages, and Kolla-Ansible 2026.1 (the `keystone` role: `keystone.conf.j2`,
   `fernet-push.sh.j2`, `fernet-rotate.sh.j2`, `fernet-healthcheck.sh.j2`, `distribute_fernet.yml`, `config.yml`, and
   `group_vars/all/keystone.yml`, `files/fernet_rotate_cron_generator.py`, `fernet-node-sync.sh.j2`), `keystone/conf/token.py`
-  and oslo.cache 4.1.1 for the token cache. Not reproduced on a lab.
+  and oslo.cache 4.1.1 for the token cache. Causes 1, 2 and 3 and the push from a chosen node reproduced on a
+  three-controller Kolla-Ansible 22.2.0 lab (see *Lab observations*); `kolla-ansible reconfigure`, TLS backends and
+  cause 4 on its own were not.
 - Kolla-Ansible only. Other deployment tools distribute Fernet keys their own way (shared storage, configuration
   management); the diagnosis applies, the commands and container names do not.
 - The validation call of *Quick checks* 3 uses an admin token as both the caller and the subject token, which the

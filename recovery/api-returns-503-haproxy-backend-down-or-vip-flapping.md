@@ -1,7 +1,7 @@
 ---
 title: The API returns 503, an HAProxy backend is DOWN, or the VIP flaps or sits on two nodes
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [haproxy, keepalived, keystone, nova, neutron]
 deployment_methods: [kolla-ansible]
@@ -11,7 +11,9 @@ environment:
   storage: any
   os: any
 risk: state-changing
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, HAProxy 2.8.16, keepalived 2.2.8 unicast, ProxySQL", date: 2026-10-27, note: "cause 1 (placement stopped on every controller: 503, NOSRV, no server available; restart), cause 2 (placement frozen with docker pause on one controller: Layer7 timeout), cause 3 (one placement down, #91 run), cause 5 (ProxySQL and, in the #91 run, HAProxy stopped on the VIP holder: FAULT, VIP moved), cause 6 (VRRP dropped on a backup: VIP on two nodes; keepalived stopped there, fixed, started) and the verification run. Not run: cause 4 (HAProxy down everywhere), cause 7, multicast mode, kolla-ansible reconfigure" }
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, HAProxy 2.8.16, keepalived 2.2.8 unicast, ProxySQL", date: 2026-10-27, note: "cause 1 (placement stopped on every controller: 503, NOSRV, no server available; restart), cause 2 (placement frozen with docker pause on one controller: Layer7 timeout), cause 3 (one placement down, #91 run), cause 5 (ProxySQL and, in the #91 run, HAProxy stopped on the VIP holder: FAULT, VIP moved), cause 6 (VRRP dropped on a backup: VIP on two nodes; keepalived stopped there, fixed, started) and the verification run. Not run: cause 4 (HAProxy down everywhere), cause 7, multicast mode, kolla-ansible reconfigure" }
 upstream_refs:
   - https://docs.openstack.org/kolla-ansible/2026.1/reference/high-availability/haproxy-guide.html
   - https://docs.openstack.org/kolla-ansible/2026.1/user/multinode.html
@@ -19,7 +21,7 @@ upstream_refs:
   - https://docs.haproxy.org/2.8/management.html
   - https://keepalived.readthedocs.io/en/latest/configuration_synopsis.html
 authored_by: agent:ozarland-author
-last_verified: 2026-10-26
+last_verified: 2026-10-27
 ---
 
 # The API returns 503, an HAProxy backend is DOWN, or the VIP flaps or sits on two nodes
@@ -67,9 +69,12 @@ Server nova_api_back/<controller-3> is DOWN, reason: Layer7 wrong status, ... 0 
 backend nova_api_back has no server available!
 ```
 
-Only the message is shown: fluentd stores each syslog line as a record, with the host and the `haproxy` process
-name around it. The backend is `<service>_back`, named after the service's key in the role defaults (`nova_api`,
-`keystone_internal`, `placement_api`, ...). The `info` text after `Layer4 connection problem` is the system error.
+Only the message is shown: fluentd stores each syslog line as a JSON record, with the host and the `haproxy` process
+name around it (`{"Payload":"<message>","log_level":"notice","Hostname":"<host>","programname":"haproxy"}`; quotes
+inside the message are escaped, `info: \"Connection refused\"`). The newest records sit in a fluentd buffer file
+(`haproxy_latest.<id>.buffer`) before they reach `haproxy_latest.log`: search `haproxy_latest*`.
+The backend is `<service>_back`, named after the service's key in the role defaults (`nova_api`, `keystone_internal`,
+`placement_api`, ...). The `info` text after `Layer4 connection problem` is the system error.
 
 ### One backend DOWN, no user-visible error
 
@@ -91,6 +96,12 @@ Script `check_alive` now returning 1
 VRRP_Script(check_alive) failed (exited with status 1)
 (kolla_internal_vip_51) Entering FAULT STATE
 (kolla_internal_vip_51) Receive advertisement timeout
+```
+
+While two nodes hold the VIP, the one with the higher priority logs, every second:
+
+```text
+(kolla_internal_vip_51) Received advert from <other-node-address> with lower priority 1, ours 2, forcing new election
 ```
 
 When another VRRP cluster uses the same virtual router ID on the same layer 2 segment:
@@ -133,13 +144,15 @@ sudo docker exec keepalived bash -c 'echo "show stat" | socat unix-connect:/var/
 #    expected for a healthy service: <service>_back <controller> UP ... L7OK 200
 #    a DOWN server shows L4CON (connection refused), L4TOUT, L7TOUT (no answer to the HTTP check) or L7STS (wrong code)
 
+# The log directory is readable only by root: run the greps in a root shell, or the glob is not expanded
+#    ("grep: /var/log/kolla/haproxy/haproxy_latest*: No such file or directory").
 # 4. Which API answers 503, and when: every request is logged (option httplog). A 503 that HAProxy produced
 #    itself, with no server left, shows <NOSRV> as the server and termination flags starting with SC.
 #    The status code follows the timers field (Tq/Tw/Tc/Tr/Ta), so match it there, not a byte count or a timer.
-sudo grep -h -E -e "<NOSRV>" -e "/[0-9]+ 503 " /var/log/kolla/haproxy/haproxy_latest* | tail -20
+sudo sh -c 'grep -h -E -e "<NOSRV>" -e "/[0-9]+ 503 " /var/log/kolla/haproxy/haproxy_latest*' | tail -20
 
 # 5. The last HAProxy and keepalived events
-sudo grep -h -e "is DOWN" -e "is UP" -e "no server available" /var/log/kolla/haproxy/haproxy_latest* | tail -20
+sudo sh -c 'grep -h -e "is DOWN" -e "is UP" -e "no server available" /var/log/kolla/haproxy/haproxy_latest*' | tail -20
 sudo docker logs --since 2h keepalived 2>&1 | grep -E "Entering|FAULT|VRRP_Script|now returning|invalid passwd|not present in advert" | tail -20
 ```
 
@@ -157,10 +170,12 @@ curl -s -o /dev/null -w '%{http_code} %{time_total}\n' --max-time 10 http://<con
 ### How Kolla-Ansible's HAProxy decides a backend is DOWN
 
 Each API backend server line carries `check inter 2000 rise 2 fall 5` (`haproxy_health_check` in the
-`haproxy-config` role): one check every 2 s, DOWN after 5 failures in a row (about 10 s), UP again after 2 successes.
+`haproxy-config` role): one check every 2 s, DOWN after 5 failures in a row, UP again after 2 successes.
 The OpenStack API backends add `option httpchk GET /healthcheck` (or `GET /` for Nova and Placement) and
 `http-check expect status 200` in each role's defaults. A check times out after `timeout check 10s`
-(`haproxy_check_timeout`).
+(`haproxy_check_timeout`). On the lab, a refused connection (`Layer4 connection problem`) made the server DOWN 4 s
+after the container stopped; a frozen container (`Layer7 timeout`, `check duration: 10001ms`) took 59 s, five checks
+of 10 s plus the interval. UP came 2 to 4 s after the service was back.
 
 So a server is DOWN when its container does not listen (`Layer4 connection problem`), accepts but does not answer the
 HTTP check within 10 s (`Layer7 timeout`: all workers busy, stuck on the database), or answers something other than
@@ -190,7 +205,8 @@ to leave FAULT. So a stuck ProxySQL moves the VIP as surely as a stuck HAProxy. 
 ```bash
 sudo docker exec keepalived /checks/check_alive_haproxy.sh; echo $?
 sudo docker exec keepalived /checks/check_alive_proxysql.sh >/dev/null; echo $?
-# 0 is healthy, 1 is the failing daemon. /check_alive.sh itself prints "Keepalived check script <path> failed." for each.
+# 0 is healthy, 1 is the failing daemon. /check_alive.sh itself prints, for each,
+# "Keepalived check script <path> succeeded." or "Keepalived check script <path> failed."
 ```
 
 A backup takes the VIP when it stops receiving the master's advertisements (`Receive
@@ -270,7 +286,7 @@ Read the service's log on that controller first: a container that exits at start
 > needed.
 
 ```bash
-sudo docker restart <container>          # e.g. nova_api, keystone, neutron_server
+sudo systemctl restart kolla-<container>-container.service   # e.g. kolla-nova_api-container.service
 ```
 
 HAProxy marks the server UP again after 2 successful checks (about 4 s). If a configuration change broke the
@@ -300,7 +316,7 @@ containers itself. A plain restart is for a transient failure, when the configur
 > Undo: none needed.
 
 ```bash
-sudo docker restart haproxy      # or: sudo docker restart proxysql
+sudo systemctl restart kolla-haproxy-container.service    # or: kolla-proxysql-container.service
 ```
 
 On a node in FAULT, keepalived leaves FAULT after 10 successful checks (`rise 10`, about 20 s): `VRRP_Script(check_alive)
@@ -313,10 +329,10 @@ it stops.
 
 > ⚠️ **State-changing.** Stops keepalived on one node: it releases the VIP and stops taking part in failover.
 > Connections that reached this node are reset. Precondition: another node holds the VIP and its HAProxy has its
-> backends UP (*Quick checks* 1 and 3 there). Undo: `sudo docker start keepalived`.
+> backends UP (*Quick checks* 1 and 3 there). Undo: `sudo systemctl start kolla-keepalived-container.service`.
 
 ```bash
-sudo docker stop keepalived
+sudo systemctl stop kolla-keepalived-container.service
 ```
 
 Then fix the transport of the advertisements, and only then start it again:
@@ -372,14 +388,26 @@ openstack server list --limit 1
   `neutron`, `glance`, `cinder` and `placement` role defaults, the `fluentd` role defaults for the HAProxy log, and
   the HAProxy and multinode guides. HAProxy messages from the HAProxy 2.8 source (`src/server.c`, `src/check.c`,
   `src/backend.c`, `src/http.c`) and its configuration and management manuals. Keepalived messages from the
-  keepalived source (`keepalived/vrrp/`). Client messages from keystoneauth1 and openstacksdk. Not reproduced on a
-  lab.
+  keepalived source (`keepalived/vrrp/`). Client messages from keystoneauth1 and openstacksdk.
+- Lab observations (Kolla-Ansible 22.2.0, 2026.1, 3 controllers, HAProxy 2.8.16, keepalived 2.2.8 in unicast mode,
+  ProxySQL, 2026-10-27): placement stopped on every controller gave `Service Unavailable (HTTP 503)` to the client,
+  the HAProxy 503 page from `curl`, the three `is DOWN ... Layer4 connection problem, info: "Connection refused"`
+  lines, `backend placement_api_back has no server available!` and `<NOSRV>` 503 lines with `SC--`; placement
+  frozen with `docker pause` on one controller gave `Layer7 timeout`; ProxySQL stopped on the VIP holder: its
+  `check_alive` failed, `Entering FAULT STATE` there and `Entering MASTER STATE` on another node 1 s later, the VIP
+  stayed there afterwards; VRRP (IP protocol 112) dropped on a backup: it logged `Entering MASTER STATE` 4 s later
+  without `Receive advertisement timeout`, the VIP was on two nodes, APIs through the VIP still answered from a
+  compute; the resolution (keepalived stopped on that node, rule removed, keepalived started: `Entering BACKUP
+  STATE`) and the verification ran as written, with `systemctl` in place of `docker`.
+- Not run on the lab: cause 4 (HAProxy down on every node), cause 7 (router ID collision), multicast mode, a TLS
+  backend, `kolla-ansible reconfigure -t loadbalancer`.
 - The HAProxy and keepalived versions in your images may differ from the sources read; the messages quoted have been
   stable for several major versions, but check yours. The `show stat` column numbers are those of HAProxy 2.8's
   management guide.
 - Kolla-Ansible only. Other deployment tools use other check paths, check intervals and VRRP settings; the
   diagnosis applies, the commands and file paths do not.
-- The commands use `docker`. With `kolla_container_engine: podman`, replace `sudo docker` with `sudo podman`; the
+- The commands use `docker` and, for stop, start and restart, the `kolla-<container>-container.service` units of
+  Kolla-Ansible 2026.1. With `kolla_container_engine: podman`, replace `sudo docker` with `sudo podman`; the
   container names and paths are the same.
 - Not covered: the external VIP on a separate interface (`track_interface`), ProxySQL's own failures beyond its
   keepalived check (its backends, its query rules), HAProxy with `haproxy_single_external_frontend`, and Let's
