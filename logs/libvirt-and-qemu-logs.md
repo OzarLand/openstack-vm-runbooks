@@ -201,12 +201,13 @@ daemon, after which the configured timeout applies again. Delete the debug file 
 > under the same precondition.
 
 **Kolla-Ansible:** set `nova_libvirt_logging_debug: true` in `/etc/kolla/globals.yml` (or in the host's `host_vars`, to
-limit it to one compute), then run `kolla-ansible reconfigure` limited to that compute. This rewrites `libvirtd.conf`
-with `log_level = 1` and restarts `nova_libvirt`. Undo by removing the variable and reconfiguring again. With no
-filters, level 1 logs every module: expect a large file. On the lab, each reconfigure (`--tags nova`) took about 4
-minutes; the running instance's QEMU process kept its pid; `libvirtd.log` grew by 2 MB in the first 25 seconds
+limit it to one compute), then run `kolla-ansible reconfigure -i <inventory> --limit <compute> --tags nova`. This
+rewrites `libvirtd.conf` with `log_level = 1` and restarts `nova_libvirt`. Undo by removing the variable and running
+the same command again. With no filters, level 1 logs every module: expect a large file. On the lab, each
+reconfigure took about 4 minutes; the running instance's QEMU process kept its pid; `libvirtd.log` grew by 2 MB in the first 25 seconds
 after the restart. The debug lines go into `libvirtd.log` itself, not a separate file, and stay there after the
-undo (10 MB on the lab): rotate or truncate it if needed.
+undo (10 MB on the lab): leave it to Kolla-Ansible's logrotate (the `cron` container) rather than truncating it, which
+loses the lines.
 
 **Any:** set `log_filters` and `log_outputs` in the daemon's configuration file, then restart the socket or the service
 (`systemctl restart virtqemud.socket`, or `libvirtd.socket`/`libvirtd.service`), as the kbase describes. Whether the
@@ -222,8 +223,9 @@ sets `stdio_handler = "logd"` in
 [`qemu.conf.j2`](https://github.com/openstack/kolla-ansible/blob/stable/2026.1/ansible/roles/nova-cell/templates/qemu.conf.j2),
 which is also libvirt's default: the `virtlogd` daemon writes and rotates the file, so a running instance's log
 survives a restart of `libvirtd` alone. On Kolla-Ansible, `virtlogd` runs in the same `nova_libvirt` container
-(`kolla_nova_libvirt_start.sh`), so restarting the container restarts `virtlogd` too. On the lab, a restart of `nova_libvirt` (by a
-`reconfigure`) kept the instance log, and the running instance's later lines would go to the same file.
+(`kolla_nova_libvirt_start.sh`), so restarting the container restarts `virtlogd` too. On the lab, a restart of
+`nova_libvirt` (by a `reconfigure`) kept the instance log file; whether the running instance's later lines still
+reach it was not checked.
 
 ```bash
 # Any (package install), on the compute
@@ -395,7 +397,7 @@ libvirt 10.0.0 and QEMU 8.2.2, a cirros 0.6.3 instance):
 | Runtime debug with `virt-admin`, then the undo | As written; `virt-admin` is in the image; 780 KB of debug for one instance start; after the undo the debug file stopped growing |
 | Persistent debug, `nova_libvirt_logging_debug: true` and `reconfigure --tags nova`, then the undo | As written, `failed=0`, 4 min 33 s and 3 min 47 s; the instance kept running (same QEMU pid); the debug lines stay in `libvirtd.log` |
 | Instance log on start, `server stop`, hard reboot, `kill -9` and `kill -15` of QEMU | The lines quoted above. A clean stop also shows `terminating on signal 15` from `libvirtd`; an outside SIGTERM gives `reason=shutdown`; SIGKILL gives `reason=crashed` with no QEMU line |
-| Nova side | `VM Stopped (Lifecycle Event)` 15 s after the crash, then `Instance shutdown by itself. Calling the stop API.`; `Instance shutdown successfully after 3 seconds.` for the clean stop |
+| Nova side | `VM Stopped (Lifecycle Event)` 15 s after the crash, then `Instance shutdown by itself. Calling the stop API.`; `Instance shutdown successfully after 3 seconds.` for the clean stop (quoted from the `nova-compute.log` capture) |
 | Console log | `openstack console log show` as written; the `docker exec nova_compute tail` failed with `Permission denied` and needed `-u root` |
 
 Not run: the package-install commands (modular `virtqemud`), a live migration (one node), a guest that ignores ACPI,

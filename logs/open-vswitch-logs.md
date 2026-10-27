@@ -318,7 +318,8 @@ fault the lab did not cause (inactivity probe, `blocked ... to quiesce`, `Droppe
 - Written from upstream source and documentation: Open vSwitch v3.7.1, Kolla-Ansible and Neutron `stable/2026.1`.
   The blocks of lines are captured on the lab (Open vSwitch 3.7.1 in the Kolla 2026.1 Ubuntu images); the table
   entries are format strings from the source. Older Open vSwitch releases may word some lines differently
-  (`ovs-vswitchd --version` gives yours).
+  (`ovs-vswitchd --version` gives yours). The Open vSwitch version on a 2026.1 compute depends on the base
+  distribution of the images or packages, so it may not be 3.7.1: the run saw only the Ubuntu images.
 - DPDK (`ovs-vswitchd` with a userspace datapath) adds its own modules and messages; not covered.
 - The meaning given for `Unreasonably long … poll interval` with high `system` time is an interpretation of what the
   numbers measure (`getrusage` of the thread), not an upstream statement.
