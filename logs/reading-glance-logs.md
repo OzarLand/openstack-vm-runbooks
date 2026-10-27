@@ -11,14 +11,15 @@ environment:
   storage: any
   os: any
 risk: read-only
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-27, note: "Glance file store: the page's greps run, a snapshot and Glance stopped during a boot captured; not injected: the Glance upload failures (store full, quota, size cap, permissions, signature) and the RBD and signature lines of Nova" }
 upstream_refs:
   - https://opendev.org/openstack/glance/src/branch/stable/2026.1/glance/api/v2/image_data.py
   - https://opendev.org/openstack/nova/src/branch/stable/2026.1/nova/image/glance.py
   - https://opendev.org/openstack/nova/src/branch/stable/2026.1/nova/virt/libvirt/driver.py
   - https://opendev.org/openstack/kolla-ansible/src/branch/stable/2026.1/ansible/roles/glance/templates/glance-api.conf.j2
 authored_by: agent:ozarland-author
-last_verified: 2026-10-26
+last_verified: 2026-10-27
 ---
 
 # Reading the Glance logs, and the image lines in Nova's logs (boot, snapshot)
@@ -43,6 +44,21 @@ snapshot are found from the instance action's request id
 ```bash
 grep "<nova-request-id>" /var/log/kolla/glance/glance-api.log
 grep "<image-id>" /var/log/kolla/glance/glance-api-uwsgi.log | tail     # PUT .../file (upload), GET .../file (download)
+```
+
+The `glance-api-uwsgi.log` lines carry no request id and their time is the start of the request; find them by image
+id. Captured on a Kolla-Ansible 2026.1 lab (file store), a snapshot upload and a download at boot:
+
+```text
+[pid: 28|app: 0|req: 28/110] 192.0.2.10 () {42 vars in 1033 bytes} [Tue Oct 27 07:17:43 2026] PUT /v2/images/<image-id>/file => generated 0 bytes in 2133 msecs (HTTP/1.1 204) 4 headers in 171 bytes (1 switches on core 0)
+[pid: 18|app: 0|req: 3/10] 192.0.2.10 () {40 vars in 1000 bytes} [Tue Oct 27 07:20:22 2026] GET /v2/images/<image-id>/file => generated 21692416 bytes in 69 msecs (HTTP/1.1 200) 5 headers in 217 bytes (349 switches on core 0)
+```
+
+At the default INFO level, a successful upload leaves little in `glance-api.log`; the snapshot's upload on the lab
+left, with Nova's request id:
+
+```text
+2026-10-27 07:17:45.260 28 INFO glance.location [None req-<nova-request-id> <user-id> <project-id> - - default default] Image format matched and virtual size computed: 1073741824
 ```
 
 ## In Glance's log: upload failures
@@ -70,7 +86,7 @@ grep -nE "storage media is full|exceeds the storage quota|too large|Insufficient
 
 | Line (message text) | Level | Log | What it means |
 |---|---|---|---|
-| `Error contacting glance server '<server>' for '<method>', retrying.` (then `done trying.`) with a traceback | ERROR | nova-compute, nova-api | Nova could not reach Glance (connection error, timeout). After the last attempt the build fails with `GlanceConnectionFailed`. |
+| `Error contacting glance server '<server>' for '<method>', retrying.` (then `done trying.`) with a traceback | ERROR | nova-compute, nova-api | Nova could not reach Glance (connection error, timeout). After the last attempt the build fails with `GlanceConnectionFailed`, and is rescheduled; the instance's fault is then `Exceeded maximum number of retries...` when no other compute is left. |
 | `Download image error` with a traceback | ERROR | nova-compute | A download through a special handler (the RBD handler when `[glance] enable_rbd_download` is on) failed; Nova falls back to downloading through the Glance API. |
 | `Successfully transferred using <scheme>` | INFO | nova-compute | A special-handler download (for example `rbd`) succeeded. |
 | `Error during RBD image export: <error>` | ERROR | nova-compute | Exporting an image from Ceph RBD to a local file failed (`CouldNotFetchImage`). |
@@ -83,6 +99,24 @@ grep -nE "storage media is full|exceeds the storage quota|too large|Insufficient
 
 Sources: `nova/image/glance.py`, `nova/virt/libvirt/driver.py`. All with `[instance: <uuid>]` where an instance is
 involved.
+
+Captured on the lab, `glance_api` stopped during a boot from an image not cached on the compute (`[glance]
+num_retries = 3`: four attempts about 1 s apart, method `data`), then `nova-conductor`'s verdict on a single compute:
+
+```text
+2026-10-27 07:19:31.942 7 ERROR nova.image.glance [None req-<nova-request-id> <user-id> <project-id> - - default default] Error contacting glance server 'http://192.0.2.10:9292' for 'data', retrying.: glanceclient.exc.CommunicationError: Error finding address for http://192.0.2.10:9292/v2/images/<image-id>: Unable to establish connection to ...
+2026-10-27 07:19:34.990 7 ERROR nova.image.glance [None req-<nova-request-id> <user-id> <project-id> - - default default] Error contacting glance server 'http://192.0.2.10:9292' for 'data', done trying.: glanceclient.exc.CommunicationError: ...
+2026-10-27 07:19:34.996 7 ERROR nova.compute.manager [None req-<nova-request-id> <user-id> <project-id> - - default default] [instance: <server-id>] Instance failed to spawn: nova.exception.GlanceConnectionFailed: Connection to glance host http://192.0.2.10:9292 failed: ...
+2026-10-27 07:19:38.739 7 ERROR nova.compute.manager [None req-<nova-request-id> <user-id> <project-id> - - default default] [instance: <server-id>] Failed to build and run instance: nova.exception.GlanceConnectionFailed: ...
+2026-10-27 07:19:41.070 112 WARNING nova.scheduler.utils [None req-<nova-request-id> ...] Failed to compute_task_build_instances: Exceeded maximum number of retries. Exhausted all hosts available for retrying build failures for instance <server-id>.: nova.exception.MaxRetriesExceeded: ...
+```
+
+With Glance down before the request, `nova-api` logged the same line for `'get'` twice (`retrying.`, then
+`done trying.` 1.2 s later) and answered 500 `Unexpected API Error ... <class 'nova.exception.GlanceConnectionFailed'>`.
+The counts differ because Kolla-Ansible's nova role sets `[glance] num_retries` in `nova-api` to the number of
+`glance-api` hosts (one on this all-in-one lab: 2 attempts), and its nova-cell role sets 3 for `nova-compute` (4
+attempts). `openstack server create` fails earlier, in its own image lookup (`The image service for <region> exists
+but does not have any supported versions.`).
 
 A snapshot of a running instance, captured on a 2026.1 lab (local qcow2 disks, `nova-compute.log`):
 
@@ -107,10 +141,13 @@ grep -n "<server-id>" /var/log/kolla/nova/nova-compute.log | grep -E "snapshot|S
 
 ## Validity and limits
 
-- Every message is quoted from Glance and Nova 2026.1. Captured on a lab (2026.1 all-in-one, local qcow2 disks,
-  2026-10-27): the live and cold snapshot lines only (cold on a shut-off instance; the managed save of a running
-  instance, RBD direct snapshots and the WARNING/ERROR snapshot lines were not seen). A lab request asks for more
-  real samples.
+- Every message is quoted from Glance and Nova 2026.1. Captured on a Kolla-Ansible 22.2.0 (2026.1) all-in-one lab
+  with the Glance file store and local qcow2 disks (2026-10-27): the `glance-api-uwsgi.log` PUT and GET lines, the
+  `glance.location` line, the live and cold snapshot lines (cold on a shut-off instance), and the `Error contacting
+  glance server` lines (compute and API) with the build failure. Not captured: the managed save of a running
+  instance, RBD direct snapshots, the WARNING/ERROR snapshot lines, the Glance upload-failure table (no store full,
+  quota, size cap, permission or signature failure was injected), `Download image error`, `Successfully transferred
+  using`, `Error during RBD image export` and the signature line (no Ceph, no signed image).
 - The status codes are the ones `image_data.py` raises for each case.
 - Store driver messages (`glance_store` for file, RBD, Swift, S3) and the interoperable import workflow (staging,
   tasks) are not covered.
