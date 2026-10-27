@@ -1,7 +1,7 @@
 ---
 title: A compute shows disabled or down. Why, what still works on it, and how to bring it back
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [nova, placement, libvirt]
 deployment_methods: [kolla-ansible, any]
@@ -11,14 +11,15 @@ environment:
   storage: any
   os: any
 risk: state-changing
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, multinode (3 controllers, 2 computes)", date: 2026-10-27, note: "the four causes produced on a disposable lab (nova_libvirt stopped, operator disable, nova_compute stopped, --down with an evacuation left done); quick checks, every resolution and Verification run; --enable while libvirt down, AUTO over an operator reason, the trait error, volume detach (no Cinder), the --enable after --up and forcing down a fenced host not run" }
 upstream_refs:
   - https://docs.openstack.org/nova/2026.1/admin/evacuate.html
   - https://docs.openstack.org/nova/2026.1/configuration/config.html#DEFAULT.service_down_time
   - https://docs.openstack.org/nova/2026.1/configuration/config.html#DEFAULT.running_deleted_instance_action
   - https://docs.openstack.org/api-ref/compute/#update-compute-service
 authored_by: agent:ozarland-author
-last_verified: 2026-10-26
+last_verified: 2026-10-27
 ---
 
 # A compute shows disabled or down. Why, what still works on it, and how to bring it back
@@ -171,9 +172,11 @@ Nova refuses `--up` while evacuations from that host are still `done` (`nova/api
 ```text
 Unable to force up host <host> as `done` evacuation migration records remain associated with the host. Ensure the compute service has been restarted, allowing these records to move to `completed` before retrying this request.
 ```
- `nova-compute` moves them to `completed` when it starts on the repaired
-host, after destroying the local copies of the evacuated instances (`Destroying instance as it has been evacuated
-from this host but still exists in the hypervisor`).
+`nova-compute` moves them to `completed` when it starts on the repaired host, after destroying the local copies
+of the evacuated instances (`Destroying instance as it has been evacuated from this host but still exists in the
+hypervisor`). A `nova-compute` that kept running while forced down does not do it: restart it. The client shows
+only `Compute service nova-compute of host <host> failed to set.`; the reason above is in the API response
+(`openstack --debug compute service set --up <host> nova-compute`).
 
 > ⚠️ **State-changing.** Lets Nova consider the service alive again from its heartbeat. Precondition: the host is
 > repaired, `nova-compute` runs and has reported (`Updated At` recent), and `openstack server migration list --host
@@ -202,6 +205,35 @@ openstack allocation candidate list --resource VCPU=1 --resource MEMORY_MB=512 -
 # expected: the compute is a candidate
 ```
 
+## Lab observations
+
+OpenStack 2026.1, Kolla-Ansible 22.2.0, 3 controllers and 2 computes, Ubuntu 24.04, nested KVM, ML2/OVS, local
+disks, no Cinder, 2026-10-27. All four causes produced on purpose on one compute.
+
+- Cause 1, `systemctl stop kolla-nova_libvirt-container.service`: `nova-compute` logged `Connection event '0'
+  reason 'Connection to libvirt lost: 0'` at once; the service showed `disabled`, `up`, reason `AUTO: Connection to
+  libvirt lost: 0` within 3 s, with the `COMPUTE_STATUS_DISABLED` trait. A build forced to that host failed with
+  `No valid host was found.` (scheduler: `Got no allocation candidates from the Placement API`). The two guests kept
+  running. After `systemctl start`, `Connection event '1' reason 'None'` came 8 s later and the service was
+  `enabled`, trait gone, at the next check 15 s after the start.
+- Cause 2: `--disable --disable-reason` set the trait and removed the compute from the allocation candidates;
+  `--enable` cleared both.
+- Cause 3, `systemctl stop kolla-nova_compute-container.service`: `down` 63 s after the last heartbeat. Before
+  that, `openstack server evacuate` was refused with HTTP 400 `Compute service of <host> is still in use.`. While
+  `down`: resize refused with HTTP 409 `Service is unavailable at this time.`; the scheduler logged `... has not
+  been heard from in a while`; a reboot was accepted (status `REBOOT`); a delete returned at once, the port was
+  deleted and the guest kept running. When `nova-compute` started again, it cleared the reboot's task state at
+  start-up (`Instance in transitional state (rebooting) at start-up ... clearing task state`), then received the
+  queued reboot (`Task possibly preempted`), and destroyed the deleted instance's guest 34 s after the start
+  (`Destroying instance with name label '<instance-name>' which is marked as DELETED but still present on host.`).
+- Cause 4, `--down` while `nova-compute` ran: `down`, `Forced Down` `True` at once, `Status` stayed `enabled`.
+  An evacuation was accepted and left a `done` record; `--up` was refused (message above, through `--debug`). The
+  source copy of the evacuated instance kept running on the compute for 3.5 minutes, until `nova-compute` was
+  restarted; it was then destroyed, the record went to `completed`, and `--up` worked. Verification as written.
+- Not run: `--enable` while libvirt was down, an `AUTO: ` disable over an operator reason, the trait update error,
+  volume detach (no Cinder), stop of an instance, the `--enable` after `--up` (the service was still enabled), and
+  forcing down a fenced host (the lab host was not fenced).
+
 ## Validity and limits
 
 - Written from Nova 2026.1: `nova/api/openstack/compute/services.py` (enable, disable, forced down,
@@ -209,7 +241,7 @@ openstack allocation candidate list --resource VCPU=1 --resource MEMORY_MB=512 -
   (`_set_host_enabled`, `DISABLE_PREFIX`), `nova/virt/libvirt/host.py`, `nova/compute/manager.py`
   (`_update_compute_provider_status`, `_cleanup_running_deleted_instances`, `_destroy_evacuated_instances`),
   `nova/compute/api.py` (`check_instance_host`, local delete, evacuate), `nova/scheduler/filters/compute_filter.py`,
-  `nova/scheduler/request_filter.py`, and `nova/conf/service.py` and `compute.py`. Not reproduced on a lab.
+  `nova/scheduler/request_filter.py`, and `nova/conf/service.py` and `compute.py`. Reproduced on a lab (Kolla-Ansible, 2026.1, ML2/OVS, no Cinder), see *Lab observations*.
 - Only `resize` (which includes cold migration) and volume detach check that the compute is up (`check_instance_host(check_is_up=True)` in `nova/compute/api.py`); delete and evacuate check it on their own. Other actions are cast over RPC without that check.
 - Kolla-Ansible paths for the logs; the `openstack` commands apply to any deployment.
 - Not covered: Ironic, the `[compute] consecutive_build_service_disable_threshold` weigher (see the max retries
