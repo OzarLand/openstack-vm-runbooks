@@ -11,8 +11,7 @@ environment:
   storage: any
   os: any
 risk: destructive
-confirmed_by:
-  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, RabbitMQ 4.2.9 with Khepri, Galera + ProxySQL", date: 2026-10-27, note: "RabbitMQ partition injected (one node cut on port 25672); steps 1 to 4, verification and reopening run in order; kolla-ansible rabbitmq-reset-state run after the partition had healed and failed with Khepri (node removed, rejoined by hand, stream and quorum replicas repaired); conductor and scheduler did not start with placement stopped; step 3 read-only (Galera healthy, mariadb-recovery not run); no Cinder, no OVN" }
+confirmed_by: []
 upstream_refs:
   - https://www.rabbitmq.com/docs/partitions
   - https://galeracluster.com/library/documentation/crash-recovery.html
@@ -90,8 +89,9 @@ with `Restart=always`, so a `docker stop` is undone within about a minute. For e
 `systemctl stop kolla-nova_api-container.service kolla-neutron_server-container.service kolla-cinder_api-container.service kolla-glance_api-container.service`
 (adapt to the services you run: a unit that does not exist on a node only prints `Failed to stop ...: Unit ... not
 loaded.`, and Glance with a file backend runs on one controller); or set those backends to `MAINT` in HAProxy.
-Keep `placement_api` running: on 2026.1, `nova-conductor` and `nova-scheduler` exit at start-up when Placement does
-not answer (`openstack.exceptions.NotSupported: The placement service for <vip>:RegionOne exists but does not have
+Keep `placement_api` running: on 2026.1, `nova-conductor` and `nova-scheduler` exit at start-up when the Placement
+endpoint answers without a usable version (on the lab, HAProxy answering for the stopped backend:
+`openstack.exceptions.NotSupported: The placement service for <vip>:RegionOne exists but does not have
 any supported versions.`), so the restarts of step 4 fail with Placement stopped. If you stopped it, start it before
 step 4.
 **Any:** `systemctl stop <api services>` or the equivalent HAProxy change.
@@ -105,10 +105,14 @@ part of the failure; you will then need to start it first in step 4 before any v
 > 🛑 **Destructive.** Purging or resetting RabbitMQ discards every in-flight RPC message: operations in progress
 > (builds, deletes, migrations) are lost and their instances will need [stale-record clean-up](../lifecycle/stale-records-stuck-instances-orphan-ports-attachments.md).
 > Affects every service. Precondition: the APIs are stopped (step 1), so no new requests accumulate; you have
-> established the cluster is partitioned or its state is unrecoverable by rejoining nodes. Cannot be undone.
+> established the cluster is partitioned or its state is unrecoverable by rejoining nodes. With Khepri, the
+> Kolla-Ansible command can fail and leave one node stopped and outside the cluster (on the lab; recovery in 2
+> below). Cannot be undone.
 
 First, establish the state on every node (`rabbitmqctl cluster_status`, `check_alarms`, which store the cluster
-uses, which queue types). If a clean rejoin of one side is possible, prefer it. Otherwise, the incident path:
+uses, which queue types). With Khepri, a partition heals by itself once the network is back (on the lab, the three
+nodes were running together within 15 s of the repair): check `cluster_status` on every node again before deciding on
+a reset. If a clean rejoin of one side is possible, prefer it. Otherwise, the incident path:
 
 1. Stop the RabbitMQ application on every node (`rabbitmqctl stop_app`), the last node stopped first on restart.
 2. Reset or purge according to your deployment tool's procedure. **Kolla-Ansible:** `kolla-ansible rabbitmq-reset-state`
@@ -125,14 +129,19 @@ uses, which queue types). If a clean rejoin of one side is possible, prefer it. 
    (`rabbitmqctl list_queues name type members`). On the lab, the re-joined node was a member of none: quorum queues
    ran on two members, and every client connected to that node failed on the streams with `PRECONDITION_FAILED -
    stream queue '<queue>' in vhost '/' does not have a running replica on the local node` (the Neutron agents of one
-   compute: a new instance got no DHCP). Add the members back:
+   compute: a new instance got no DHCP). Add the members back.
+
+   > ⚠️ **State-changing.** Adds new members to the streams and quorum queues: each copies the queue's data, a
+   > replication load on the cluster. Precondition: the node is running and listed as joined in `cluster_status`.
+   > Undo: `rabbitmq-queues shrink rabbit@<node>` and `rabbitmq-streams delete_replica -p / <stream> rabbit@<node>`.
+
    `rabbitmq-streams add_replica -p / <stream> rabbit@<node>` for each stream, and
    `rabbitmq-queues grow rabbit@<node> all` for the quorum queues (Kolla-Ansible's guide also points to
    `contrib/ops/rabbitmq/rabbitmq-repair-stream-replicas.sh`, not shipped in the kolla-ansible package). An instance
    that booted meanwhile needs a hard reboot to get its DHCP lease.
 
-With Khepri, a partition heals by itself once the network is back (on the lab, the three nodes were running together
-within 15 s of the repair): check `cluster_status` on every node before deciding on a reset.
+The lab run of this step happened after the partition had healed, outside the step's precondition, to test the
+commands; what it observed is in 2 and 4 above.
 
 When RabbitMQ returns, every agent on every host reconnects at once; on a large platform that reconnection storm is
 itself a load to expect, and consumers may take minutes to reappear on queues.
@@ -171,8 +180,8 @@ rabbitmqctl list_queues name messages consumers | awk '$3==0 && $2>0'   # empty:
 mysql -e "SHOW STATUS LIKE 'wsrep_cluster_size'; SHOW STATUS LIKE 'wsrep_cluster_status';"
 #    Kolla-Ansible: sudo docker exec mariadb mariadb -uroot -p<database_password> -e "..." (no mysql in the image)
 
-# 2. Every compute service and network agent reporting again. These need nova-api and neutron-server: start them
-#    first (internally), and read the output: with the API stopped, the command prints a 503 and grep still prints 0.
+# 2. Every compute service and network agent reporting again. These need nova-api and neutron-server (see below);
+#    read the output: with the API stopped, the command prints a 503 and grep still prints 0.
 openstack compute service list --service nova-compute | grep -c down     # 0
 openstack network agent list -f value -c Alive | grep -vc True          # 0 = every agent alive (agent-based backends)
 
@@ -182,6 +191,15 @@ openstack server add floating ip reopen-test <fip>   # or test from a host on th
 ping -c 3 <address>
 openstack server delete --wait reopen-test
 ```
+
+Checks 2 and 3 need `nova-api` and `neutron-server`. On Kolla-Ansible, starting their units puts them back behind
+the VIP and reopens provisioning early. To run the checks without reopening, keep those backends in HAProxy `MAINT`
+(step 1's alternative) while the units run, and run the checks from a controller against the service's own address.
+This was not run on the lab.
+
+> ⚠️ **State-changing.** Starting `nova-api` and `neutron-server` with their backends out of `MAINT` reopens
+> provisioning to users before the gate passes. Precondition: the backends are in `MAINT` on every HAProxy host.
+> Undo: stop the units again.
 
 Only then re-enable the API backends (**Kolla-Ansible:** `systemctl start` the units stopped in step 1, or take the
 backends out of `MAINT`) and announce the reopening. Expect a burst of retried requests from users and
