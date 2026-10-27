@@ -41,6 +41,10 @@ The service exits at start-up, and the container restarts in a loop:
 ```
 
 ```text
+... nova.exception.InvalidConfiguration: My compute node <node-uuid> has hypervisor_hostname <old-hypervisor-hostname> but virt driver reports it should be <new-hypervisor-hostname>. Possible rename detected, refusing to start!
+```
+
+```text
 ... nova.exception.InvalidConfiguration: No local node identity found, but this is not our first startup on this host. Refusing to start after potentially having lost that state!
 ```
 
@@ -143,19 +147,21 @@ existing provider is refused with `409 Conflicting resource provider name`. The 
 
 - the compute service was deleted but its provider was not: `openstack compute service delete` deletes the
   provider and its allocations, but ignores a provider that still has allocations afterwards
-  (`ResourceProviderInUse` is swallowed in `delete_resource_provider`), and only logs a Placement error
-  (`Failed to delete compute node resource provider for compute node <uuid>` in the `nova-api` log);
+  (`ResourceProviderInUse` is swallowed in `delete_resource_provider`). The only trace is the 409 that
+  `_delete_provider` logs in the `nova-api` log: `Failed to delete resource provider with UUID <uuid> from the
+  placement API. Got 409: ...`. When Placement cannot be reached at all, the `nova-api` log has `Failed to delete
+  compute node resource provider for compute node <uuid>: ...` instead;
 - the compute's identity changed (a new `compute_id`) while its old compute node and provider stayed.
 
 ## Possible causes
 
 | What you see | Cause |
 |---|---|
-| `Possible rename detected` | Cause 1: the host name changed |
+| `Possible rename detected` (the node's host, or its hypervisor host name, changed) | Cause 1: the host name changed |
 | `My hypervisor has existing instances, but I appear to be a new service` | Cause 1 too: the new name created a new service, while the instances run under the old one |
-| `No local node identity found` | Cause 2: the `compute_id` file was lost (reinstall, volume removed) |
+| `No local node identity found` | Cause 2: the `compute_id` file was lost (reinstall) |
 | `Conflicting resource provider name`, one provider with the old UUID and no hypervisor with that ID | Cause 3: a provider left over from a deleted or re-identified compute |
-| Kolla-Ansible: `Found multiple compute services with same host name` | Cause 3's Nova side: two compute services or hypervisors with that name; check *Quick checks* 1 |
+| Kolla-Ansible: `Found multiple compute services with same host name` | Two compute services, with different `Host` values (typically a short name and an FQDN), report the same hypervisor host name; check *Quick checks* 1 |
 
 ### Cause 1: the host name changed
 
@@ -165,8 +171,10 @@ changes what `hostname` returns.
 
 ### Cause 2: the identity file was lost
 
-Same host name, the service exists, but `compute_id` is missing in the container (Kolla-Ansible: the `nova_compute`
-volume was removed or the compute was reinstalled, and the deploy has not run since).
+Same host name, the service exists, but `compute_id` is missing in the container. On Kolla-Ansible, the container
+copies `/etc/kolla/nova-compute/compute_id` into `/var/lib/nova/compute_id` at every start, so removing the
+`nova_compute` volume alone does not cause this: the file in `/etc/kolla/nova-compute/` must be lost too, for
+example after an OS reinstall, and the deploy has not run since.
 
 ### Cause 3: an old provider with the same name
 
@@ -191,6 +199,15 @@ sudo hostnamectl set-hostname <old-host>
 the configuration are written again: `kolla-ansible reconfigure -i <inventory> -t nova --limit <old-host>`.
 
 **Any:** restart `nova-compute`.
+
+If `nova-compute` started under the new name before you noticed, clean up what it left:
+
+- a second compute service with the new name, `down` now, and its compute node and provider. Delete it as in cause
+  3's last step, after checking that no instance is listed under that name
+  (`openstack server list --all-projects --host <new-host>`);
+- on Kolla-Ansible, a `compute_id` that a deploy run under the new name rewrote with a UUID derived from it: the
+  `reconfigure` above writes the old hypervisor's ID back once the name and the inventory are the old ones again.
+  Check that `/etc/kolla/nova-compute/compute_id` equals the old hypervisor ID before starting the container.
 
 If the compute must really have a new name, treat it as a new compute: move its instances off
 ([maintenance](../migration/moving-instances-off-a-host-for-maintenance.md)), delete its compute service (see
@@ -262,17 +279,20 @@ Then give the instances that run on this compute their allocations back, on the 
 > provider exists (`resource provider list --name <hypervisor-hostname>` shows `<new-node-uuid>`). Undo:
 > `openstack resource provider allocation delete <server-id>`.
 
+For each consumer in the saved `provider-<old-node-uuid>.json` that is an instance on this compute:
+
 ```bash
-sudo docker exec nova_api nova-manage placement heal_allocations --verbose --dry-run
-sudo docker exec nova_api nova-manage placement heal_allocations --verbose
+sudo docker exec nova_api nova-manage placement heal_allocations --verbose --dry-run --instance <server-id>
+sudo docker exec nova_api nova-manage placement heal_allocations --verbose --instance <server-id>
 ```
 
-If there are two compute services for the same host (the Kolla-Ansible assert), delete the one that is `down` and
-has no instance, after checking its ID:
+If two compute services report the same hypervisor host name (the Kolla-Ansible assert), they have different
+`Host` values, typically a short name and an FQDN. Delete the one that is `down` and has no instance, after checking
+its ID and running the instance check with *its own* `Host` value:
 
 > 🛑 **Destructive.** Deletes the compute service record, its compute node, its host mapping, its aggregate
 > memberships and its provider. What can be lost: the record of the compute if the wrong ID is taken. Precondition:
-> the service is `down`, and `openstack server list --all-projects --host <host>` is empty for it (Nova refuses
+> the service is `down`, and `openstack server list --all-projects --host <that-service-host>` is empty (Nova refuses
 > otherwise: `Unable to delete compute service that is hosting instances`). Undo: none; a compute that starts again
 > under that name registers anew.
 
