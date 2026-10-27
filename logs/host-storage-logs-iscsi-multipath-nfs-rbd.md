@@ -11,7 +11,8 @@ environment:
   storage: iscsi, nfs or ceph-rbd volumes attached to instances
   os: any linux with systemd
 risk: state-changing
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-27, note: "iSCSI without multipath only: port 3260 dropped for 60 s and 180 s (replacement_timeout 120 s, noop 5/5 s), kernel and iscsid lines captured, read commands run; not run: multipath (not deployed), NFS (no backend), Ceph RBD client logs and their state-changing setup (no Ceph)" }
 upstream_refs:
   - https://github.com/open-iscsi/open-iscsi/blob/2.1.13/README
   - https://github.com/open-iscsi/open-iscsi/blob/2.1.13/usr/initiator.c
@@ -106,9 +107,37 @@ problem.
 
 ```bash
 # On the compute
-journalctl -k | grep -E "detected conn error|session recovery timed out"
+journalctl -k | grep -E "detected conn error|session recovery timed out"   # current boot only: add -b -1 after a reboot
 iscsiadm -m session -P 1          # sessions, their state and target portal (Kolla-Ansible: docker exec iscsid ...)
 ```
+
+`journalctl -k` reads only the current boot, even with `--since`: after the compute rebooted, the lines of the
+previous boot need `journalctl -k -b -1` (`journalctl --list-boots` lists the boots).
+
+Captured on a lab (Kolla-Ansible 2026.1 all-in-one, kernel 6.8, open-iscsi 2.1.9, `noop_out_interval` and
+`noop_out_timeout` 5 s, `replacement_timeout` 120 s, port 3260 dropped on the compute for 60 s, then for 180 s):
+
+```text
+aio-1 kernel:  connection5:0: ping timeout of 5 secs expired, recv timeout 5, last rx <n>, last ping <n>, now <n>
+aio-1 kernel:  connection5:0: detected conn error (1022)
+aio-1 docker[<pid>]: iscsid: Kernel reported iSCSI connection 5:0 error (1022 - ISCSI_ERR_NOP_TIMEDOUT: A NOP has timed out) state (3)
+aio-1 docker[<pid>]: iscsid: re-opening session 5 (reopen_cnt 0)
+aio-1 docker[<pid>]: iscsid: connection5:0 login failed ISCSI_CONN_STATE_XPT_WAIT/R_STAGE_SESSION_REOPEN (reopen_cnt=0, reopen_max=0)
+aio-1 docker[<pid>]: iscsid: connection5:0 is operational after recovery (4 attempts)
+aio-1 kernel:  session5: session recovery timed out after 120 secs
+aio-1 kernel: sd 2:0:0:1: rejecting I/O to offline device
+aio-1 kernel: I/O error, dev sda, sector 1049536 op 0x1:(WRITE) flags 0x8800 phys_seg 2 prio class 2
+```
+
+`re-opening session …` and the lower-case `login failed …` are debug lines (`initiator.c`): they appear because
+Kolla-Ansible runs `iscsid -d 8 -f`.
+
+On that lab: the error was detected 8 s after the cut; during it `iscsiadm -m session -P 1` showed `iSCSI Connection
+State: TRANSPORT WAIT`, `iSCSI Session State: FAILED`; the guest's writes blocked without error for a 60 s cut and
+resumed 1 s after recovery; for the 180 s cut, `session recovery timed out` came 120 s after detection, the guest got
+I/O errors and remounted its ext4 file system read-only, and stayed so after the session came back. `nova-compute`
+and `cinder-volume` logged nothing. The iscsid output had 1387 lines in 100 s (`-d 8`); `Login failed` with a capital
+L never appeared, only the lower-case `login failed ...` above, one every 14 to 15 s.
 
 ## Multipath: multipathd
 
@@ -147,7 +176,7 @@ guest sees I/O errors.
 
 ```bash
 journalctl -u multipathd -u kolla-multipathd-container.service | grep -E "checker failed|remaining active paths|reinstated|recovery mode|Disable queueing"
-multipath -ll                     # maps, paths and their states (Kolla-Ansible: docker exec multipathd ...)
+sudo multipath -ll                # maps, paths and their states (Kolla-Ansible: docker exec multipathd ...)
 ```
 
 ## NFS volumes and instance directories on NFS
@@ -236,10 +265,11 @@ side, slow requests in the cluster's health.
 ## Validity and limits
 
 - Written from upstream source and documentation only: open-iscsi 2.1.13, multipath-tools 0.15.1, Linux v7.3, Ceph
-  `tentacle` documentation, Kolla-Ansible and Nova `stable/2026.1`. Every message above is a format string from that
-  source, not a captured line.
-- Not run on a lab yet. A lab capture is requested of an iSCSI target made unreachable for longer than
-  `replacement_timeout`, with and without multipath, and of an NFS server that stops answering.
+  `tentacle` documentation, Kolla-Ansible and Nova `stable/2026.1`. The tables are format strings from that source;
+  the iSCSI block marked as captured is from an all-in-one lab (2026-10-27).
+- iSCSI without multipath checked on that lab: `journalctl -u kolla-iscsid-container.service`, `docker logs iscsid`,
+  `journalctl -k`, `docker exec iscsid iscsiadm -m session -P 1`. Not run: multipath (`multipathd` not deployed there;
+  `multipath -ll` on the host needs root), NFS (no NFS backend), the Ceph RBD client logs (no Ceph).
 - The exact unit and container names assume Kolla-Ansible's `kolla-<container>-container.service` naming
   (stable/2026.1).
 - Fibre Channel, NVMe-oF and other `os-brick` connectors are not covered.

@@ -1,7 +1,7 @@
 ---
 title: Instance snapshot never finishes. Task state image_pending_upload or image_uploading, image queued or saving
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [nova, glance, libvirt, ceph]
 deployment_methods: [kolla-ansible, any]
@@ -11,14 +11,15 @@ environment:
   storage: local instance disks, or Ceph RBD for instances and images
   os: any
 risk: destructive
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-27, note: "standard snapshot path, local disks and Glance file store, upload slowed with tc: cause 1 (slow upload) and cause 4 (nova-compute restarted during the upload: task state cleared, image left queued, deleted) run, and an upload failure; not run: causes 2 and 3, the cold snapshot, the Ceph direct snapshot and rbd checks, the restart for a task state stuck with nova-compute up" }
 upstream_refs:
   - https://docs.openstack.org/nova/2026.1/configuration/config.html#libvirt.snapshots_directory
   - https://docs.openstack.org/nova/2026.1/configuration/config.html#workarounds.disable_libvirt_livesnapshot
   - https://docs.openstack.org/glance/2026.1/user/statuses.html
   - https://docs.openstack.org/kolla-ansible/2026.1/reference/shared-services/glance-guide.html
 authored_by: agent:ozarland-author
-last_verified: 2026-10-26
+last_verified: 2026-10-27
 ---
 
 # Instance snapshot never finishes. Task state image_pending_upload or image_uploading, image queued or saving
@@ -52,9 +53,10 @@ Read-only. With admin credentials:
 ```bash
 # 1. The instance's task state, host, and the snapshot action
 openstack server show <server-id> -c OS-EXT-STS:task_state -c OS-EXT-STS:power_state -c OS-EXT-SRV-ATTR:host
-openstack server event list <server-id>              # createImage, its start time and result
+openstack server event list <server-id>              # createImage and its start time (its result stays Success
+                                                     # even when the upload fails later)
 
-# 2. The image: status, size so far, when it was created
+# 2. The image: status, size (shown only once active), when it was created
 openstack image show <image-id> -c status -c size -c created_at -c updated_at
 
 # 3. Is the compute up?
@@ -98,9 +100,13 @@ sudo docker exec nova_compute ls -la /var/lib/nova/instances/snapshots/
 4. **End:** `Snapshot image upload complete`, then `Took <n> seconds to snapshot the instance on the hypervisor.`;
    the task state clears, the image is `active`.
 
-On any error, `nova-compute` logs `Failed to snapshot image` with a traceback, **deletes the image** in Glance
-(`delete_image_on_error`), and clears the task state. A snapshot that failed leaves no image behind; a snapshot that
-is stuck leaves a `queued` or `saving` image.
+On any error, `nova-compute` **deletes the image** in Glance (`delete_image_on_error`) and clears the task state,
+logging `Successfully reverted task state from <task state> on failure for instance.`; the error itself is in the
+lines before it (for an upload, `Error contacting glance server '<url>' for 'upload', retrying.` then `done
+trying.`, with tracebacks). On the standard path (local disks, or a direct snapshot that fell back) an error is not
+logged as `Failed to snapshot image`: read the lines before `Successfully reverted task state …`. On the direct
+(Ceph RBD) path, a failure is logged as `Failed to snapshot image` (ERROR, with a traceback); the lab did not run that
+path. A snapshot that failed leaves no image behind; a snapshot that is stuck leaves a `queued` or `saving` image.
 
 When `nova-compute` starts, it clears every snapshot task state left on its instances (`_init_instance`; the log
 line `Instance in transitional state <state> at start-up clearing task state` is at debug level). The image in
@@ -115,14 +121,17 @@ Glance is not cleaned up then.
 | `image_pending_upload` | `Performing standard snapshot because direct snapshot failed`, or `Beginning live/cold snapshot process` without Ceph | Writing the snapshot on the compute: disk space under `snapshots_directory`, disk speed, a large disk |
 | `image_uploading`, image `queued` | `Beginning live/cold snapshot process`, no `Snapshot extracted` line (Ceph RBD) | The direct snapshot is stuck in Ceph: Ceph health, the images pool |
 | `image_uploading`, image `saving` | `Snapshot extracted, beginning image upload` | The upload to Glance: network from the compute, the Glance API, Glance's storage |
-| cleared, image gone | `Failed to snapshot image` with a traceback | The traceback names the error |
+| cleared, image gone | `Successfully reverted task state from ... on failure for instance.`, errors before it | The errors before it name the cause (standard path) |
+| cleared, image gone | `Failed to snapshot image` (ERROR, traceback) | The direct (Ceph RBD) snapshot failed; the traceback names the cause |
 
 ## Possible causes
 
 ### Cause 1: a large disk on a slow path
 
-Nothing is broken; the copy takes time. The image `size` (check 2) grows, or the temporary file under
-`snapshots_directory` grows. With Kolla-Ansible, HAProxy's client and server timeouts for the Glance API are 6 hours
+Nothing is broken; the copy takes time. While the snapshot is `image_pending_upload`, the temporary file under
+`snapshots_directory` grows. Once `Snapshot extracted, beginning image upload` is logged, the file is complete and the
+upload has no progress indicator in the API: the image stays `saving` with no `size` until it turns `active`, and
+`glance-api-uwsgi.log` logs the `PUT /v2/images/<image-id>/file` line only when the request ends. With Kolla-Ansible, HAProxy's client and server timeouts for the Glance API are 6 hours
 (`haproxy_glance_api_client_timeout`, `haproxy_glance_api_server_timeout`): an upload longer than that is cut.
 
 ### Cause 2: no space on the compute for the snapshot
@@ -140,13 +149,16 @@ Glance API log has the error.
 ### Cause 4: `nova-compute` stopped or restarted during the snapshot
 
 The task state was cleared at restart, or stays set if `nova-compute` is down. The image remains `queued` or `saving`
-in Glance, empty or partial.
+in Glance, empty or partial. The temporary directory under `snapshots_directory`, with the full extracted disk, is
+left behind on the compute.
 
 ## Resolution
 
 ### For cause 1: wait, and watch progress
 
-Repeat quick check 2 and the `ls` of the snapshots directory. If the image `size` grows, let it finish. For large
+Repeat quick checks 1 and 2 and the `ls` of the snapshots directory. If the temporary file grows, or the upload
+started (`Snapshot extracted`) and the task state is still `image_uploading` with no error in the compute log, let it
+finish. For large
 instances, plan snapshots where the network and Glance allow, or snapshot their data volumes with Cinder instead.
 
 ### For causes 2 and 3: free space, then snapshot again
@@ -174,6 +186,22 @@ openstack image show <image-id> -c status -c size -c owner -c created_at -c prop
 openstack image delete <image-id>
 ```
 
+Then remove the temporary directory the interrupted snapshot left on the compute:
+
+```bash
+sudo docker exec nova_compute ls -la /var/lib/nova/instances/snapshots/      # tmp<random>/ with one file each
+```
+
+> 🛑 **Destructive.** Deletes the extracted copy of the instance's disk. Precondition: no snapshot is running on this
+> compute (no instance with a snapshot task state on it, no `Snapshot extracted` without `upload complete` since the
+> last start of `nova-compute`), and only `tmp*` directories older than the last start of `nova_compute`
+> (`sudo docker inspect -f '{{.State.StartedAt}}' nova_compute`); a running snapshot reads its file from there.
+> Cannot be undone.
+
+```bash
+sudo docker exec -u root nova_compute rm -rf /var/lib/nova/instances/snapshots/<tmp-dir>
+```
+
 With a direct snapshot (Ceph), deleting the `queued` image may not remove what Ceph already created: a snapshot or a
 clone can remain in the images pool or on the instance's disk. Look, read-only, with
 `rbd snap ls <pool>/<server-id>_disk` and `rbd ls -l <images-pool>`, and escalate to whoever runs Ceph rather than
@@ -187,7 +215,8 @@ snapshots too.
 > ⚠️ **State-changing.** Restarts `nova-compute` on that compute; running instances are not affected; operations in
 > progress on its instances fail. Undo: none needed.
 
-**Kolla-Ansible:** `sudo docker restart nova_compute`
+**Kolla-Ansible:** `sudo systemctl restart kolla-nova_compute-container.service` (about 60 s on the lab: the unit's
+`ExecStop` waits up to Kolla-Ansible's `docker_graceful_timeout`, 60 s by default)
 
 **Any:** restart the `nova-compute` service.
 
@@ -205,12 +234,35 @@ openstack image list --status queued ; openstack image list --status saving   # 
 
 To check that a snapshot is usable, boot a test instance from it, then delete the instance.
 
+## Lab observations
+
+Kolla-Ansible 22.2.0 (2026.1) all-in-one, local instance disks (qcow2), Glance file store, a CirrOS instance, the
+upload slowed with `tc` on the Glance API port, on 2026-10-27:
+
+- Cause 1 (upload at 4 Mbit/s): `image_pending_upload` and `queued` for about 10 s while the temporary file grew,
+  then `image_uploading` and `saving` with no `size`; `Snapshot extracted` to `Snapshot image upload complete` 108 s,
+  `Took 117.55 seconds to snapshot the instance on the hypervisor.`, image `active` at 53542912 bytes. The Glance
+  file store file stayed at 0 bytes during the upload.
+- An upload broken by the network (packets dropped): `Error contacting glance server '<url>' for 'upload',
+  retrying.` three times, `done trying.`, `Successfully reverted task state from image_uploading on failure for
+  instance.`; Glance `Failed to upload image data due to internal error: OSError: unable to receive chunked part`;
+  the image was deleted (`DELETE` 204). No `Failed to snapshot image` line (standard path). `server event list` showed the
+  `createImage` event, its `compute_snapshot_instance` result `Success`.
+- Cause 4: `systemctl restart kolla-nova_compute-container.service` 20 s into the upload took 61 s; Glance logged
+  `unable to receive chunked part` 16 s after the stop; `nova-compute` logged `Starting compute node` 5 s after the
+  restart returned and the task state was clear within 11 s after that; the image was left `queued` (no `size`), with `instance_uuid`, `owner` and `created_at` matching. `image delete`
+  worked; a new snapshot was `active` and an instance booted from it. A 52 MB `tmp<random>/` directory was left under
+  `/var/lib/nova/instances/snapshots/` and removed by hand.
+
 ## Validity and limits
 
+- Lab-run for causes 1 and 4 and for an upload failure on the standard snapshot path (see *Lab observations*). Not
+  run: cause 2 (compute disk full), cause 3 (Glance store full or unreachable), the cold snapshot, the direct
+  snapshot on Ceph RBD and its `rbd` checks, the `max_concurrent_snapshots` wait, the restart of `nova-compute` with
+  the task state stuck while it is up.
 - Written from Nova 2026.1 (`nova/compute/api.py` `snapshot`, `nova/compute/manager.py` `_snapshot_instance`,
   `delete_image_on_error`, `_init_instance`; `nova/virt/libvirt/driver.py` `snapshot`; `snapshots_directory`,
-  `disable_libvirt_livesnapshot`) and Kolla-Ansible 2026.1 (Glance role defaults and backends). Neither the problem
-  nor the clean-up was run on a lab.
+  `disable_libvirt_livesnapshot`) and Kolla-Ansible 2026.1 (Glance role defaults and backends).
 - Not covered: snapshots of instances booted from volume (they create Cinder volume snapshots, not a disk upload),
   Glance image import, Glance multi-store, and drivers other than libvirt.
 

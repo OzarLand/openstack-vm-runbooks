@@ -11,7 +11,8 @@ environment:
   storage: any
   os: any
 risk: state-changing
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0 all-in-one (libvirt 10.0.0, QEMU 8.2.2)", date: 2026-10-27, note: "Kolla-Ansible steps on a disposable lab: daemon log, runtime debug with virt-admin and its undo, persistent debug with nova_libvirt_logging_debug and its undo, instance log on start, stop, hard reboot, SIGKILL and SIGTERM of QEMU, console log; not run: the package-install (modular daemon) commands, live migration, KVM errors, panic, OOM killer" }
 upstream_refs:
   - https://gitlab.com/libvirt/libvirt/-/blob/v12.8.0/docs/kbase/debuglogs.rst
   - https://gitlab.com/libvirt/libvirt/-/blob/v12.8.0/docs/daemons.rst
@@ -35,7 +36,7 @@ upstream_refs:
   - https://github.com/openstack/kolla-ansible/blob/stable/2026.1/ansible/roles/nova-cell/defaults/main.yml
   - https://github.com/openstack/python-openstackclient/blob/stable/2026.1/openstackclient/compute/v2/console.py
 authored_by: agent:ozarland-author
-last_verified: 2026-10-26
+last_verified: 2026-10-27
 ---
 
 # Reading the libvirt and QEMU logs of a compute, and the guest console log
@@ -71,6 +72,13 @@ tail -n 100 /var/log/kolla/libvirt/libvirtd.log
 grep -E ': (error|warning) : ' /var/log/kolla/libvirt/libvirtd.log | tail -20
 ```
 
+Each start of `libvirtd` logs one `error` line per QEMU binary of the image that cannot use KVM, about sixty lines
+of noise (captured on a lab, Kolla-Ansible 22.2.0):
+
+```text
+2026-10-27 07:28:41.691+0000: 4585: error : virQEMUCapsCacheLookupDefault:5959 : invalid argument: the accel 'kvm' is not supported by '/usr/bin/qemu-system-sh4eb' on this host
+```
+
 **Any (package install):** first find out whether the host runs the modular daemons or the monolithic one. libvirt's
 [daemons documentation](https://gitlab.com/libvirt/libvirt/-/blob/v12.8.0/docs/daemons.rst) gives this test:
 
@@ -93,11 +101,16 @@ journalctl -u virtqemud --since "1 hour ago"     # or -u libvirtd
 ### Reading one line
 
 A file output line is built by `virLogOutputToFd` and `virLogFormatString` in
-[`src/util/virlog.c`](https://gitlab.com/libvirt/libvirt/-/blob/v12.8.0/src/util/virlog.c). Its shape is (format, not a
-captured line):
+[`src/util/virlog.c`](https://gitlab.com/libvirt/libvirt/-/blob/v12.8.0/src/util/virlog.c). Its shape is:
 
 ```text
 <YYYY-MM-DD HH:MM:SS.mmm+0000>: <thread-id>: <level> : <function>:<line> : <message>
+```
+
+A debug line captured on the lab:
+
+```text
+2026-10-27 07:31:03.520+0000: 4589: debug : qemuProcessLaunch:7638 : Creating domain log file
 ```
 
 - The timestamp is always **UTC** (`+0000`), whatever the host's time zone. Check the time zone of the other logs
@@ -135,8 +148,8 @@ prints them as `Logging filters: <filters>` and `Logging outputs: <outputs>`
 
 **Kolla-Ansible:** the `nova_libvirt` container runs `libvirtd --listen` with no idle timeout
 ([`kolla_nova_libvirt_start.sh`](https://github.com/openstack/kolla/blob/stable/2026.1/docker/nova/nova-libvirt/kolla_nova_libvirt_start.sh)).
-Run `virt-admin` inside the container, if the image ships it (`command -v virt-admin`); otherwise use the persistent
-method below. Write the debug file on the `kolla_logs` volume, next to the normal log:
+Run `virt-admin` inside the container, if the image ships it (`command -v virt-admin`; the 2026.1 Ubuntu image
+ships `/usr/bin/virt-admin`); otherwise use the persistent method below. Write the debug file on the `kolla_logs` volume, next to the normal log:
 
 ```bash
 # On the compute (root). With Podman, use podman exec instead of docker exec.
@@ -146,6 +159,9 @@ docker exec nova_libvirt virt-admin -c libvirtd:///system daemon-log-outputs    
 docker exec nova_libvirt virt-admin -c libvirtd:///system daemon-log-outputs "1:file:/var/log/kolla/libvirt/libvirtd-debug.log 3:file:/var/log/kolla/libvirt/libvirtd.log"
 docker exec nova_libvirt virt-admin -c libvirtd:///system daemon-log-filters "3:remote 4:event 3:util.json 3:util.object 3:util.dbus 3:util.netlink 3:node_device 3:rpc 3:access 1:*"
 ```
+
+On the lab, libvirt 10.0.0 printed the filters back as `3:*remote* 4:*event* ... 1:***`, and one instance start wrote
+about 780 KB to the debug file.
 
 **Any, modular daemon:** the daemon is usually socket-activated and stops after an idle timeout (120 seconds in common
 deployments, per the kbase), which would discard the runtime settings. `daemon-timeout --timeout 0` (libvirt 8.6.0 and
@@ -185,9 +201,13 @@ daemon, after which the configured timeout applies again. Delete the debug file 
 > under the same precondition.
 
 **Kolla-Ansible:** set `nova_libvirt_logging_debug: true` in `/etc/kolla/globals.yml` (or in the host's `host_vars`, to
-limit it to one compute), then run `kolla-ansible reconfigure` limited to that compute. This rewrites `libvirtd.conf`
-with `log_level = 1` and restarts `nova_libvirt`. Undo by removing the variable and reconfiguring again. With no
-filters, level 1 logs every module: expect a large file.
+limit it to one compute), then run `kolla-ansible reconfigure -i <inventory> --limit <compute> --tags nova`. This
+rewrites `libvirtd.conf` with `log_level = 1` and restarts `nova_libvirt`. Undo by removing the variable and running
+the same command again. With no filters, level 1 logs every module: expect a large file. On the lab, each
+reconfigure took about 4 minutes; the running instance's QEMU process kept its pid; `libvirtd.log` grew by 2 MB in the first 25 seconds
+after the restart. The debug lines go into `libvirtd.log` itself, not a separate file, and stay there after the
+undo (10 MB on the lab): leave it to Kolla-Ansible's logrotate (the `cron` container) rather than truncating it, which
+loses the lines.
 
 **Any:** set `log_filters` and `log_outputs` in the daemon's configuration file, then restart the socket or the service
 (`systemctl restart virtqemud.socket`, or `libvirtd.socket`/`libvirtd.service`), as the kbase describes. Whether the
@@ -203,8 +223,9 @@ sets `stdio_handler = "logd"` in
 [`qemu.conf.j2`](https://github.com/openstack/kolla-ansible/blob/stable/2026.1/ansible/roles/nova-cell/templates/qemu.conf.j2),
 which is also libvirt's default: the `virtlogd` daemon writes and rotates the file, so a running instance's log
 survives a restart of `libvirtd` alone. On Kolla-Ansible, `virtlogd` runs in the same `nova_libvirt` container
-(`kolla_nova_libvirt_start.sh`), so restarting the container restarts `virtlogd` too; what that does to the log of a
-running instance was not checked.
+(`kolla_nova_libvirt_start.sh`), so restarting the container restarts `virtlogd` too. On the lab, a restart of
+`nova_libvirt` (by a `reconfigure`) kept the instance log file; whether the running instance's later lines still
+reach it was not checked.
 
 ```bash
 # Any (package install), on the compute
@@ -225,8 +246,21 @@ upgrade or a redeploy. Copy the file out (`docker cp`, or `podman cp`) before su
 
 ### The lines libvirt writes, and what they mean
 
-All the lines below are format strings from libvirt's source (v12.8.0), not captured lines. libvirt timestamps
-them in UTC.
+All the lines below are format strings from libvirt's source (v12.8.0). libvirt timestamps them in UTC. Lines
+captured on a lab (Kolla-Ansible 22.2.0, whose Ubuntu image ships libvirt 10.0.0 and QEMU 8.2.2), with the action
+that wrote them:
+
+```text
+2026-10-27 07:31:03.698+0000: starting up libvirt version: 10.0.0, package: 10.0.0-2ubuntu8.19 (Ubuntu), qemu version: 8.2.2Debian 1:8.2.2+ds-0ubuntu1.18, kernel: 6.8.0-100-generic, hostname: compute-1
+char device redirected to /dev/pts/0 (label charserial0)
+2026-10-27T07:32:04.145625Z qemu-system-x86_64: terminating on signal 15 from pid 3513 (/usr/sbin/libvirtd)
+2026-10-27 07:32:04.380+0000: shutting down, reason=shutdown          # openstack server stop, guest answered ACPI
+2026-10-27 07:33:08.635+0000: shutting down, reason=crashed           # kill -9 of QEMU from the host: no QEMU line
+2026-10-27T07:34:51.263738Z qemu-system-x86_64: terminating on signal 15 from pid 3513 (/usr/sbin/libvirtd)
+2026-10-27 07:34:51.464+0000: shutting down, reason=destroyed         # openstack server reboot --hard
+2026-10-27T07:35:28.197568Z qemu-system-x86_64: terminating on signal 15 from pid 27070 ()
+2026-10-27 07:35:28.458+0000: shutting down, reason=shutdown          # kill -15 of QEMU from the host
+```
 
 | Line (format) | Written when | Source |
 |---|---|---|
@@ -245,7 +279,7 @@ compute, with the code path that sets them:
 
 | reason | What happened | Typical OpenStack cause |
 |---|---|---|
-| `shutdown` | QEMU reported a clean guest shutdown before it exited | The guest powered itself off, or answered the ACPI request of a `openstack server stop` within `shutdown_timeout` (60 s by default) |
+| `shutdown` | QEMU reported a shutdown before it exited: the guest's own, or QEMU's on a SIGTERM from outside libvirt (the lab: `kill -15` gave `reason=shutdown`, after `terminating on signal 15 from pid <n> ()`) | The guest powered itself off, or answered the ACPI request of a `openstack server stop` within `shutdown_timeout` (60 s by default) |
 | `destroyed` | libvirt was asked to kill the domain | `openstack server stop` after the guest ignored the shutdown request, hard reboot, delete, or the destroy that ends every Nova power off |
 | `crashed` | QEMU exited **without** a shutdown event (libvirt's debug log says it "disappeared without SHUTDOWN event; assuming the domain crashed") | QEMU killed from outside (for example by the kernel OOM killer), or QEMU aborted. Read the kernel log of that minute next |
 | `migrated` | The migration completed and the source QEMU was stopped | Live migration, on the source |
@@ -268,7 +302,7 @@ around them. Messages worth knowing (formats from QEMU v11.1.2):
 
 | Message (format) | Meaning | Source |
 |---|---|---|
-| `terminating on signal <n> from pid <pid> (<process name>)`, or `terminating on signal <n>` when the sender is unknown | QEMU received a catchable signal (15 is SIGTERM) and exits; the pid and name say who sent it. libvirt's destroy sends SIGTERM first, so this line naming the libvirt daemon, just **before** `shutting down, reason=destroyed`, is normal. Another sender is worth investigating | `qemu_kill_report` in `system/runstate.c` |
+| `terminating on signal <n> from pid <pid> (<process name>)`, or `terminating on signal <n>` when the sender is unknown | QEMU received a catchable signal (15 is SIGTERM) and exits; the pid and name say who sent it. libvirt sends SIGTERM to stop QEMU, so this line naming the libvirt daemon, just **before** `shutting down, reason=destroyed` or `reason=shutdown` (the lab showed it for both a hard reboot and a clean `server stop`), is normal. Another sender is worth investigating; an empty name `()` means the sender had already exited | `qemu_kill_report` in `system/runstate.c` |
 | `KVM internal error. Suberror: <n>` (no prefix), followed by `extra data[<i>]: ...` and, for suberror 1, `emulation failure` and a register dump | KVM could not handle a guest exit. The guest stops; check the kernel log of the host for KVM messages at the same time | `kvm_handle_internal_error` in `accel/kvm/kvm-all.c` |
 | `error: kvm run failed <errno text>` (no prefix) | The `KVM_RUN` call itself failed | `kvm_cpu_exec` in `accel/kvm/kvm-all.c` |
 
@@ -285,7 +319,15 @@ where `<state>` is one of `Started`, `Stopped`, `Paused`, `Resumed`, `Suspended`
 `handle_lifecycle_event` in [`manager.py`](https://github.com/openstack/nova/blob/stable/2026.1/nova/compute/manager.py)).
 If the instance was supposed to be running, the power state sync then logs
 `Instance shutdown by itself. Calling the stop API.` and stops it in Nova's database: Nova does not restart an instance
-that stopped on its own.
+that stopped on its own. On the lab, after QEMU was killed with SIGKILL (`reason=crashed` at 07:33:08.6):
+
+```text
+2026-10-27 07:33:23.653 6 INFO nova.compute.manager [-] [instance: <server-id>] VM Stopped (Lifecycle Event)
+2026-10-27 07:33:24.676 6 INFO nova.compute.manager [...] [instance: <server-id>] During _sync_instance_power_state the DB power_state (1) does not match the vm_power_state from the hypervisor (4). Updating power_state in the DB to match the hypervisor.
+2026-10-27 07:33:25.188 6 WARNING nova.compute.manager [...] [instance: <server-id>] Instance shutdown by itself. Calling the stop API. Current vm_state: active, current task_state: None, original DB power_state: 1, current VM power_state: 4
+```
+
+The lifecycle event came 15 seconds after the stop.
 
 ```bash
 # On the compute: the Nova side, then the libvirt side, of one instance
@@ -318,8 +360,9 @@ Nova returns at most the last 100 KiB (`MAX_CONSOLE_BYTES`), reading `console.lo
 console whose file does not exist yet returns an empty output and logs `console logfile for instance does not exist`.
 
 ```bash
-# On the compute, the same file directly (root). Kolla-Ansible: the directory is in the nova_compute volume
-docker exec nova_compute tail -n 50 /var/lib/nova/instances/<server-id>/console.log
+# On the compute, the same file directly (root). Kolla-Ansible: the directory is in the nova_compute volume;
+# console.log is root-only (mode 600) and docker exec runs as the nova user, hence -u root
+docker exec -u root nova_compute tail -n 50 /var/lib/nova/instances/<server-id>/console.log
 ```
 
 ### What to look for
@@ -343,18 +386,34 @@ Related runbooks: [compute disk full, instance paused](../lifecycle/compute-disk
 [live migration never completes](../migration/live-migration-never-completes-or-times-out.md),
 [after a compute reboot](../recovery/after-a-compute-reboot-instances-shutoff-or-without-network.md).
 
+## Lab observations
+
+On an all-in-one lab (OpenStack 2026.1, Kolla-Ansible 22.2.0, Ubuntu 24.04, Docker, the Kolla Ubuntu image with
+libvirt 10.0.0 and QEMU 8.2.2, a cirros 0.6.3 instance):
+
+| Step | Observed |
+|---|---|
+| Daemon log, `tail` and `grep` | As written; about 60 `accel 'kvm' is not supported by '/usr/bin/qemu-system-<arch>'` errors at each `libvirtd` start |
+| Runtime debug with `virt-admin`, then the undo | As written; `virt-admin` is in the image; 780 KB of debug for one instance start; after the undo the debug file stopped growing |
+| Persistent debug, `nova_libvirt_logging_debug: true` and `reconfigure --tags nova`, then the undo | As written, `failed=0`, 4 min 33 s and 3 min 47 s; the instance kept running (same QEMU pid); the debug lines stay in `libvirtd.log` |
+| Instance log on start, `server stop`, hard reboot, `kill -9` and `kill -15` of QEMU | The lines quoted above. A clean stop also shows `terminating on signal 15` from `libvirtd`; an outside SIGTERM gives `reason=shutdown`; SIGKILL gives `reason=crashed` with no QEMU line |
+| Nova side | `VM Stopped (Lifecycle Event)` 15 s after the crash, then `Instance shutdown by itself. Calling the stop API.`; `Instance shutdown successfully after 3 seconds.` for the clean stop (quoted from the `nova-compute.log` capture) |
+| Console log | `openstack console log show` as written; the `docker exec nova_compute tail` failed with `Permission denied` and needed `-u root` |
+
+Not run: the package-install commands (modular `virtqemud`), a live migration (one node), a guest that ignores ACPI,
+KVM internal errors, a guest panic, the OOM killer, a recreate of `nova_libvirt`.
+
 ## Validity and limits
 
-- Written from upstream source and documentation only: libvirt v12.8.0, QEMU v11.1.2, Nova, Kolla-Ansible and
-  python-openstackclient `stable/2026.1`. Every message above is a format string from that source, not a captured log
-  line. Older libvirt and QEMU releases may word some lines differently; check your versions with the `starting up`
-  header.
-- Not run on a lab yet. A lab capture of a boot, a stop, a forced stop, a live migration and a QEMU process killed with
-  SIGKILL is requested, to replace the formats with redacted real lines.
+- Written from upstream source and documentation: libvirt v12.8.0, QEMU v11.1.2, Nova, Kolla-Ansible and
+  python-openstackclient `stable/2026.1`. The lines marked as captured come from a Kolla-Ansible 22.2.0 lab, whose
+  image ships libvirt 10.0.0 and QEMU 8.2.2; the other messages are format strings from the source. Releases may word
+  some lines differently; check your versions with the `starting up` header.
+- The migration, KVM error, panic and OOM lines are not captured yet (see *Lab observations*).
 - The OOM killer line is quoted from the Linux kernel's current source; distribution kernels can differ. The kernel
   logs are covered on their own page.
-- `virt-admin` is not part of every distribution's libvirt client package; whether the Kolla image ships it depends on
-  the base distribution. Not checked.
+- `virt-admin` is not part of every distribution's libvirt client package. The Kolla 2026.1 Ubuntu image ships it;
+  other base distributions not checked.
 - The `panic` line needs a pvpanic or Hyper-V crash device in the domain. Whether Nova adds one for a given image
   was not checked; most instances never produce this line.
 

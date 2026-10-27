@@ -1,7 +1,7 @@
 ---
 title: nova-conductor or nova-scheduler is down. What still works, what waits, what fails, and where failed builds go (cell0)
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [nova, rabbitmq]
 deployment_methods: [kolla-ansible, any]
@@ -11,7 +11,8 @@ environment:
   storage: any
   os: any
 risk: destructive
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, RabbitMQ cluster with quorum queues", date: 2026-10-27, note: "nova_conductor, then nova_scheduler, stopped on all three controllers (systemctl stop); queued build ACTIVE 32 s after the conductor restart, computes up after 11 s; scheduler-down build ERROR in 61 s with fault MessagingTimeout; cell0 cleanup run; a start sent while the conductor was down left task_state powering-on, reset with --auto-approve --state error and a hard reboot; not run: resize, migrations, evacuate, a stop or reboot of a running instance, a local delete, cell0 database unreachable, --state active" }
 upstream_refs:
   - https://docs.openstack.org/nova/2026.1/admin/architecture.html
   - https://docs.openstack.org/nova/2026.1/admin/cells.html
@@ -38,16 +39,18 @@ database.
   running. Each `nova-compute` log says once (`nova/servicegroup/drivers/db.py`):
 
   ```text
-  WARNING nova.servicegroup.drivers.db [...] Lost connection to nova-conductor for reporting service status.
+  WARNING nova.servicegroup.drivers.db [-] Lost connection to nova-conductor for reporting service status.: oslo_messaging.exceptions.MessagingTimeout: Timed out waiting for a reply to message ID <message-id>
   ```
 
 - A `nova-compute` that starts while the conductors are down repeats (`nova/conductor/api.py`):
 
   ```text
-  WARNING nova.conductor.api [...] Timed out waiting for nova-conductor.  Is it running? Or did this service start before nova-conductor?  Reattempting establishment of nova-conductor connection...
+  WARNING nova.conductor.api [...] Timed out waiting for nova-conductor.  Is it running? Or did this service start before nova-conductor?  Reattempting establishment of nova-conductor connection...: oslo_messaging.exceptions.MessagingTimeout: Timed out waiting for a reply to message ID <message-id>
   ```
 
-- In RabbitMQ, the `conductor` queue grows and has no consumer.
+  about every 60 s, until `INFO nova.conductor.api [...] nova-conductor connection established successfully`.
+
+- In RabbitMQ, the `conductor` queue grows and has no consumer (on the lab: 3, then 6 messages, 0 consumers).
 
 ### nova-scheduler down on every controller
 
@@ -64,12 +67,13 @@ database.
 - The conductor log has the failure and its traceback (`nova/conductor/manager.py`):
 
   ```text
-  ERROR nova.conductor.manager [...] Failed to schedule instances
+  ERROR nova.conductor.manager [...] Failed to schedule instances: oslo_messaging.exceptions.MessagingTimeout: Timed out waiting for a reply to message ID <message-id>
+  ERROR nova.conductor.manager   File ".../nova/conductor/manager.py", line 1677, in schedule_and_build_instances
   ...
-  oslo_messaging.exceptions.MessagingTimeout: Timed out waiting for a reply <reply-queue> to message ID <message-id>.
   ```
 
-- In RabbitMQ, the `scheduler` queue has no consumer.
+- In RabbitMQ, the `scheduler` queue has no consumer. `openstack compute service list` still shows the schedulers `up`
+  until their heartbeat is older than `service_down_time`.
 
 ## Impact
 
@@ -79,7 +83,7 @@ database.
 | `openstack server list`, `show`, API reads | work (nova-api reads the databases itself) | work |
 | New instances | wait in `BUILD`, finish when conductor is back | fail after about `rpc_response_timeout` (60 s), `ERROR` in cell0 |
 | Resize, cold migration, live migration without a host, evacuate | wait in the queue | wait, then fail |
-| Start, stop, reboot of existing instances | sent to the compute, which needs the conductor for its database updates: they time out after `rpc_response_timeout` and can leave a `task_state` set (see *Resolution*, *A task state left set*) | work |
+| Start, stop, reboot of existing instances | accepted by the API and sent to the compute, which needs the conductor for its database updates: they time out (a start: `MessagingTimeout` in `nova-compute.log` about 2 min later on the lab) and can leave a `task_state` set (see *Resolution*, *A task state left set*) | work |
 | Compute services | reported `down` after `service_down_time` (60 s) | stay `up` |
 | Danger | deleting an instance while its compute is reported `down` is a local delete (see Diagnosis) | none beyond failed requests |
 
@@ -93,8 +97,9 @@ sudo docker ps -a --filter name=nova_conductor --filter name=nova_scheduler --fi
   --format '{{.Names}} {{.Status}}'
 
 # 2. Do their queues have consumers? (<vhost> is the one in transport_url, "/" by default on Kolla-Ansible)
-sudo docker exec rabbitmq rabbitmqctl list_queues -p <vhost> name messages consumers | grep -E '^(conductor|scheduler)\b'
-#    expected: consumers > 0 on both. 0 consumers and messages growing on conductor: no conductor listening.
+sudo docker exec rabbitmq rabbitmqctl list_queues -p <vhost> name messages consumers | grep -E '^(conductor|scheduler)\s'
+#    expected: consumers > 0 on both (\s skips the per-host conductor.<host> and scheduler.<host> queues).
+#    0 consumers and messages growing on conductor: no conductor listening.
 
 # 3. Their logs (Kolla-Ansible)
 sudo tail -n 50 /var/log/kolla/nova/nova-conductor.log
@@ -119,7 +124,7 @@ openstack compute service list
 - Resize, migrations, evacuate and rebuild are also cast to the conductor (`ComputeTaskAPI`).
 
 When a conductor comes back, it consumes the queued requests, and the computes log `Recovered from being unable to
-report status.`
+report status.` (on the lab: computes `up` 11 s and the queued build `ACTIVE` 32 s after the restart).
 
 ### What the scheduler does, so what fails without it
 
@@ -216,14 +221,19 @@ Choose the state from the power state: `active` if the guest runs (`Running`), o
 it (a plain start is refused from `error`: `start` accepts only a stopped instance). When a stop timed out, the
 compute has often powered the guest off already: setting `active` would leave a record that says it runs. Resetting
 the state is an admin action (`os_compute_api:os-admin-actions:reset_state` is admin-only by default).
+On the lab, a hard reboot was refused with the `task_state` at `powering-on` (`409 ... Cannot 'reboot' instance
+<server-id> while it is in task_state powering-on`): reset the state first. A hard reboot is accepted only with no
+`task_state` or one of `task_states.ALLOW_REBOOT` (`rebooting`, `reboot_pending`, `reboot_started`, `resuming`,
+`rebooting_hard`, `unpausing`, `pausing`, `suspending`). `openstack server set --state` asks for confirmation
+(python-openstackclient 10.5.0); `--auto-approve` skips the question, and without a terminal the command fails.
 
 > ⚠️ **State-changing.** Changes the instance record only (its `vm_state`, and clears `task_state`); nothing happens
 > to the guest. Precondition: the conductor is back and the power state has been checked as above. Undo: set the
 > other state with the same command; the old `task_state` cannot be restored, which is the point.
 
 ```bash
-openstack server set --state active <server-id>     # the guest runs
-openstack server set --state error <server-id>      # the guest is off
+openstack server set --auto-approve --state active <server-id>     # the guest runs
+openstack server set --auto-approve --state error <server-id>      # the guest is off
 ```
 
 If the guest is off and was set to `error`, bring it back with a hard reboot:
@@ -242,7 +252,7 @@ openstack server reboot --hard <server-id>
 > and a network.
 
 ```bash
-sudo docker exec rabbitmq rabbitmqctl list_queues -p <vhost> name messages consumers | grep -E '^(conductor|scheduler)\b'
+sudo docker exec rabbitmq rabbitmqctl list_queues -p <vhost> name messages consumers | grep -E '^(conductor|scheduler)\s'
 # expected: consumers > 0, messages near 0
 openstack compute service list
 # expected: every nova-conductor, nova-scheduler and nova-compute up
@@ -259,7 +269,19 @@ openstack server delete --wait <test-name>
   `nova/conf/api.py`
   (`list_records_by_skipping_down_cells`), `nova/compute/api.py` (local delete), and Kolla-Ansible 2026.1 (`nova`
   and `nova-cell` role defaults: `nova_scheduler`, `nova_conductor`, `nova_super_conductor` only with
-  `enable_cells`). The MessagingTimeout text is oslo.messaging's. Not reproduced on a lab.
+  `enable_cells`). The MessagingTimeout text is oslo.messaging's.
+- Lab observations (Kolla-Ansible 22.2.0, 2026.1, 3 controllers + 2 computes, RabbitMQ quorum queues, defaults
+  `rpc_response_timeout` 60 and `service_down_time` 60, 2026-10-27): with every `nova_conductor` stopped, a new build
+  stayed `BUILD`/`scheduling`, both computes were `down` 51-58 s after the last conductor stopped, the `conductor`
+  queue had 0 consumers and 3, then 6 messages; a `server start` of a stopped instance was accepted, `nova-compute`
+  logged `MessagingTimeout` 120-122 s later (two runs) and the instance kept `task_state` `powering-on` after the
+  conductors were back; `systemctl restart` of the conductors brought the computes `up` in 11 s and the queued build
+  `ACTIVE` in 32 s, not resubmitted; `--auto-approve --state error` then `reboot --hard` brought the instance
+  `ACTIVE`. With every `nova_scheduler` stopped, a build went `ERROR` 61-63 s after creation (two runs), no host,
+  fault `MessagingTimeout`; the cleanup commands ran as written. `Timed out waiting for nova-conductor` was seen
+  when the computes started before the conductors at lab start-up, not injected.
+- Not run: resize, migrations, evacuate, a stop or reboot of a running instance, a delete while the computes were
+  `down` (local delete), the cell0 database unreachable, `--state active`, `kolla-ansible reconfigure`.
 - The impact table follows the code paths; actions not listed (console, attach) behave like the closest one but were
   not traced.
 - Whether a queued cast survives depends on the queue type and RabbitMQ staying up: with Kolla-Ansible 2026.1's

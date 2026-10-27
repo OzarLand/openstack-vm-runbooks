@@ -11,7 +11,8 @@ environment:
   storage: any
   os: any
 risk: read-only
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-27, note: "request line and global request id for a create, 409 over capacity and unit constraints (test consumer via osc-placement), over-capacity warning after an inventory change, scheduler no-candidates line; not observed: retry limit, generation conflict, 500, the nova-compute report-client lines" }
 upstream_refs:
   - https://opendev.org/openstack/placement/src/branch/stable/2026.1/placement/requestlog.py
   - https://opendev.org/openstack/placement/src/branch/stable/2026.1/placement/objects/allocation.py
@@ -20,7 +21,7 @@ upstream_refs:
   - https://opendev.org/openstack/nova/src/branch/stable/2026.1/nova/scheduler/client/report.py
   - https://opendev.org/openstack/nova/src/branch/stable/2026.1/nova/scheduler/manager.py
 authored_by: agent:ozarland-author
-last_verified: 2026-10-26
+last_verified: 2026-10-27
 ---
 
 # Reading the Placement logs, and the Placement lines in Nova's logs
@@ -54,8 +55,8 @@ allocation write can be found from the instance's create request:
 
 ```bash
 # Kolla-Ansible, on the controllers
-grep "<nova-request-id>" /var/log/kolla/placement/placement-api.log
-grep -E 'status: (409|400|500)' /var/log/kolla/placement/placement-api.log | tail -20
+sudo grep "<nova-request-id>" /var/log/kolla/placement/placement-api.log
+sudo grep -E 'status: (409|400|500)' /var/log/kolla/placement/placement-api.log | tail -20
 ```
 
 The useful URIs: `GET /allocation_candidates?...` (the scheduler asks where the request fits), `PUT /allocations/<consumer>`
@@ -110,10 +111,10 @@ Sources: `nova/scheduler/client/report.py`.
 
 ```bash
 # On a compute: Placement problems seen by its report client
-grep -nE "Placement API service is not responding|Placement service credentials|Failed to update inventory|Failed to save allocation" \
+sudo grep -nE "Placement API service is not responding|Placement service credentials|Failed to update inventory|Failed to save allocation" \
   /var/log/kolla/nova/nova-compute.log | tail
 # Then follow one placement request id to Placement
-grep "<placement-req-id>" /var/log/kolla/placement/placement-api.log
+sudo grep "<placement-req-id>" /var/log/kolla/placement/placement-api.log
 ```
 
 ## Reading a Placement problem in order
@@ -125,13 +126,38 @@ grep "<placement-req-id>" /var/log/kolla/placement/placement-api.log
 4. **The numbers**: `openstack resource provider inventory list <uuid>` and
    `openstack resource provider usage show <uuid>` (with `osc-placement`) against what the line says.
 
+## Captured on a lab
+
+Kolla-Ansible 22.2.0 (2026.1) all-in-one, 2026-10-27, ids replaced. The create of an instance, found in
+`placement-api.log` by Nova's request id (the first id in brackets is Nova's, the global request id):
+
+```text
+INFO placement.requestlog [req-<nova-request-id> req-<placement-request-id> <user-id> <project-id> - - default default] 192.0.2.10 "GET /allocation_candidates?limit=1000&resources=DISK_GB%3A1%2CMEMORY_MB%3A512%2CVCPU%3A1&root_required=..." ...
+INFO placement.requestlog [req-<nova-request-id> req-<placement-request-id> ...] 192.0.2.10 "PUT /allocations/<server-id>" status: 204 len: 0 microversion: 1.36
+```
+
+Allocations written by hand for a test consumer with `openstack resource provider allocation set` (osc-placement),
+and an inventory change with `openstack resource provider inventory set --amend`:
+
+```text
+WARNING placement.objects.allocation [...] Over capacity for MEMORY_MB on resource provider <rp-uuid>. Needed: 15400, Used: 512, Capacity: 15480.0
+INFO placement.requestlog [...] 192.0.2.10 "PUT /allocations/<consumer>" status: 409 ...
+WARNING placement.objects.allocation [...] Allocation for MEMORY_MB on resource provider <rp-uuid> violates min_unit, max_unit, or step_size. Requested: 20000, min_unit: 1, max_unit: 15992, step_size: 1
+INFO placement.requestlog [...] 192.0.2.10 "PUT /allocations/<consumer>" status: 409 len: 415 microversion: 1.28
+WARNING placement.objects.resource_provider [...] Resource provider <rp-uuid> is now over-capacity for MEMORY_MB
+```
+
+The client got `The requested amount would exceed the capacity. (HTTP 409)` and `... would violate inventory
+constraints. (HTTP 409)`. After the inventory change (`reserved` raised by hand in Placement), `nova-compute` did
+not put its own value back within 3 minutes: it was restored by hand.
+
 ## Validity and limits
 
-- Every message is quoted from Placement and Nova 2026.1. **None was captured on a lab.** A lab request asks for real
-  samples.
-- Which status code accompanies each Placement warning follows from the exceptions raised in the source
-  (`InvalidAllocationCapacityExceeded`, `InvalidAllocationConstraintsViolated`, `ResourceProviderConcurrentUpdateDetected`);
-  the exact code was not observed.
+- Every message is quoted from Placement and Nova 2026.1; *Captured on a lab* has the lines observed. Not observed:
+  `Exceeded retry limit`, consumer generation conflicts, the 500 line, and the report client's lines in
+  `nova-compute.log`.
+- The 409 for over capacity and for unit constraints was observed; the code for `Exceeded retry limit` follows from
+  the source (`ResourceProviderConcurrentUpdateDetected`) and was not observed.
 - The `osc-placement` commands require that client plugin.
 
 ## Related
