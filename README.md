@@ -173,6 +173,7 @@ lab), **documentation** (upstream documentation and source), **production incide
 | [nova-compute is down and the compute refuses an SSH login, but the host is alive](recovery/nova-compute-down-host-alive-ssh-refused.md) | nova, libvirt, ssh | 2026.1 | lab-verified | lab run |
 | [nova-compute is down on a compute, but its instances are still running](recovery/nova-compute-down-instances-still-running.md) | nova, libvirt | 2026.1 | lab-verified | lab run |
 | [RPC timeouts in every service, computes reported down. RabbitMQ is partitioned, blocked by an alarm, or a node is missing](recovery/rabbitmq-partition-or-alarm-rpc-timeouts.md) | rabbitmq, oslo.messaging, kolla-ansible, nova, neutron, cinder | 2026.1 | draft | documentation |
+| [nova-conductor or nova-scheduler is down. What still works, what waits, what fails, and where failed builds go (cell0)](recovery/nova-conductor-or-scheduler-down-what-still-works.md) | nova, rabbitmq | 2026.1 | draft | documentation |
 | [Reopening provisioning after a control-plane incident. Stop the APIs, recover, verify, reopen](recovery/reopening-provisioning-after-control-plane-incident.md) | nova, neutron, rabbitmq, mariadb, haproxy | not recorded ([help wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=recovery%2Freopening-provisioning-after-control-plane-incident.md&title=Release+for+recovery%2Freopening-provisioning-after-control-plane-incident.md)) | draft | book |
 
 ## Pages wanted next
