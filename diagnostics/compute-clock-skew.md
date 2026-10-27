@@ -1,7 +1,7 @@
 ---
 title: The logs of one compute do not line up with the controllers. Its clock has drifted
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [nova, neutron, ntp]
 deployment_methods: [kolla-ansible]
@@ -11,12 +11,13 @@ environment:
   storage: local ephemeral disk on the computes, no Cinder
   os: ubuntu-24.04 (noble), docker, systemd-timesyncd
 risk: state-changing
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, multinode (3 controllers, 2 computes)", date: 2026-10-27, note: "compute clock 300 s back with timesyncd stopped and with it disabled, and cause 2 (unreachable NTP server), on a disposable lab; quick checks (timesync-status started the stopped service), request-id comparison, fixes with sudo and Verification run; chrony and the plain ssh loop not run" }
 upstream_refs:
   - https://docs.openstack.org/install-guide/environment-ntp.html
   - https://docs.openstack.org/nova/latest/admin/service-groups.html
 authored_by: agent:ozarland-author
-last_verified: 2026-10-21
+last_verified: 2026-10-27
 ---
 
 # The logs of one compute do not line up with the controllers. Its clock has drifted
@@ -59,11 +60,17 @@ Run on each host (controllers and computes):
 # 1. Is the clock synchronised, and is a time service running?
 timedatectl
 
-# 2. Details of the synchronisation (systemd-timesyncd)
+# 2. Details of the synchronisation (systemd-timesyncd). Not read-only if the service is only stopped: see below.
 timedatectl timesync-status
 #    with chrony instead:
 chronyc tracking
 ```
+
+`timedatectl timesync-status` asks systemd-timesyncd over D-Bus, and D-Bus starts the service if it is stopped but
+not disabled (`systemctl stop`): on the lab, the clock jumped back to the right time at once and the offset was
+gone before it was measured. When `timedatectl` shows `NTP service: inactive`, measure the offset first (below) and
+skip check 2. After `timedatectl set-ntp false` (service disabled), it only prints `Failed to query server: Unit
+dbus-org.freedesktop.timesync1.service not found.`
 
 Compare the clocks of all hosts in one run, from the deployment host:
 
@@ -78,6 +85,9 @@ ansible -i <inventory> all -m command -a 'date -u +%s'
 ```bash
 for h in controller-1 compute-1 compute-2; do echo "$h $(ssh $h date -u +%s)"; done
 ```
+
+(Needs SSH from where you run it to each host with known host keys; on the lab, the Kolla-Ansible deployment host
+had neither for plain `ssh`, and the Ansible variant was used.)
 
 On a controller, check that the services of the compute are healthy anyway (this is what makes the drift silent):
 
@@ -114,10 +124,13 @@ To measure the offset in the logs, compare the same event on both sides, for exa
 
 ```bash
 # On a controller
-grep <request-id> /var/log/kolla/nova/nova-conductor.log | head -n 3
+sudo grep <request-id> /var/log/kolla/nova/nova-conductor.log | head -n 3
 # On the compute
-grep <request-id> /var/log/kolla/nova/nova-compute.log | head -n 3
+sudo grep <request-id> /var/log/kolla/nova/nova-compute.log | head -n 3
 ```
+
+On the lab, with the compute 300 s behind, the conductor stamped `07:47:18.617` and the compute's `Claim successful`
+line, which comes after it, `07:42:19.517`: 299 s apart. Without `sudo`, `grep` gets `Permission denied`.
 
 ## Possible causes
 
@@ -128,8 +141,10 @@ the lab (with a clock also set back by hand).
 
 ### Cause 2: the time source cannot be reached
 
-The service runs, but `timedatectl timesync-status` (or `chronyc sources`) shows no usable server. Not reproduced on
-the lab.
+The service runs, but `timedatectl timesync-status` (or `chronyc sources`) shows no usable server. On the lab
+(systemd-timesyncd pointed at an address that does not answer): `System clock synchronized: no`, `NTP service:
+active`, `Packet count: 0` in `timesync-status`, and `Timed out waiting for reply from <server>:123` in
+`journalctl -u systemd-timesyncd`.
 
 ### Cause 3: the clock was set by hand
 
@@ -148,14 +163,14 @@ its first synchronisation.
 > a reachable time source. Undo: stop the service (the clock then drifts again).
 
 ```bash
-systemctl start systemd-timesyncd
-systemctl enable systemd-timesyncd
+sudo systemctl start systemd-timesyncd
+sudo systemctl enable systemd-timesyncd
 ```
 
 With chrony instead:
 
 ```bash
-systemctl start chrony
+sudo systemctl start chrony
 ```
 
 Wait for the synchronisation:
@@ -176,10 +191,10 @@ chrony configuration), then restart the service.
 > reached. Affects this host only. Undo: none needed.
 
 ```bash
-systemctl restart systemd-timesyncd
+sudo systemctl restart systemd-timesyncd
 ```
 
-Not tested on the lab.
+On the lab, once the source answered again, the clock was synchronised 1 s after the restart.
 
 ## Verification
 
@@ -223,13 +238,27 @@ on that compute. Observed for 180 s:
 - Starting systemd-timesyncd brought the clock back within 5 s of the first controller.
 - The lab expected the heartbeats of the compute to fail. None did, and that is the finding: the drift is silent.
 
+A second run (2026-10-27, three controllers and two computes, same build) set compute-2 300 s back three times:
+
+- With the service stopped by `systemctl stop`, `timedatectl timesync-status` (*Quick checks* 2) started it through
+  D-Bus and the clock was right again at once; `timedatectl`, `timedatectl show`, `systemctl status` and
+  `journalctl` did not. With `timedatectl set-ntp false`, check 2 failed harmlessly.
+- During the drift: Ansible `date -u +%s` showed compute-2 300 s behind the five other hosts; `nova-compute` up and
+  the Open vSwitch agent alive; an instance on compute-2 ACTIVE in 27 s; the request id 299 s apart between
+  `nova-conductor` and `nova-compute`; no time-related WARNING or ERROR in `nova-compute` or the Open vSwitch agent.
+- `sudo systemctl start` and `enable systemd-timesyncd`: synchronised within 1 s. Without `sudo`: `Interactive
+  authentication required`.
+- Cause 2 (the only server an address that does not answer): reproduced as described above; fixed by restoring the
+  server and `sudo systemctl restart systemd-timesyncd`.
+
 ## Validity and limits
 
 - Observed on one lab build with the configuration above: OpenStack 2026.1, Kolla-Ansible 22.2.0, ML2/OVS, Docker,
   Ubuntu 24.04 with systemd-timesyncd, Nova's database service group driver.
 - Observed: a 300 s backward drift on one compute, for 180 s; services up, new instance created, no loss, no time
   warning in the logs; recovery by starting systemd-timesyncd.
-- Not run: chrony, cause 2 (unreachable source), the log comparison by request id, `enable` of the service.
+- Not run: chrony; the plain `ssh` comparison loop (Ansible variant used). Cause 2, the log comparison by request
+  id and `enable` of the service were run in the second lab run.
 - Not tested: a drift on a controller, a forward drift, an offset larger than 300 s or lasting longer than a few
   minutes, TLS certificate checks, other service group drivers, OVN, other releases, other deployment tools,
   production scale. Any of these may break things this page says stay healthy.

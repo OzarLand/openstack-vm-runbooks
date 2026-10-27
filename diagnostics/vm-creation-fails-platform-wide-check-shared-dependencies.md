@@ -1,8 +1,8 @@
 ---
 title: VM creation fails platform-wide while instances keep running. Check the shared dependencies first
 kind: diagnostic
-status: draft
-openstack_releases: [unrecorded]
+status: lab-verified
+openstack_releases: ["2026.1"]
 components: [nova, neutron, rabbitmq, mariadb, memcached, haproxy, keystone]
 deployment_methods: [any]
 environment:
@@ -11,13 +11,15 @@ environment:
   storage: any
   os: any
 risk: read-only
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, RabbitMQ 4.2.9 with Khepri, Galera + ProxySQL", date: 2026-10-27, note: "every read-only check run on a healthy lab and during an injected RabbitMQ memory alarm (1.5 min), with the Kolla commands corrected (mariadb client, no -it); a RabbitMQ partition and an alarm also observed in the RPC-timeouts page's run; not run: the certificate check (no TLS on the lab), Galera non-Primary or flow control, memcached, Fernet" }
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, RabbitMQ 4.2.9 with Khepri, Galera + ProxySQL", date: 2026-10-27, note: "every read-only check run on a healthy lab and during an injected RabbitMQ memory alarm (1.5 min), with the Kolla commands corrected (mariadb client, no -it); a RabbitMQ partition and an alarm also observed in the RPC-timeouts page's run; not run: the certificate check (no TLS on the lab), Galera non-Primary or flow control, memcached, Fernet" }
 upstream_refs:
   - https://galeracluster.com/library/documentation/monitoring-cluster.html
   - https://www.rabbitmq.com/docs/partitions
   - https://docs.openstack.org/oslo.messaging/latest/admin/rabbit.html
 authored_by: agent:ozarland-author
-last_verified: 2026-10-18
+last_verified: 2026-10-27
 ---
 
 # VM creation fails platform-wide while instances keep running. Check the shared dependencies first
@@ -50,7 +52,7 @@ openstack compute service list                   # any 'down'? all of them down 
 openstack network agent list                     # same question (agent-based backends)
 
 # 2. Transitional-state instances piling up
-openstack server list --all-projects --long -c ID -c Status -c "Task State" -c Created | grep -E 'BUILD|scheduling|networking|spawning'
+openstack server list --all-projects --long -c ID -c Status -c "Task State" | grep -E 'BUILD|scheduling|networking|spawning'
 
 # 3. API health at the load balancer: are the APIs answering, and how slowly?
 time openstack token issue -f value -c id >/dev/null
@@ -91,7 +93,9 @@ SHOW STATUS LIKE 'wsrep_local_state_comment';    -- Synced expected; Donor/Desyn
 SHOW STATUS LIKE 'wsrep_flow_control_paused';    -- fraction of time replication stalled the node; near 1 = stuck
 ```
 
-**Kolla-Ansible:** `docker exec -it mariadb mysql -uroot -p -e "SHOW STATUS LIKE 'wsrep%'"` on a controller. Run it
+**Kolla-Ansible:** `sudo docker exec mariadb mariadb -uroot -p<database_password> -e "SHOW STATUS LIKE 'wsrep%'"` on a
+controller (the 2026.1 image has no `mysql` command; `-it` fails when there is no terminal; the password is
+`database_password` in `/etc/kolla/passwords.yml` on the deploy host). Run it
 on every node: a node in `non-Primary` while the others are `Primary` is a node that lost quorum.
 
 ### RabbitMQ
@@ -103,7 +107,7 @@ rabbitmqctl list_queues name messages consumers | awk '$2>0 && $3==0'    # queue
 rabbitmqctl list_unresponsive_queues
 ```
 
-**Kolla-Ansible:** prefix with `docker exec -it rabbitmq`. A partition means the bus is split into sides the services
+**Kolla-Ansible:** prefix with `sudo docker exec rabbitmq`. A partition means the bus is split into sides the services
 cannot agree on; services connected to different sides exchange nothing. Two facts decide what you may do next:
 whether the cluster uses the Mnesia metadata store (every version before 3.13, and clusters upgraded in place),
 where `cluster_partition_handling` (`pause_minority` is the usual OpenStack choice) governs behaviour, or the Khepri
@@ -125,8 +129,8 @@ of a failed boot. Typical confirmations: `AMQP server on ... is unreachable`, `M
 
 | Cause | How to tell |
 |---|---|
-| RabbitMQ network partition | `cluster_status` lists partitions; RPC timeouts in every service; agents report up but nothing moves |
-| RabbitMQ memory or disk alarm | `check_alarms`; publishers block, APIs hang rather than fail |
+| RabbitMQ network partition | `cluster_status` lists partitions (Mnesia), or, with Khepri, the nodes disagree on the running nodes while *Network Partitions* stays `(none)`; RPC timeouts in every service; agents report up but nothing moves |
+| RabbitMQ memory or disk alarm | `check_alarms`; publishers block: reads answer, but every compute goes `down` and every agent dead, and a create hangs until the load balancer gives up (502 after 60 s on Kolla-Ansible) |
 | Galera node out of Primary, or whole cluster non-Primary | `wsrep_cluster_status`; services log WSREP errors |
 | Galera flow control stalled | `wsrep_flow_control_paused` near 1; everything slow, nothing failing outright |
 | Certificate expired, Fernet keys inconsistent | Every API call fails authentication; dated exactly |
@@ -155,6 +159,13 @@ rehearse before you need it.
 
 Derived from an operator's incident (users could not create VMs, instances ran, cause later established as a
 RabbitMQ partition) and from the shared-component signals they recommend watching; release not recorded.
+Lab (Kolla-Ansible 22.2.0, 2026.1, 3 controllers, RabbitMQ 4.2.9 with Khepri, Galera with ProxySQL, 2026-10-27):
+every check ran on a healthy lab and during a memory alarm injected on one RabbitMQ node: 2 computes `down`, 14/14
+agents dead, a new instance in `BUILD`/`scheduling`, token and list still 1.4-1.6 s, `check_alarms` and
+`cluster_status` showed the alarm, no queue with messages and no consumer, `list_unresponsive_queues` empty; the
+instance went `ACTIVE` once the alarm cleared. A partition with Khepri was observed in the run of
+[RPC timeouts](../recovery/rabbitmq-partition-or-alarm-rpc-timeouts.md). Not run on the lab: the certificate check
+(no TLS), Galera out of Primary or flow control, memcached, Fernet keys.
 RabbitMQ facts (Khepri, quorum queues, removal of classic mirroring in 4.0) are version-dependent: check which
 store and queue types your cluster uses before applying partition guidance. OVN deployments do not carry Neutron
 agent RPC on RabbitMQ (OVN uses its own databases), so the "agents stale" symptom does not apply to them.
