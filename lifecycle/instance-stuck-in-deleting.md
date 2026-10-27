@@ -132,7 +132,8 @@ an admin's delete goes through a lock (`check_instance_lock` in `nova/compute/ap
 ### For cause 1: restart `nova-compute`, which resumes the delete
 
 Fix the message bus first if it is the cause
-([shared dependencies](../diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md)).
+([RabbitMQ](../recovery/rabbitmq-partition-or-alarm-rpc-timeouts.md),
+[shared dependencies](../diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md)).
 At start-up, `nova-compute` resumes every delete left in `deleting` on its host (`_init_instance`).
 
 > ⚠️ **State-changing.** Restarts `nova-compute` on that compute; running instances are not affected, operations in
