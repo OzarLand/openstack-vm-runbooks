@@ -60,8 +60,11 @@ ports in that group matches).
 - A security group is a set of **allow** rules on a port, default deny: traffic matches if any rule of any of the
   port's groups allows it. Groups add up.
 - Rules are **stateful**: allowing ingress TCP 22 also allows the return traffic.
-- The `default` group of a project allows all egress and denies all ingress, unless changed. A port created without a
-  group gets `default`.
+- The `default` group of a project allows all egress, and allows ingress **only from ports in `default` itself**
+  (IPv4 and IPv6, every protocol and port): Neutron creates it from its default security group rule templates, two
+  of which have `remote_group_id` set to the group itself (`neutron/db/securitygroups_db.py`). So instances that share
+  `default` reach each other on every port. An admin can change these templates
+  (`openstack default security group rule list`). A port created without a group gets `default`.
 - Neutron also adds basic and anti-spoofing rules: a port can only send from its own MAC and IP addresses, or those in
   its `allowed_address_pairs`.
 - With `port_security_enabled` set to `False` on a port, none of this applies: no security group, no anti-spoofing,
@@ -71,8 +74,8 @@ ports in that group matches).
 
 - **ML2/OVS with Kolla-Ansible 2026.1**: `openvswitch_agent.ini` sets
   `firewall_driver = neutron.agent.linux.iptables_firewall.OVSHybridIptablesFirewallDriver`. Each port gets a Linux
-  bridge (`qbr…`) between the instance and `br-int`, and iptables chains on the compute, named after the port's device
-  (`tap` followed by the beginning of the port ID): `…-i<id>` for ingress, `…-o<id>` for egress, `…-s<id>` for
+  bridge (`qbr…`) between the instance and `br-int`, and iptables chains on the compute, named after the port ID
+  (its first 10 characters): `neutron-openvswi-i<id>` for ingress, `…-o<id>` for egress, `…-s<id>` for
   anti-spoofing; unmatched traffic goes to `sg-fallback`, which drops it (`neutron/agent/linux/iptables_firewall.py`).
   The Open vSwitch agent writes them; while it is dead, rule changes are not applied on that compute.
 - **ML2/OVS with the native driver** (`firewall_driver = openvswitch`): OpenFlow rules in `br-int`. The networking
@@ -85,10 +88,12 @@ ports in that group matches).
 
 To see what is enforced:
 
-**Kolla-Ansible, ML2/OVS:** on the compute,
+**Kolla-Ansible, ML2/OVS:** on the compute, inside the agent's container (a host using nftables may not show what
+the container wrote),
 
 ```bash
-sudo iptables-save | grep -i <first-10-characters-of-port-id>      # the port's chains and their rules
+sudo docker exec neutron_openvswitch_agent iptables-save | grep -i <first-10-characters-of-port-id>
+sudo docker exec neutron_openvswitch_agent ip6tables-save | grep -i <first-10-characters-of-port-id>
 ```
 
 **Kolla-Ansible, ML2/OVN:** on a host running the OVN northbound database,
@@ -127,6 +132,12 @@ security group allows it, something else drops it
 Traffic from an address listed in `allowed_address_pairs`, or arriving on another port of the instance with other
 groups, is allowed by design.
 
+### Cause 6: both instances are in the `default` group
+
+Traffic that should be blocked passes between two instances of the project because both ports use `default`, which
+allows all ingress from its own members (see *How Neutron applies security groups*). Quick checks 1 and 2 show it: an
+`ingress` rule with `default` itself as remote group.
+
 ## Resolution
 
 ### For cause 1: add the rule the traffic needs, to the group the port uses
@@ -145,14 +156,17 @@ Or add a group to the port (`openstack port set --security-group <group> <port-i
 
 > ⚠️ **State-changing.** Filtering starts on that port: traffic not allowed by its groups, or sent from addresses that
 > are not the port's own, is dropped at once. Check the groups first, and the allowed address pairs if the instance
-> uses other addresses (a VRRP address, a router guest). Undo: `openstack port set --disable-port-security <port-id>`
-> (needs the port's security groups removed first).
+> uses other addresses (a VRRP address, a router guest). Undo:
+> `openstack port set --no-security-group --disable-port-security <port-id>`.
 
 ```bash
 openstack port set --enable-port-security --security-group <group> <port-id>
 ```
 
 ### For cause 3: bring the agent back
+
+> ⚠️ **State-changing.** Restarting an agent touches every port on that host; read the warnings in the page linked
+> below first.
 
 Start the Open vSwitch agent or `ovn-controller` on the compute, or `ovn-northd`
 ([port binding failed](port-binding-failed.md), cause 1, for the restarts and their warnings). Once it is back, it
@@ -161,6 +175,21 @@ applies the current rules; check with the commands under *Where the rules are en
 ### For causes 4 and 5
 
 Fix the filter that drops the traffic, or the pair or port that lets it through.
+
+### For cause 6: give the instances their own group
+
+> ⚠️ **State-changing.** The instance loses the access `default` gave it from its peers, and any rule of `default` it
+> relied on. Check the new group's rules first. Undo: `openstack port set --security-group default <port-id>`.
+
+```bash
+openstack security group create <group>
+openstack security group rule create --ingress --ethertype IPv4 --protocol tcp --dst-port <port> \
+  --remote-ip <cidr> <group>
+openstack port set --no-security-group --security-group <group> <port-id>
+```
+
+Or, as admin, change the templates for groups created from now on (`openstack default security group rule list`,
+`create`, `delete`); existing `default` groups keep their rules.
 
 ## Verification
 
@@ -172,9 +201,12 @@ show the rule.
 
 - Written from Neutron 2026.1 (networking guide on security groups, Open vSwitch native firewall guide,
   `neutron/agent/linux/iptables_firewall.py`, `neutron/common/ovn/utils.py`), Kolla-Ansible 2026.1
-  (`openvswitch_agent.ini.j2`) and python-openstackclient 2026.1. Not reproduced on a lab.
-- Not covered: stateless security groups, security group logging, FWaaS, and the effect of a rule change on
-  connections already established.
+  (`openvswitch_agent.ini.j2`), python-openstackclient 2026.1, and the default security group rule templates
+  (`neutron/db/securitygroups_db.py`, migration `c33da356b165`). Not reproduced on a lab.
+- Connections already established: when a rule is removed, the iptables driver deletes the matching conntrack
+  entries (`delete_conntrack_state_by_rule` in `iptables_firewall.py`); with other drivers, notably OVN's stateful
+  ACLs, a flow conntrack already tracks may keep passing. Not verified on a lab.
+- Not covered: stateless security groups, security group logging, FWaaS.
 
 ## Related
 
