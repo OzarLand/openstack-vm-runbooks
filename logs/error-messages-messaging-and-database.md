@@ -3,7 +3,7 @@ title: "Error messages: messaging and database. MessagingTimeout, AMQP connectio
 kind: diagnostic
 status: draft
 openstack_releases: ["2026.1"]
-components: [rabbitmq, mariadb, nova, neutron, cinder]
+components: [rabbitmq, mariadb, proxysql, haproxy, nova, neutron, cinder]
 deployment_methods: [any]
 environment:
   topology: any
@@ -76,10 +76,13 @@ How to read the RabbitMQ broker log itself is on
 ### `[<connection-id>] AMQP server <host>:<port> closed the connection. Check login credentials: <error>`
 
 - **Where:** ERROR, same file, when the error contains `Socket closed`.
-- **Means:** the TCP connection opened, then the broker closed it. The message itself points at the credentials.
+- **Means:** the TCP connection opened, then was closed. The message points at the credentials, but it is logged for
+  **any** `Socket closed` error, including a broker shutting down or a proxy cutting the connection.
 - **Usual causes:** wrong user or password in `transport_url`, a user or virtual host missing on the broker (for
-  example after a broker rebuild).
-- **Read next:** the RabbitMQ log on that node for the refused login, at the same second.
+  example after a broker rebuild); or a broker restart, or something in between closing connections.
+- **Read next:** the RabbitMQ log on that node at the same second. A refused login shows there as `login refused` (see
+  [reading the RabbitMQ logs](reading-rabbitmq-logs.md));
+  without it, look for a broker stop or a connection closed by the network instead of a credentials problem.
 
 ### `A recoverable connection/channel error occurred, trying to reconnect: <error>`
 
@@ -106,10 +109,11 @@ How to read the RabbitMQ broker log itself is on
 
 ### Nova: `Lost connection to nova-conductor for reporting service status.`
 
-- **Where:** WARNING, in `nova-compute` (and other Nova services), from the database service group driver
+- **Where:** WARNING, in `nova-compute`, from the database service group driver
   ([`servicegroup/drivers/db.py`](https://github.com/openstack/nova/blob/stable/2026.1/nova/servicegroup/drivers/db.py)).
   Logged once per outage; `Recovered from being unable to report status.` marks the end.
-- **Means:** the periodic heartbeat sent through the conductor timed out. If it lasts longer than `service_down_time`
+- **Means:** the periodic heartbeat that `nova-compute` sends through the conductor (it has no direct database
+  access; the other Nova services write their heartbeat to the database themselves) timed out. If it lasts longer than `service_down_time`
   (60 s), the API shows this service `down` while it still runs.
 - **Read next:** the conductor's log and the broker state at that time.
 - **Fix:** [RPC timeouts caused by RabbitMQ](../recovery/rabbitmq-partition-or-alarm-rpc-timeouts.md); for a compute
@@ -135,12 +139,16 @@ How to read the RabbitMQ broker log itself is on
   | 2013 | `CR_SERVER_LOST` | The connection was lost during a query |
   | 1047 | `UNKNOWN_COM_ERROR` | The server refused the command; with Galera, a node that is not synced (`WSREP has not yet prepared node for application use`) answers this |
 
-- **Usual causes:** HAProxy has no healthy database backend, the MariaDB container or service is down, Galera lost
+- **Usual causes:** the database proxy has no healthy node (ProxySQL by default on Kolla-Ansible 2026.1, since
+  `enable_proxysql` follows `enable_mariadb`; HAProxy's `mariadb` backend only when ProxySQL is disabled), the MariaDB
+  container or service is down, Galera lost
   quorum or a node is not synced, or the connection was idle longer than the server or the proxy allows (2006/2013
   appearing once after a quiet period).
-- **Read next:** HAProxy's state for the database backend
-  ([reading the HAProxy, keepalived and memcached logs](reading-haproxy-keepalived-memcached-logs.md)), then the
-  MariaDB log on the nodes (Galera state: `wsrep_cluster_status`, `wsrep_local_state_comment`), as in
+- **Read next:** the database proxy that is actually in the path: on Kolla-Ansible by default ProxySQL,
+  `/var/log/kolla/proxysql/proxysql.log` on the load balancer nodes and the state of its Galera hostgroups (see
+  [reading the MariaDB and Galera logs](reading-mariadb-galera-logs.md)); with ProxySQL disabled, HAProxy's `mariadb`
+  backend ([reading the HAProxy, keepalived and memcached logs](reading-haproxy-keepalived-memcached-logs.md)). Then
+  the MariaDB log on the nodes (Galera state: `wsrep_cluster_status`, `wsrep_local_state_comment`), as in
   [reading the MariaDB and Galera logs](reading-mariadb-galera-logs.md).
 - **Fix:** [Galera lost quorum or stopped everywhere](../recovery/galera-cluster-lost-quorum-database-unavailable.md).
 
@@ -151,14 +159,17 @@ How to read the RabbitMQ broker log itself is on
 - **Means:** the first connection failed with `DBConnectionError`; oslo.db retries up to `max_retries` (10 by
   default) every `retry_interval` (10 s by default)
   ([`options.py`](https://github.com/openstack/oslo.db/blob/stable/2026.1/oslo_db/options.py)). After the last
-  attempt, the service fails to start and, on Kolla-Ansible, its unit restarts it.
-- **Read next:** same as `DBConnectionError`; on a service in a restart loop, see the systemd and container engine
-  page.
+  attempt, the service fails to start and, on Kolla-Ansible, its unit restarts it. With `max_retries = -1`, oslo.db
+  retries forever (`itertools.count()` in `_test_connection`).
+- **Read next:** same as `DBConnectionError`; on a service in a restart loop, see
+  [the systemd journal and the container engine](systemd-journal-and-container-engine.md).
 
 ### `DBDeadlock` (MySQL error 1213, `Deadlock found when trying to get lock`)
 
 - **Where:** in a traceback; oslo.db maps error 1213 to `DBDeadlock` (`exc_filters.py`).
-- **Means:** the database rolled back one transaction to resolve a lock conflict. oslo.db offers a retry on deadlock
+- **Means:** the database rolled back one transaction to resolve a lock conflict. With Galera, a certification
+  conflict between nodes is reported to the client with the same error 1213, and the two look identical (see
+  [reading the MariaDB and Galera logs](reading-mariadb-galera-logs.md)). oslo.db offers a retry on deadlock
   (`wrap_db_retry(retry_on_deadlock=True)` and the `retry_on_deadlock` decorator in
   [`oslo_db/api.py`](https://github.com/openstack/oslo.db/blob/stable/2026.1/oslo_db/api.py)) that the services use on
   many database calls, so an occasional line is usually harmless.
@@ -170,7 +181,8 @@ How to read the RabbitMQ broker log itself is on
 1. Count the services and hosts that log these messages in the same minutes: everywhere means the broker or the
    database; one service means that service or its host.
 2. Messaging: the first `is unreachable` or `MessagingTimeout`, then the RabbitMQ log at that second.
-3. Database: the error code, then HAProxy's backend state, then Galera's state on each node.
+3. Database: the error code, then the database proxy in the path (ProxySQL by default on Kolla-Ansible, or HAProxy's
+   `mariadb` backend), then Galera's state on each node.
 
 ## Validity and limits
 
@@ -178,7 +190,7 @@ How to read the RabbitMQ broker log itself is on
   error code names. Every message is a format string from that source, not a captured line; the text that a database
   driver adds after the exception name varies.
 - Not run on a lab yet. A lab capture of RabbitMQ stopped on one node, then on all nodes, and of the database backend
-  made unavailable behind HAProxy, is requested to add real redacted lines.
+  made unavailable behind its proxy (ProxySQL by default), is requested to add real redacted lines.
 - The reading of 1047 as `WSREP has not yet prepared node for application use` is the line quoted in the Galera
   runbook; the codes and their names are from PyMySQL.
 - Only the RabbitMQ driver of oslo.messaging is covered.
