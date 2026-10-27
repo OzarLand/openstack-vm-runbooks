@@ -10,7 +10,7 @@ environment:
   network: any
   storage: any
   os: any
-risk: state-changing
+risk: destructive
 confirmed_by:
   - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, multinode (3 controllers, 2 computes)", date: 2026-10-27, note: "the four causes produced on a disposable lab (nova_libvirt stopped, operator disable, nova_compute stopped, --down with an evacuation left done); quick checks, every resolution and Verification run; --enable while libvirt down, AUTO over an operator reason, the trait error, volume detach (no Cinder), the --enable after --up and forcing down a fenced host not run" }
 upstream_refs:
@@ -174,12 +174,21 @@ Unable to force up host <host> as `done` evacuation migration records remain ass
 ```
 `nova-compute` moves them to `completed` when it starts on the repaired host, after destroying the local copies
 of the evacuated instances (`Destroying instance as it has been evacuated from this host but still exists in the
-hypervisor`). A `nova-compute` that kept running while forced down does not do it: restart it. The client shows
-only `Compute service nova-compute of host <host> failed to set.`; the reason above is in the API response
+hypervisor`). A `nova-compute` that kept running while forced down does not do it: it must be restarted. The client
+shows only `Compute service nova-compute of host <host> failed to set.`; the reason above is in the API response
 (`openstack --debug compute service set --up <host> nova-compute`).
 
+> 🛑 **Destructive.** At start-up `nova-compute` destroys the local guest of every instance evacuated from this host
+> and, unless the storage is shared, its local disks (`_destroy_evacuated_instances`, `nova/compute/manager.py`; the
+> lab saw the source copy destroyed). Precondition: every evacuated instance is `ACTIVE` on its destination, and
+> nothing is needed from the source copies. Cannot be undone.
+
+**Kolla-Ansible:** `sudo systemctl restart kolla-nova_compute-container.service`
+
+**Any:** restart the `nova-compute` service.
+
 > ⚠️ **State-changing.** Lets Nova consider the service alive again from its heartbeat. Precondition: the host is
-> repaired, `nova-compute` runs and has reported (`Updated At` recent), and `openstack server migration list --host
+> repaired, `nova-compute` runs, has been restarted since the evacuation, and has reported (`Updated At` recent), and `openstack server migration list --host
 > <host> --type evacuation` shows no `done` record. Undo: none. Forcing the service down again is step 2 of
 > [fence before you evacuate](../recovery/compute-host-failure-fence-before-evacuate.md), with its precondition:
 > on a host that is not fenced, it allows local deletes and evacuations of instances that are alive.
@@ -224,11 +233,12 @@ disks, no Cinder, 2026-10-27. All four causes produced on purpose on one compute
   been heard from in a while`; a reboot was accepted (status `REBOOT`); a delete returned at once, the port was
   deleted and the guest kept running. When `nova-compute` started again, it cleared the reboot's task state at
   start-up (`Instance in transitional state (rebooting) at start-up ... clearing task state`), then received the
-  queued reboot (`Task possibly preempted`), and destroyed the deleted instance's guest 34 s after the start
+  queued reboot and dropped it (`Task possibly preempted`, from `reverts_task_state` on
+  `UnexpectedTaskStateError`), and destroyed the deleted instance's guest 34 s after the start
   (`Destroying instance with name label '<instance-name>' which is marked as DELETED but still present on host.`).
 - Cause 4, `--down` while `nova-compute` ran: `down`, `Forced Down` `True` at once, `Status` stayed `enabled`.
   An evacuation was accepted and left a `done` record; `--up` was refused (message above, through `--debug`). The
-  source copy of the evacuated instance kept running on the compute for 3.5 minutes, until `nova-compute` was
+  source copy of the evacuated instance kept running on the compute until `nova-compute` was
   restarted; it was then destroyed, the record went to `completed`, and `--up` worked. Verification as written.
 - Not run: `--enable` while libvirt was down, an `AUTO: ` disable over an operator reason, the trait update error,
   volume detach (no Cinder), stop of an instance, the `--enable` after `--up` (the service was still enabled), and

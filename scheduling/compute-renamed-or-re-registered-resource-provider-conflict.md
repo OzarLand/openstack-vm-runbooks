@@ -36,7 +36,7 @@ One of these in the `nova-compute` log of the compute (**Kolla-Ansible:** `/var/
 The messages are from `nova/compute/manager.py` and `nova/scheduler/client/report.py`.
 
 The service refuses to start. On the Kolla-Ansible 2026.1 lab, for `Possible rename detected`, `nova-compute` logged
-the exception and kept running, without RPC or heartbeat: the container stayed `Up (healthy)`, with no restart loop,
+the exception and kept running, without heartbeat: the container stayed `Up (healthy)`, with no restart loop,
 and the service went `down`. Look in the log, not at the container status:
 
 ```text
@@ -174,7 +174,8 @@ changes what `hostname` returns.
 
 **Kolla-Ansible:** the `nova_compute` container keeps the host name it was created with. On the lab, `hostnamectl
 set-hostname` followed by a restart of the container did not change the name `nova-compute` saw (`docker exec
-nova_compute hostname` still gave the old one); only a deploy that recreates the container brings the new name in.
+nova_compute hostname` still gave the old one). Whether a deploy that recreates the container brings the new name
+in was not tested.
 
 ### Cause 2: the identity file was lost
 
@@ -358,7 +359,7 @@ compute without instances.
   both `compute_id` files, one provider with that UUID.
 - Cause 1, simulated with `host = <new-host>` in `[DEFAULT]` of the compute's `nova.conf` (the system rename alone
   did not reach the container, see cause 1): `My node <node-uuid> has host '<old-host>' but my host is
-  '<new-host>'; Possible rename detected, refusing to start!`, logged 2 s after `Starting compute node`; the process
+  '<new-host>'; Possible rename detected, refusing to start!`, logged after `Starting compute node`; the process
   stayed up, the container `healthy`, no new service record. Removing the line and restarting the container gave
   the service back `up`.
 - Cause 2, both `compute_id` files removed: the container exits with `MissingRequiredSource` and restarts in a loop.
@@ -385,7 +386,7 @@ compute without instances.
   Identification* guide, and Kolla-Ansible 2026.1 (`nova-cell` role, `tasks/config.yml` and `nova-compute.json.j2`).
   Causes 1 and 2 reproduced on a Kolla-Ansible lab, cause 3 not: see *Lab observations*.
 - The log lines are shown with the logger and message from the source; the exception lines are the last line of the
-  traceback that the service prints when it exits. The JSON in the Placement 409 is trimmed.
+  traceback that the service prints (on the lab, the process stayed up after printing it). The JSON in the Placement 409 is trimmed.
 - Not covered: Ironic (no `compute_id`, nodes move between services by design), computes with more than one node,
   and renaming a compute while its instances stay on it, which upstream does not support.
 
