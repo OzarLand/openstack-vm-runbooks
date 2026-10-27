@@ -11,8 +11,7 @@ environment:
   storage: any
   os: any
 risk: destructive
-confirmed_by:
-  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers (Galera + ProxySQL) + 2 computes, ML2/OVS", date: 2026-10-27, note: "MariaDB full (max_connections lowered on the writer: 9001 platform-wide, writer shunned) and no synced writer (one node: failover; three nodes: 9001) reproduced, KILL of one idle session run; QueuePool not reproduced (uWSGI one thread per process), ProxySQL client limit not tested, runtime max_connections raise not run (root refused on the full node; a MariaDB container restart restored it), service restart for causes 1-2 not run" }
+confirmed_by: []
 upstream_refs:
   - https://docs.openstack.org/kolla-ansible/2026.1/reference/databases/mariadb-guide.html
   - https://proxysql.com/documentation/global-variables/mysql-variables/
@@ -51,7 +50,8 @@ sqlalchemy.exc.TimeoutError: QueuePool limit of size 1 overflow 50 reached, conn
 - `1040` and `9001` are MySQL protocol errors; oslo.db does not treat them as connection errors (its connection
   filter matches 2002, 2003, 2006, 2013 and 1047), so it does not retry them. On a lab, `9001` reached the logs as
   `sqlalchemy.exc.OperationalError` (237 lines), and as `oslo_db.exception.DBConnectionError` in two nova-conductor
-  service-status reports; never as `DBError`.
+  service-status reports; never as `DBError`. A `1040` from a direct connection is wrapped by oslo.db 18 as
+  `oslo_db.exception.DBError`, so a chained traceback can show both that and the `sqlalchemy` form.
 - Behind ProxySQL, a full MariaDB node is seen by the services as `9001`, not `1040`: the `1040` is only in
   `proxysql.log` (`Failed to mysql_real_connect() on 0:<node>:3306 , ... , 1040: Too many connections.`) and in the
   node's `mariadb.log` (`Aborted connection 0 to db: 'unconnected' user: 'unauthenticated' host: 'connecting host'
@@ -120,16 +120,20 @@ below 10000, `max_connect_timeouts` not growing.
 - **`QueuePool limit` in one service**, the database itself fine (check 2 and 3 normal): the problem is inside that
   service. Its processes hold their connections: long transactions, requests stuck on something else (RabbitMQ,
   another API) while holding a session, or many concurrent requests per process. Other services are fine.
-- **`9001 Max connect timeout`**: ProxySQL could not get a backend connection in 10 s. Either the backend servers
-  are at their `ConnUsed` limit (check 3), or no node is `ONLINE` in the writer hostgroup: with
-  `mysql_galera_hostgroups`, ProxySQL moves a Galera node that is not synced out of the writer hostgroup (to the
-  offline hostgroup, `3` for the first shard), and with no writer left every query times out like this. If check 3
-  shows no `ONLINE` server in hostgroup `0`, see [Galera lost quorum](galera-cluster-lost-quorum-database-unavailable.md).
+- **`9001 Max connect timeout`**: ProxySQL could not get a backend connection in 10 s (the number printed is the
+  elapsed time, so it can be slightly above 10000). Check 3 tells three situations apart:
+  - the writer still in hostgroup `0` but `SHUNNED`, `ConnFree` 0, `ConnERR` growing, and `1040: Too many
+    connections.` in `proxysql.log`: MariaDB is full (cause 2, below). With `max_writers: 1`, hostgroup `0` then has
+    no `ONLINE` server either, but the Galera checks of that node are healthy;
+  - backends `ONLINE` with `ConnUsed` at the limit: ProxySQL's own backend pool is full (cause 2);
+  - hostgroup `0` empty and every node in hostgroup `3` (offline): with `mysql_galera_hostgroups`, ProxySQL moves a
+    node that is not synced out of the writer hostgroup, and with no writer left every query times out like this.
+    That is Galera, not connections (cause 3): see [Galera lost quorum](galera-cluster-lost-quorum-database-unavailable.md).
 - **`1040 Too many connections`**, ProxySQL's warning present: the client side of ProxySQL is full (40000). Look at
   `Client_Connections_connected` and at which services keep connections open.
-- **`1040 Too many connections`**, no ProxySQL warning, `Threads_connected` near `max_connections` on a MariaDB
-  node: MariaDB itself is full. ProxySQL's backend limit equals MariaDB's, so this needs other clients on top of
-  ProxySQL's: direct connections, backups, monitoring, or a ProxySQL limit raised above MariaDB's.
+- **`1040 Too many connections`** seen by a client that connects to MariaDB directly (a backup, a monitoring
+  check, an operator's session), `Threads_connected` near `max_connections`: MariaDB itself is full. Services behind
+  ProxySQL do not see this `1040`: they see `9001` (next bullet).
 - **MariaDB full behind ProxySQL** shows as `9001`, not `1040` (see *Symptom*). ProxySQL keeps serving from the
   backend connections it already holds; when it needs new ones, it logs `1040: Too many connections.` for them, then
   `Shunning server <node>:3306 with 5 errors/sec. Shunning for 10 seconds`, drops the node's free connections, and
@@ -148,8 +152,9 @@ host. Behind ProxySQL, the client address MariaDB sees is the ProxySQL node; use
 | What you see | Cause |
 |---|---|
 | `QueuePool limit` in one service only | Cause 1: the service's pool is too small for its load, or its sessions are held too long |
+| `9001`, the writer `SHUNNED` in hostgroup `0`, `ConnERR` growing, `1040` in `proxysql.log` | Cause 2: MariaDB is full |
 | `9001`, backends `ONLINE` with `ConnUsed` at the limit | Cause 2: one service, or a few, open far more connections than usual (a burst, a leak, a restart storm) |
-| `9001`, no server `ONLINE` in the writer hostgroup | Cause 3: Galera is not synced: not a connection problem |
+| `9001`, hostgroup `0` empty, every node in hostgroup `3` | Cause 3: Galera is not synced: not a connection problem |
 | `1040` from ProxySQL or from MariaDB | Cause 2, at the client side; or limits changed so that ProxySQL allows more than MariaDB |
 
 ## Resolution
@@ -159,9 +164,10 @@ host. Behind ProxySQL, the client address MariaDB sees is the ProxySQL node; use
 Find why the service holds its connections (its own log, the other errors around the `QueuePool` lines). If it
 waits on another dependency, fix that dependency. A restart releases the pool at once:
 
-> ⚠️ **State-changing.** Restarts the service's container on one controller. Its requests in flight fail; the other
-> controllers keep serving through HAProxy. Precondition: the reason it held its connections is understood, or
-> this is a stop-gap while you look. Undo: none needed.
+> ⚠️ **State-changing.** Restarts the service's container on one controller. Its requests in flight fail.
+> Precondition: the reason it held its connections is understood, or
+> this is a stop-gap while you look. Undo: none needed. For an API, the other controllers keep serving through
+> HAProxy; for a conductor or scheduler, the other instances keep consuming RPC.
 
 ```bash
 sudo systemctl restart kolla-<container>-container.service   # e.g. kolla-nova_api-container.service
@@ -181,14 +187,25 @@ If MariaDB is the full one and nothing else can be done quickly, its limit can b
 > ⚠️ **State-changing.** Raises `max_connections` on one MariaDB node until its next restart. Each connection costs
 > memory on that node. Precondition: the node has the memory for it, and you can still connect to it: on a lab, a
 > node at its limit refused root too (`ERROR 2002 (HY000): Received error packet before completion of TLS handshake.
-> ... 1040 - Too many connections`), and the only way back seen was
-> `sudo systemctl restart kolla-mariadb-container.service` on that node (it rejoined by IST, `Synced` 33 s after
-> the restart, the other two nodes kept serving). Undo: `SET GLOBAL max_connections = 10000;`.
+> ... 1040 - Too many connections`); then use the restart below. Undo: `SET GLOBAL max_connections = 10000;`.
 > To keep it, set it in `/etc/kolla/config/galera.cnf` and run `kolla-ansible reconfigure -t mariadb`, which restarts
 > the MariaDB nodes one by one.
 
 ```bash
 sudo docker exec -it mariadb mariadb -u root -p -e "SET GLOBAL max_connections = <new-limit>;"
+```
+
+If the full node refuses every connection, restarting its MariaDB container was the way back on a lab (it rejoined
+by IST, `Synced` 33 s after the restart, while the other two nodes kept serving):
+
+> ⚠️ **State-changing.** Restarts MariaDB on one Galera node: its connections drop, ProxySQL moves the writer to
+> another node, and the node rejoins by IST, or by SST if its gap is too large. Precondition: the two other nodes are
+> `Synced` and `wsrep_cluster_size` is 3 (`SHOW GLOBAL STATUS LIKE 'wsrep_%';` on them), and one node at a time;
+> restarting a node while the others are not synced can cost quorum. Undo: none. Afterwards, check that the node is
+> `Synced` again (`wsrep_local_state_comment`).
+
+```bash
+sudo systemctl restart kolla-mariadb-container.service
 ```
 
 As a last resort, sessions can be killed:
@@ -198,7 +215,8 @@ As a last resort, sessions can be killed:
 > a volume can be left half-updated. Who is affected: the users of the requests in flight on those sessions.
 > Precondition: the sessions are idle (`Sleep`) for long (`time` column of `information_schema.processlist`) and
 > belong to the service you identified; restarting that service, which closes them cleanly, was not possible. No
-> undo.
+> undo. Run it on the MariaDB node that holds the session: the processlist is per node. Behind ProxySQL, these
+> sessions are ProxySQL's own backend connections; ProxySQL notices and closes the matching client connection.
 
 ```bash
 sudo docker exec -it mariadb mariadb -u root -p -e "
