@@ -18,6 +18,7 @@ These pages explain how to read; the fixes are in the runbooks of the other fold
 | [Reading the RabbitMQ logs, and the oslo.messaging lines that go with them](reading-rabbitmq-logs.md) | Broker log format, Khepri or Mnesia, nodes down and partitions, memory and disk alarms, flow control, connection churn and heartbeats, client reconnect lines | 2026.1 | draft |
 | [Reading the Neutron logs with ML2/OVS](reading-neutron-logs-ml2-ovs.md) | neutron-server, RPC server and periodic workers, OVS, L3, DHCP and metadata agents: heartbeats, port binding, the vif-plugged notification, common lines | 2026.1 | draft |
 | [Reading the kernel log of a compute (dmesg, journalctl -k)](kernel-messages-on-computes.md) | journalctl -k and dmesg, then the OOM killer, KVM, NIC link flaps, bonding and LACP, over-MTU drops, disk and filesystem errors, conntrack table full, hung tasks | 2026.1 | draft |
+| [Reading the libvirt and QEMU logs of a compute, and the guest console log](libvirt-and-qemu-logs.md) | libvirtd and virtqemud logs, filters and debug on and off, the per-instance QEMU log (start, migration, shutdown reasons, QEMU and KVM messages), the guest console log | 2026.1 | draft |
 | [Reading the systemd journal and the container engine on an OpenStack host](systemd-journal-and-container-engine.md) | journalctl units, priorities, time ranges and boots, the kolla-<container>-container units, restart loops as systemd and Docker show them, Docker and Podman logs, a persistent journal | 2026.1 | draft |
 
 ## Planned
