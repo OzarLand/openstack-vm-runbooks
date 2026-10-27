@@ -142,9 +142,11 @@ At start-up, `nova-compute` resumes every delete left in `deleting` on its host 
 
 **Kolla-Ansible:** `sudo systemctl restart kolla-nova_compute-container.service`
 
-Not `docker restart nova_compute`: it bypasses the container's systemd unit, which then fails and re-attaches 59 s
-later. Stopping `nova_compute` can take up to 60 s (the unit's `ExecStop` is `docker stop nova_compute -t 60`). On a lab, `docker restart` of a **paused**
-`nova_compute` only unpaused it: the old process then ran the queued delete before being killed.
+Not `docker restart nova_compute`: it bypasses the container's systemd unit, which then fails and re-attaches after
+`RestartSec` (11 s with the Kolla defaults, 59 s on the lab, which sets `docker_client_timeout: 600`). Stopping
+`nova_compute` can take up to 60 s (the unit's `ExecStop` is `docker stop nova_compute -t 60`). On a lab, `docker
+restart` of a **paused** `nova_compute` only unpaused it: the old process then ran the queued delete before being
+killed.
 
 **Any:** restart the `nova-compute` service.
 
@@ -255,8 +257,8 @@ On a lab: OpenStack 2026.1 (Nova 33.0.3), Kolla-Ansible 22.2.0, all-in-one, pyth
   marked as DELETED but still present on host.`, destroyed and undefined the domain and deleted its files.
 - **Cause 5.** A member user's delete of its locked instance: `409 … Instance <id> is locked`. The admin's delete of
   the same locked instance went through, as the page says.
-- On Kolla-Ansible, `docker stop nova_compute` is undone by the systemd unit after 59 s, before Nova's 60 s
-  `service_down_time`: stop the unit to reproduce cause 4.
+- On Kolla-Ansible, `docker stop nova_compute` is undone by the systemd unit after `RestartSec` (59 s on
+  the lab, 11 s with the Kolla defaults), before Nova's 60 s `service_down_time`: stop the unit to reproduce cause 4.
 
 Not run: causes 2 and 3, `disable_terminate`, `server set --state error`, and the forced-down command of cause 4
 (`compute service set ... --down`) with its undo (`--up --enable`): cause 4 was reproduced with the service down

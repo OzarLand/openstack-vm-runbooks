@@ -143,9 +143,9 @@ is set in `globals.yml`. Without it, the command ends with `failed=0` and takes 
 check that a backup file was written. In cases B and C it does not:
 `mariadb-backup` needs a node in a Primary component, so copy each node's `mariadb` Docker volume instead. Stop the
 container first with `sudo systemctl stop kolla-mariadb-container.service` on each node, not `docker stop` (systemd
-starts it again about a minute later, and `mysqld` would write under the copy), check with `sudo docker ps -a` that it
-stays stopped, and only then copy the volume. Then stop new requests at the APIs
-if your procedure allows it ([reopening provisioning](reopening-provisioning-after-control-plane-incident.md)).
+starts it again after `RestartSec`, 11 s with the Kolla defaults, and `mysqld` would write under the copy), check
+with `sudo docker ps -a` that it stays stopped, and only then copy the volume. Then stop new requests at the APIs if
+your procedure allows it ([reopening provisioning](reopening-provisioning-after-control-plane-incident.md)).
 
 ### For cause 1: let the failed node rejoin
 
@@ -156,7 +156,8 @@ copies what it missed.
 > slows the donor while the copy runs. Undo: `sudo systemctl stop kolla-mariadb-container.service`.
 
 On Kolla-Ansible 2026.1, each container has a systemd unit (`kolla-<container>-container.service`, `Restart=always`,
-`RestartSec=59` with the default settings): a container stopped with `docker stop` is started again by systemd about a minute later. To keep a
+`RestartSec` 11 s with the Kolla defaults, 59 s on the lab, which sets `docker_client_timeout: 600`): a container
+stopped with `docker stop` is started again by systemd after that delay. To keep a
 node's MariaDB stopped while you repair the host, use `sudo systemctl stop kolla-mariadb-container.service`, and
 `sudo systemctl start kolla-mariadb-container.service` to start it.
 
