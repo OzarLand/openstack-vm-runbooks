@@ -1,7 +1,7 @@
 ---
 title: Requests fail with 401 for tokens that should be valid. Fernet keys differ between Keystone nodes, or a clock is off
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [keystone, nova, neutron]
 deployment_methods: [kolla-ansible]
@@ -11,14 +11,15 @@ environment:
   storage: any
   os: any
 risk: destructive
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, RabbitMQ cluster with quorum queues", date: 2026-10-27, note: "nova_conductor, then nova_scheduler, stopped on all three controllers (systemctl stop); queued build ACTIVE 32 s after the conductor restart, computes up after 11 s; scheduler-down build ERROR in 61 s with fault MessagingTimeout; cell0 cleanup run; a start sent while the conductor was down left task_state powering-on, reset with --auto-approve --state error and a hard reboot; not run: resize, migrations, evacuate, a stop or reboot of a running instance, a local delete, cell0 database unreachable, --state active" }
 upstream_refs:
   - https://docs.openstack.org/keystone/2026.1/admin/fernet-token-faq.html
   - https://docs.openstack.org/keystone/2026.1/admin/tokens-overview.html
   - https://docs.openstack.org/keystonemiddleware/latest/middlewarearchitecture.html
   - https://docs.openstack.org/kolla-ansible/2026.1/reference/shared-services/keystone-guide.html
 authored_by: agent:ozarland-author
-last_verified: 2026-10-26
+last_verified: 2026-10-27
 ---
 
 # Requests fail with 401 for tokens that should be valid. Fernet keys differ between Keystone nodes, or a clock is off
