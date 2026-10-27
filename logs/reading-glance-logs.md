@@ -84,6 +84,19 @@ grep -nE "storage media is full|exceeds the storage quota|too large|Insufficient
 Sources: `nova/image/glance.py`, `nova/virt/libvirt/driver.py`. All with `[instance: <uuid>]` where an instance is
 involved.
 
+A snapshot of a running instance, captured on a 2026.1 lab (local qcow2 disks, `nova-compute.log`):
+
+```text
+07:34:12.299 INFO nova.compute.manager [...] [instance: <server-id>] instance snapshotting
+07:34:12.325 INFO nova.virt.libvirt.driver [...] [instance: <server-id>] Beginning live snapshot process
+07:34:24.981 INFO nova.virt.libvirt.driver [...] [instance: <server-id>] Snapshot extracted, beginning image upload
+07:34:27.804 INFO nova.virt.libvirt.driver [...] [instance: <server-id>] Snapshot image upload complete
+07:34:27.805 INFO nova.compute.manager [...] [instance: <server-id>] Took 15.51 seconds to snapshot the instance on the hypervisor.
+```
+
+A shut-off instance logs `trying to snapshot a non-running instance: (state: 4 expected: 1)` (WARNING) then
+`Beginning cold snapshot process`, and the same three lines after it.
+
 A snapshot that never logs `Snapshot image upload complete` stopped during the upload: look for an upload failure in
 Glance's log at that time (table above), and for errors in `nova-compute.log` after `Snapshot extracted`.
 
@@ -94,8 +107,10 @@ grep -n "<server-id>" /var/log/kolla/nova/nova-compute.log | grep -E "snapshot|S
 
 ## Validity and limits
 
-- Every message is quoted from Glance and Nova 2026.1. **None was captured on a lab.** A lab request asks for real
-  samples.
+- Every message is quoted from Glance and Nova 2026.1. Captured on a lab (2026.1 all-in-one, local qcow2 disks,
+  2026-10-27): the live and cold snapshot lines only (cold on a shut-off instance; the managed save of a running
+  instance, RBD direct snapshots and the WARNING/ERROR snapshot lines were not seen). A lab request asks for more
+  real samples.
 - The status codes are the ones `image_data.py` raises for each case.
 - Store driver messages (`glance_store` for file, RBD, Swift, S3) and the interoperable import workflow (staging,
   tasks) are not covered.
