@@ -187,7 +187,8 @@ Fix the filter that drops the traffic, or the pair or port that lets it through.
 ### For cause 6: give the instances their own group
 
 > ⚠️ **State-changing.** The instance loses the access `default` gave it from its peers, and any rule of `default` it
-> relied on. Check the new group's rules first. Undo: `openstack port set --security-group default <port-id>`.
+> relied on. Check the new group's rules first. Undo:
+> `openstack port set --no-security-group --security-group default <port-id>`.
 
 ```bash
 openstack security group create <group>
