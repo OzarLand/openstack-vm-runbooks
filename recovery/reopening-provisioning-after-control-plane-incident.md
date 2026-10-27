@@ -171,7 +171,13 @@ the OVN databases, not to RabbitMQ, and does not need a restart for this.
 
 ## Verification, before reopening
 
-All three must hold:
+All three must hold. Checks 2 and 3 need `nova-api`, `neutron-server` and `glance-api` running (and `cinder-api` for
+boot from volume), reachable through the internal VIP: Nova reaches Glance and Neutron through it.
+
+> ⚠️ **State-changing.** On Kolla-Ansible, starting those units (`sudo systemctl start
+> kolla-<container>-container.service`, for the units stopped in step 1) puts them back behind HAProxy, which opens
+> them to users before the gate passes: with a single VIP there is no internal-only path. That is what the lab did:
+> the APIs were started, then checks 2 and 3 run. Precondition: check 1 holds. Undo: stop the units again.
 
 ```bash
 # 1. Shared infrastructure whole
@@ -185,21 +191,12 @@ mysql -e "SHOW STATUS LIKE 'wsrep_cluster_size'; SHOW STATUS LIKE 'wsrep_cluster
 openstack compute service list --service nova-compute | grep -c down     # 0
 openstack network agent list -f value -c Alive | grep -vc True          # 0 = every agent alive (agent-based backends)
 
-# 3. End-to-end: create, reach, delete a test instance (with the APIs reopened internally, or from a controller)
+# 3. End-to-end: create, reach, delete a test instance
 openstack server create --flavor <flavor> --image <image> --network <network> --wait reopen-test
 openstack server add floating ip reopen-test <fip>   # or test from a host on the network
 ping -c 3 <address>
 openstack server delete --wait reopen-test
 ```
-
-Checks 2 and 3 need `nova-api` and `neutron-server`. On Kolla-Ansible, starting their units puts them back behind
-the VIP and reopens provisioning early. To run the checks without reopening, keep those backends in HAProxy `MAINT`
-(step 1's alternative) while the units run, and run the checks from a controller against the service's own address.
-This was not run on the lab.
-
-> ⚠️ **State-changing.** Starting `nova-api` and `neutron-server` with their backends out of `MAINT` reopens
-> provisioning to users before the gate passes. Precondition: the backends are in `MAINT` on every HAProxy host.
-> Undo: stop the units again.
 
 Only then re-enable the API backends (**Kolla-Ansible:** `systemctl start` the units stopped in step 1, or take the
 backends out of `MAINT`) and announce the reopening. Expect a burst of retried requests from users and
