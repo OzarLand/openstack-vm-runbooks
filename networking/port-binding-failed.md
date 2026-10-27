@@ -79,7 +79,7 @@ With ML2/OVN, compare the chassis names with the compute names Nova uses:
 
 ```bash
 openstack compute service list --service nova-compute -c Host
-sudo docker exec ovn_sb_db ovn-sbctl --columns=name,hostname list Chassis   # Kolla-Ansible, on an OVN DB host
+sudo docker exec ovn_sb_db ovn-sbctl --no-leader-only --columns=name,hostname list Chassis   # Kolla-Ansible, OVN DB host
 ```
 
 ## Diagnosis
@@ -178,10 +178,13 @@ compute for Nova and Placement and orphans the instances on it.
 - **ML2/OVN with Kolla-Ansible:** set `openvswitch_hostname: <name Nova uses>` for that host (in `host_vars`), then
   apply it with the `openvswitch` role.
 
-> ⚠️ **State-changing.** Restarts the Open vSwitch agent, or rewrites `external_ids:hostname` and restarts
-> `ovn_controller`, on that compute: the agent or chassis registers under the new name, and the old agent entry
-> remains to be deleted (`openstack network agent delete <old-agent-id>`). Instances' existing ports keep their
-> binding. Undo: set the previous name back and restart again.
+> ⚠️ **State-changing.** ML2/OVS: restarts the Open vSwitch agent on that compute; the agent registers under the new
+> name, and the old agent entry remains to be deleted (`openstack network agent delete <old-agent-id>`).
+> ML2/OVN with Kolla-Ansible: the task that sets `external_ids:hostname` (`openvswitch/tasks/post-config.yml`) restarts
+> the **`openvswitch_vswitchd`** container on that compute: every instance there can briefly lose its network. Do it in
+> a maintenance window, or after moving the instances away. The chassis, keyed by its `system-id`, keeps its entry
+> and takes the new hostname. Instances' existing ports keep their binding. Undo: set the previous name back and
+> apply again (same restart).
 
 ```bash
 kolla-ansible reconfigure -i <inventory> --tags openvswitch,ovn-controller --limit <compute>   # ML2/OVN
