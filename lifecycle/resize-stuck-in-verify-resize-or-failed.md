@@ -1,7 +1,7 @@
 ---
 title: Resize or cold migration not finished. Instance in VERIFY_RESIZE, stuck in RESIZE, or in ERROR after a failed resize
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [nova, placement, libvirt]
 deployment_methods: [kolla-ansible, any]
@@ -11,7 +11,8 @@ environment:
   storage: local instance disks or shared storage
   os: any
 risk: destructive
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, ML2/OVS, local disks", date: 2026-10-26, note: "full procedure on a disposable lab (causes 1, 2, 3, 5; with the corrections of this review)" }
 upstream_refs:
   - https://docs.openstack.org/nova/2026.1/user/resize.html
   - https://docs.openstack.org/nova/2026.1/admin/configuration/resize.html
@@ -94,12 +95,15 @@ that many seconds. Kolla-Ansible 2026.1 does not set it, and sets `allow_resize_
 | Step | Usual errors (fault or compute log) | State after |
 |---|---|---|
 | Scheduling and `prep_resize` | No valid host (from the conductor), resources claim failed, anti-affinity | `ACTIVE` again (or `SHUTOFF`), migration `error` |
-| Disk copy | `Unable to resize disk down.`, `not able to execute ssh command`, `Migration is not supported for LVM backed instances` | Rolled back to the previous state: these errors are raised as `InstanceFaultRollback` |
+| API, before any compute | a new root disk smaller than the current one: HTTP 400 `Flavor's disk is smaller than the minimum size specified in image metadata. Flavor disk is <n> bytes, minimum size is <m> bytes.` | Unchanged, no migration record |
+| Disk copy | `Unable to resize disk down.` (smaller ephemeral disk), `not able to execute ssh command`, `Migration is not supported for LVM backed instances` | Rolled back to the previous state: these errors are raised as `InstanceFaultRollback` |
 | Disk copy, other errors | copy interrupted, disk full on the destination | `ERROR`, `host` still the **source** |
 | `finish_resize` | the guest fails to start on the destination (libvirt, volume, network) | `ERROR`, `host` the **destination**, flavor set back to the old one |
 
-A `nova-compute` that restarts while an instance is in `resize_migrating` reverts the instance on that host and
-clears the task state (`_init_instance`). A restart in `resize_prep` clears the task state only.
+A `nova-compute` that restarts while an instance is in `resize_migrating` tries to revert the instance on that host,
+then clears the task state whatever the result (`_init_instance`). A restart in `resize_prep` clears the task state
+only. In both cases the migration record is not updated: it stays `migrating`, and the Placement allocations stay
+as the move left them (the instance's on the destination, the migration's on the source).
 
 ### What the compute logs say
 
@@ -138,10 +142,12 @@ Kolla-Ansible, through the `nova_ssh` containers, which must run on every comput
 A problem on the destination compute: libvirt or QEMU error, a volume connection failure, a port binding failure,
 no space for the disks.
 
-### Cause 5: a smaller disk (rolled back)
+### Cause 5: a smaller disk (refused or rolled back)
 
-`Unable to resize disk down.`: the new flavor's root or ephemeral disk is smaller than the old one. Nova does not
-shrink disks, except a root disk booted from volume.
+Nova does not shrink disks, except a root disk booted from volume. A smaller **root** disk is refused by the API at
+once (HTTP 400, `Flavor's disk is smaller than the minimum size specified in image metadata`): nothing is left to
+recover. A smaller **ephemeral** disk passes the API and is rolled back by the source compute with
+`Unable to resize disk down.`
 
 ## Resolution
 
@@ -181,8 +187,17 @@ then `kolla-ansible reconfigure -i <inventory> --tags nova`.
 
 Bring back the service that stopped (quick check 4), or the message bus
 ([RabbitMQ](../recovery/rabbitmq-partition-or-alarm-rpc-timeouts.md),
-[shared dependencies](../diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md)). If the instance
-was in `resize_migrating` on that compute, its restart reverts the instance. Then check quick check 1 again.
+[shared dependencies](../diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md)). On
+Kolla-Ansible 2026.1, each container runs under a systemd unit (`kolla-<container>-container.service`,
+`Restart=always`, `RestartSec=59`): a container that stopped or was stopped with `docker stop` is started again by
+systemd about a minute later, without anyone typing `docker start`. If the instance was in `resize_migrating` on that
+compute, its restart tries to revert the instance. Then check quick check 1 again, and the source `nova-compute` log
+for `Failed to revert crashed migration`.
+
+If that revert failed, the instance is back on the source with its disks but stopped (`SHUTOFF` after the next power
+state sync), and its migration record stays `migrating`. Start it (`openstack server start <server-id>`), then check
+the allocations (*Verification*): the instance's allocation is still on the destination and the migration's on the
+source.
 
 If the instance stays in `RESIZE` with the services up, find where its disks are (the `host` field and the migration
 record), and on that compute, whether the guest exists:
@@ -240,18 +255,31 @@ disks are at least the current sizes.
 openstack server show <server-id> -c status -c OS-EXT-STS:task_state -c OS-EXT-SRV-ATTR:host -c flavor
 # expected: ACTIVE (or SHUTOFF if it was), no task state, the expected flavor and host
 openstack server migration list --server <server-id>
-# expected: the last migration confirmed, reverted or error, none in progress
+# expected: the last migration confirmed, reverted or error, none in progress.
+# After a nova-compute restart during the copy (cause 2), the record stays "migrating": see below.
 ```
 
 Then check the allocations: after a failed or abandoned resize, the migration may still hold resources on the
-source compute ([no valid host with free capacity](../scheduling/no-valid-host-with-free-capacity.md) and
+source compute (`openstack resource provider allocation show <server-id>` and `... show <migration-uuid>`, the
+`UUID` column of `openstack server migration list`, with the osc-placement plugin). Deleting the instance does not
+remove the migration's allocation. After a copy interrupted by a `nova-compute` restart, a partial `<server-id>`
+directory can also remain on the destination ([no valid host with free capacity](../scheduling/no-valid-host-with-free-capacity.md) and
 [stale records](stale-records-stuck-instances-orphan-ports-attachments.md) show how to find them).
 
 ## Validity and limits
 
 - Written from Nova 2026.1 (`nova/compute/manager.py`, `nova/compute/api.py`, `nova/virt/libvirt/driver.py`, the
   resize guides, `resize_confirm_window`), python-openstackclient 2026.1 (`server resize`, `server migration`,
-  `server set --state`) and Kolla-Ansible 2026.1 (`nova.conf.j2`, `nova_ssh`). Not reproduced on a lab.
+  `server set --state`) and Kolla-Ansible 2026.1 (`nova.conf.j2`, `nova_ssh`).
+- Lab run (2026-10-26, Kolla-Ansible 22.2.0, 3 controllers + 2 computes, ML2/OVS, local qcow2 disks): causes 1, 2,
+  3 and 5 reproduced. Cause 1: resize to `VERIFY_RESIZE` in 34 s, confirm 12 s, revert 19 s, `server image create`
+  refused with 409 `Cannot 'createImage' instance <server-id> while it is in vm_state resized`. Cause 5: root shrink
+  refused by the API (400), ephemeral shrink rolled back in 13 s. Cause 3: `docker stop nova_ssh` on the destination,
+  rollback in 16 s with `ssh: connect to host <dest> port 8022: Connection refused`. Cause 2: `docker stop
+  nova_compute` on the source during the copy left the instance in `RESIZE`/`resize_migrating`; systemd restarted
+  the container 60 s later, the revert failed with `AttributeError: 'NoneType' object has no attribute 'get'` in
+  `_finish_revert_migration_vtpm`, the task state was reset and the instance ended stopped on the source, migration
+  `migrating`, allocations swapped. Cause 4 not reproduced.
 - With local disks, an instance in `ERROR` after a failed copy whose `host` points to a compute without its disks
   is not covered: moving the disks by hand is outside this page.
 - Not covered: cross-cell resize, resize of instances with PCI devices, vGPUs or NUMA topology, and VMware or
