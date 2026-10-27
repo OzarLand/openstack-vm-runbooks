@@ -2,7 +2,7 @@
 title: Reopening provisioning after a control-plane incident. Stop the APIs, recover, verify, reopen
 kind: runbook
 status: draft
-openstack_releases: [unrecorded]
+openstack_releases: ["2026.1"]
 components: [nova, neutron, rabbitmq, mariadb, haproxy]
 deployment_methods: [any]
 environment:
@@ -11,7 +11,8 @@ environment:
   storage: any
   os: any
 risk: destructive
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, RabbitMQ 4.2.9 with Khepri, Galera + ProxySQL", date: 2026-10-27, note: "RabbitMQ partition injected (one node cut on port 25672); steps 1 to 4, verification and reopening run in order; kolla-ansible rabbitmq-reset-state run after the partition had healed and failed with Khepri (node removed, rejoined by hand, stream and quorum replicas repaired); conductor and scheduler did not start with placement stopped; step 3 read-only (Galera healthy, mariadb-recovery not run); no Cinder, no OVN" }
 upstream_refs:
   - https://www.rabbitmq.com/docs/partitions
   - https://galeracluster.com/library/documentation/crash-recovery.html
@@ -66,7 +67,7 @@ the evidence the incident review will need, and the state will change once you s
 
 | Cause | How to tell | Is this runbook the right one? |
 |---|---|---|
-| RabbitMQ network partition | `rabbitmqctl cluster_status` lists partitions | Yes. This was the cause in the source incident |
+| RabbitMQ network partition | `rabbitmqctl cluster_status` lists partitions (Mnesia); with Khepri, *Network Partitions* stays `(none)` and the nodes disagree on the running nodes | Yes. This was the cause in the source incident |
 | RabbitMQ memory or disk alarm | `rabbitmq-diagnostics check_alarms` | Usually not: free memory or disk and the alarm clears; no stop needed |
 | One RabbitMQ node left a cluster that keeps its majority | One node missing, no partition | No: rejoin or reset that node only |
 | Galera lost quorum on one node | That node `non-Primary`, others `Primary` | No: restart that node and let it rejoin |
@@ -86,8 +87,13 @@ timing out, and the action is reversible in one place. Alternative: stop the API
 
 **Kolla-Ansible:** on each controller, stop the systemd units, not the containers: each container runs from a unit
 with `Restart=always`, so a `docker stop` is undone within about a minute. For example
-`systemctl stop kolla-nova_api-container.service kolla-neutron_server-container.service kolla-cinder_api-container.service kolla-glance_api-container.service kolla-placement_api-container.service`
-(adapt to the services you run); or set those backends to `MAINT` in HAProxy.
+`systemctl stop kolla-nova_api-container.service kolla-neutron_server-container.service kolla-cinder_api-container.service kolla-glance_api-container.service`
+(adapt to the services you run: a unit that does not exist on a node only prints `Failed to stop ...: Unit ... not
+loaded.`, and Glance with a file backend runs on one controller); or set those backends to `MAINT` in HAProxy.
+Keep `placement_api` running: on 2026.1, `nova-conductor` and `nova-scheduler` exit at start-up when Placement does
+not answer (`openstack.exceptions.NotSupported: The placement service for <vip>:RegionOne exists but does not have
+any supported versions.`), so the restarts of step 4 fail with Placement stopped. If you stopped it, start it before
+step 4.
 **Any:** `systemctl stop <api services>` or the equivalent HAProxy change.
 
 Leave Keystone running. The verification gate before reopening needs tokens, and with the other APIs stopped
@@ -108,7 +114,25 @@ uses, which queue types). If a clean rejoin of one side is possible, prefer it. 
 2. Reset or purge according to your deployment tool's procedure. **Kolla-Ansible:** `kolla-ansible rabbitmq-reset-state`
    resets the cluster and recreates it. **Any:** `rabbitmqctl force_reset` on the nodes, then rejoin, or purge the
    queues one by one (`rabbitmqctl purge_queue <queue>`) if the cluster itself is healthy.
+   With Khepri (the default of a new RabbitMQ 4.2 cluster, as Kolla-Ansible 2026.1 deploys it), `force_reset` is
+   refused (`Forced reset is unsupported with Khepri`). On the lab, `kolla-ansible rabbitmq-reset-state` failed: the
+   fallback `rabbitmqctl reset` timed out on one node, which left the cluster with its application stopped, and the
+   two others waited for 3 nodes and failed (`Not enough nodes joined ...'s cluster`); users, vhosts and queues were
+   kept on the two others. That node came back with `rabbitmqctl reset`, `rabbitmqctl join_cluster
+   rabbit@<other-node>`, `rabbitmqctl start_app`.
 3. Start the application on every node and confirm `cluster_status` shows one cluster, no partitions, no alarms.
+4. After a node was reset or re-joined, check that every quorum queue and stream has a member on it
+   (`rabbitmqctl list_queues name type members`). On the lab, the re-joined node was a member of none: quorum queues
+   ran on two members, and every client connected to that node failed on the streams with `PRECONDITION_FAILED -
+   stream queue '<queue>' in vhost '/' does not have a running replica on the local node` (the Neutron agents of one
+   compute: a new instance got no DHCP). Add the members back:
+   `rabbitmq-streams add_replica -p / <stream> rabbit@<node>` for each stream, and
+   `rabbitmq-queues grow rabbit@<node> all` for the quorum queues (Kolla-Ansible's guide also points to
+   `contrib/ops/rabbitmq/rabbitmq-repair-stream-replicas.sh`, not shipped in the kolla-ansible package). An instance
+   that booted meanwhile needs a hard reboot to get its DHCP lease.
+
+With Khepri, a partition heals by itself once the network is back (on the lab, the three nodes were running together
+within 15 s of the repair): check `cluster_status` on every node before deciding on a reset.
 
 When RabbitMQ returns, every agent on every host reconnects at once; on a large platform that reconnection storm is
 itself a load to expect, and consumers may take minutes to reappear on queues.
@@ -145,8 +169,10 @@ All three must hold:
 rabbitmqctl cluster_status                                   # one cluster, no partitions, no alarms
 rabbitmqctl list_queues name messages consumers | awk '$3==0 && $2>0'   # empty: every queue has consumers
 mysql -e "SHOW STATUS LIKE 'wsrep_cluster_size'; SHOW STATUS LIKE 'wsrep_cluster_status';"
+#    Kolla-Ansible: sudo docker exec mariadb mariadb -uroot -p<database_password> -e "..." (no mysql in the image)
 
-# 2. Every compute service and network agent reporting again
+# 2. Every compute service and network agent reporting again. These need nova-api and neutron-server: start them
+#    first (internally), and read the output: with the API stopped, the command prints a 503 and grep still prints 0.
 openstack compute service list --service nova-compute | grep -c down     # 0
 openstack network agent list -f value -c Alive | grep -vc True          # 0 = every agent alive (agent-based backends)
 
@@ -178,6 +204,14 @@ RabbitMQ steps depend heavily on version (Mnesia versus Khepri, quorum versus cl
 documentation for your version before resetting anything. Deployment-tool commands are given for Kolla-Ansible;
 other tools have their own recovery commands. This is the heaviest option; use it when lighter ones (rejoin one
 node, restart one service) do not apply.
+
+Lab (Kolla-Ansible 22.2.0, 2026.1, 3 controllers, RabbitMQ 4.2.9 with Khepri, quorum queues and stream fanout, Galera
+with ProxySQL, ML2/OVS, no Cinder, 2026-10-27): a partition of one RabbitMQ node made `server create` answer 504
+and left the record in `BUILD`; steps 1, 2 (`kolla-ansible rabbitmq-reset-state`, run after the partition had
+healed, to test it), 3 (read-only: Galera was healthy) and 4, the verification and the reopening were run in this
+order, with the results written in the steps above; the test instance was reachable after the stream replicas were
+repaired and a hard reboot. Not run: `rabbitmqctl stop_app` by hand, `force_reset` or `purge_queue` outside
+Kolla-Ansible, a Galera recovery, HAProxy `MAINT`, OVN, Mnesia.
 
 ## Related
 
