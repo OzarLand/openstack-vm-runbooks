@@ -13,7 +13,6 @@ environment:
 risk: read-only
 confirmed_by:
   - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, RabbitMQ 4.2.9 with Khepri, Galera + ProxySQL", date: 2026-10-27, note: "every read-only check run on a healthy lab and during an injected RabbitMQ memory alarm (1.5 min), with the Kolla commands corrected (mariadb client, no -it); a RabbitMQ partition and an alarm also observed in the RPC-timeouts page's run; not run: the certificate check (no TLS on the lab), Galera non-Primary or flow control, memcached, Fernet" }
-  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, RabbitMQ 4.2.9 with Khepri, Galera + ProxySQL", date: 2026-10-27, note: "every read-only check run on a healthy lab and during an injected RabbitMQ memory alarm (1.5 min), with the Kolla commands corrected (mariadb client, no -it); a RabbitMQ partition and an alarm also observed in the RPC-timeouts page's run; not run: the certificate check (no TLS on the lab), Galera non-Primary or flow control, memcached, Fernet" }
 upstream_refs:
   - https://galeracluster.com/library/documentation/monitoring-cluster.html
   - https://www.rabbitmq.com/docs/partitions
