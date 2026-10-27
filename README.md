@@ -88,6 +88,7 @@ A page written for one deployment method is welcome; variants for other methods 
 | Placement usage of a compute does not match its instances, or a resource provider cannot be deleted (HTTP 409) | [Placement allocations out of sync](scheduling/placement-allocations-out-of-sync-audit-and-heal.md) |
 | The guest does not boot (kernel panic, emergency shell) or is unreachable after a change inside it | [Rescue mode](lifecycle/rescue-mode-repair-an-unbootable-guest.md) |
 | nova-compute says "Possible rename detected, refusing to start!", or logs "Conflicting resource provider name" | [Compute renamed or re-added](scheduling/compute-renamed-or-re-registered-resource-provider-conflict.md) |
+| A boot is refused or aborted: "Flavor's disk is too small for requested image" | [Image larger than the flavor's disk](scheduling/image-larger-than-flavor-disk.md) |
 | A boot from volume ends in ERROR ("Failure prepping block device"), or boots nothing | [Instance fails to boot from volume](scheduling/instance-fails-to-boot-from-volume.md) |
 | An instance went SHUTOFF on its own, Nova logged "shutdown by itself" | [Host OOM killer](lifecycle/instance-shut-off-by-host-oom-killer.md) |
 | After a compute reboot, instances stay SHUTOFF or have no network | [After a compute reboot](recovery/after-a-compute-reboot-instances-shutoff-or-without-network.md) |
@@ -120,6 +121,7 @@ lab), **documentation** (upstream documentation and source), **production incide
 | Page | Components | Releases | Status | Source |
 |---|---|---|---|---|
 | [New instance in ERROR with "Exceeded maximum number of retries". The real error is on the computes that tried](scheduling/build-fails-exceeded-maximum-number-of-retries.md) | nova, placement | 2026.1 | draft | documentation |
+| [Boot refused or aborted because the flavor's disk is too small for the image](scheduling/image-larger-than-flavor-disk.md) | nova, glance, cinder | 2026.1 | draft | documentation |
 | [Instance fails to boot from volume. ERROR at build, or ACTIVE with no bootable disk](scheduling/instance-fails-to-boot-from-volume.md) | nova, cinder, glance, libvirt | 2026.1 | draft | documentation |
 | [No valid host was found, although capacity exists](scheduling/no-valid-host-with-free-capacity.md) | nova, placement | 2026.1 | lab-verified | book |
 | [A compute shows disabled or down. Why, what still works on it, and how to bring it back](scheduling/compute-service-disabled-or-forced-down.md) | nova, placement, libvirt | 2026.1 | draft | documentation |
