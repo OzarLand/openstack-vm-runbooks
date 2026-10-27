@@ -244,7 +244,7 @@ On the client side, `oslo.messaging` logs (`impl_rabbit.py`; prefix `[<connectio
 | `Timed out waiting for a reply to message ID <msg-id>` (in a `MessagingTimeout`; a second form, `Timed out waiting for a reply <reply queue> to message ID <msg-id>.`, comes from the reply waiter, so grep `Timed out waiting for a reply`) | ERROR, in a traceback | An RPC call got no answer within `rpc_response_timeout` (60 s). Either the server side (conductor, agent, compute) did not process it, or the reply was lost. (`amqpdriver.py`) |
 
 Captured on a lab, when one of the three RabbitMQ nodes was restarted at 17:38:09: the broker being stopped logs one
-`connection_forced` line per client connection (64 here), and the clients log three different `<error>` texts, then
+`connection_forced` line per client connection, and the clients log three different `<error>` texts, then
 reconnect to another node 3 to 5 s later. Two client lines not in the table above also appeared: `Connection failed:
 … (retrying in 0 seconds)` (ERROR) and `Stream Queue.declare: <topic>_fanout after offset …` (INFO, on reconnect).
 

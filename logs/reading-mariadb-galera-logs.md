@@ -96,7 +96,7 @@ The states are `SYNCED`, `JOINED`, `DONOR/DESYNCED`, `JOINER`, `PRIMARY`, `OPEN`
 
 | Line (message text) | Level | What it means |
 |---|---|---|
-| `WSREP: Quorum results:` followed by `version = …`, `component = PRIMARY` or `NON-PRIMARY`, `conf_id = …`, `members = <joined>/<total> (joined/total)`, `act_id = …`, … | Note | A new view of the cluster was computed. `component = NON-PRIMARY` means **this node has no quorum**: it refuses queries. `members` says how many nodes it sees. |
+| `WSREP: Quorum results:` followed by `version = …`, `component = PRIMARY` or `NON-PRIMARY`, `conf_id = …`, `members = <joined>/<total> (joined/total)`, `act_id = …`, … | Note | A new view of the cluster was computed. `component = NON-PRIMARY` means **this node has no quorum**: it refuses queries. `members` says how many nodes it sees. On the lab, a node cut from the others logged no `Quorum results` block, only `Received NON-PRIMARY.` (see below). |
 | `WSREP: <self> connection to peer <uuid> with addr <address> timed out, no messages seen in <period>, socket stats: …` | Note | The group communication link to one peer was silent for `gmcast.peer_timeout`. The network between database nodes failed, or the peer is stuck. |
 | `WSREP: <self> suspecting node: <uuid>` / `suspected node without join message, declaring inactive` (or `detected inactive node: <uuid>`) | Note | The node suspects, then declares, a peer gone. A new view follows. On a lab network cut, the second form appeared, and `detected inactive node` did not. |
 | `WSREP: forgetting <uuid> (<address>)` | Note | The peer is removed from the list of known members. |
@@ -110,7 +110,7 @@ Sources: `gcs/src/gcs_group.cpp`, `gcomm/src/gmcast.cpp`, `gcomm/src/evs_proto.c
 **Captured on a lab** (Kolla-Ansible 2026.1, MariaDB 11.4.13, Galera 26.4.27, 3 nodes). One node cut from the two
 others on port 4567 for 1 min 45 s. The cut node (controller-3) logged no `Quorum results:` block while it had no
 quorum: it logged `view(view_id(NON_PRIM, …))`, `New COMPONENT: primary = no`, `Received NON-PRIMARY.` and `Non-primary
-view`, then `timed out` every 4 s or so per peer until the network came back:
+view`, then `timed out` lines per peer until the network came back:
 
 ```text
 2026-10-27 17:44:07 0 [Note] WSREP: (aaaaaaaa-0003, 'tcp://192.0.2.13:4567') connection to peer aaaaaaaa-0001 with addr tcp://192.0.2.11:4567 timed out, no messages seen in PT3S, socket stats: rtt: 13812 rttvar: …
@@ -125,7 +125,7 @@ view`, then `timed out` every 4 s or so per peer until the network came back:
 ```
 
 The two other nodes kept quorum (`component = PRIMARY`, `members = 2/2 (joined/total)` at 17:44:11) and logged the
-cut node under `partitioned`, then `forgetting`. A clean stop of a node (`systemctl stop
+cut node under `partitioned`, then `forgetting` (in the run's capture of controller-1). A clean stop of a node (`systemctl stop
 kolla-mariadb-container.service`, same lab) logs no `timed out`, `suspecting` or `inactive` line: the peers log
 `forgetting <uuid>` and a view with the node under `partitioned` in the same second. The status variables on the cut
 node read `wsrep_cluster_status` `non-Primary`, `wsrep_local_state_comment` `Initialized`, `wsrep_ready` `OFF`.
