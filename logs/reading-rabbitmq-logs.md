@@ -1,7 +1,7 @@
 ---
 title: Reading the RabbitMQ logs, and the oslo.messaging lines that go with them
 kind: diagnostic
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [rabbitmq, nova, neutron, cinder]
 deployment_methods: [kolla-ansible, any]
@@ -11,7 +11,8 @@ environment:
   storage: any
   os: any
 risk: read-only
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, 3 controllers + 2 computes, RabbitMQ 4.2.9 with Khepri", date: 2026-10-27, note: "every read-only command run (log greps from a root shell); real lines captured from a restart of one RabbitMQ node (systemctl restart, 37 s) and, in the same lab's recovery run, from a network cut of one node and a forced memory alarm. Not seen: Mnesia partition and autoheal lines, Node was restarted, disk and fd alarms, missed heartbeats, login refused, Failed to publish, MessagingTimeout" }
 upstream_refs:
   - https://www.rabbitmq.com/docs/4.2/partitions
   - https://www.rabbitmq.com/docs/4.2/alarms
@@ -25,7 +26,7 @@ upstream_refs:
   - https://opendev.org/openstack/oslo.messaging/src/branch/stable/2026.1/oslo_messaging/_drivers/amqpdriver.py
   - https://opendev.org/openstack/kolla-ansible/src/branch/stable/2026.1/ansible/roles/rabbitmq/templates/rabbitmq.conf.j2
 authored_by: agent:ozarland-author
-last_verified: 2026-10-26
+last_verified: 2026-10-27
 ---
 
 # Reading the RabbitMQ logs, and the oslo.messaging lines that go with them
@@ -63,8 +64,17 @@ Kolla-Ansible's fluentd parser accepts the timestamp with or without microsecond
 (`input/03-rabbitmq.conf.j2`). Several messages span several lines (a banner of asterisks, a table); read the
 lines after the first.
 
+The same line from RabbitMQ 4.2.9 on Kolla-Ansible 2026.1 (captured on a lab), with microseconds and the offset:
+
+```text
+2026-10-27 17:24:36.043822+00:00 [info] <0.919.0> Memory high watermark set to 9595 MiB (10061436518 bytes) of 15992 MiB (16769060864 bytes) total
+```
+
+Run the `rabbit@*.log` commands from a root shell (`sudo -i`): with `sudo grep … rabbit@*.log`, your own shell
+expands the glob, cannot read `/var/log/kolla/rabbitmq/`, and grep answers `No such file or directory`.
+
 ```bash
-# Kolla-Ansible, on a RabbitMQ node
+# Kolla-Ansible, on a RabbitMQ node, as root
 grep -nE '\[(warning|error)\]' /var/log/kolla/rabbitmq/rabbit@*.log | tail -30
 docker exec rabbitmq rabbitmq-diagnostics cluster_status
 docker exec rabbitmq rabbitmq-diagnostics alarms
@@ -117,6 +127,34 @@ replicas is reachable.
 
 Sources: `rabbit_node_monitor.erl`, `rabbit_autoheal.erl` (RabbitMQ 4.2.9); the partitions guide.
 
+**Captured on a lab** (Kolla-Ansible 2026.1, RabbitMQ 4.2.9, Khepri, 3 nodes). A clean restart of one node
+(`systemctl restart kolla-rabbitmq-container.service` on controller-3), as seen from controller-1: the reason is
+`connection_closed`, the node is `up` again 7 s later, and `rabbit on node … up` comes only when RabbitMQ has
+started there, 37 s after the stop (on another node, a short `up`/`down` flap appeared at the `node … up` second).
+No `Node <node> was restarted` line appeared.
+
+```text
+2026-10-27 17:38:09.689857+00:00 [info] <0.963.0> rabbit on node 'rabbit@controller-3' down
+2026-10-27 17:38:09.716869+00:00 [info] <0.1631.0> queue 'scheduler' in vhost '/': Leader monitor down with shutdown, setting election timeout
+2026-10-27 17:38:09.925888+00:00 [info] <0.963.0> node 'rabbit@controller-3' down: connection_closed
+2026-10-27 17:38:13.413432+00:00 [info] <0.1631.0> queue 'scheduler' in vhost '/': detected a new leader {'%2F_scheduler','rabbit@controller-2'} in term 8
+2026-10-27 17:38:16.942180+00:00 [info] <0.963.0> node 'rabbit@controller-3' up
+2026-10-27 17:38:46.747626+00:00 [info] <0.963.0> rabbit on node 'rabbit@controller-3' up
+```
+
+Each quorum queue whose leader was on the stopped node logs `Leader monitor down` and, a few seconds later,
+`detected a new leader` (39 such queues here); stream fanout queues log `rabbit_stream_coordinator: Error while
+starting replica for __<name>_fanout_<n> on node <node> …` and `Writer process node is down, exiting...` warnings at
+the same second, which are expected while a node is away. A network cut, on the same lab, gave instead (after 74 s,
+no pause and nothing under `Network Partitions` with Khepri):
+
+```text
+2026-10-27 13:26:49.191990+00:00 [error] <0.499.0> ** Node 'rabbit@controller-1' not responding **
+2026-10-27 13:26:49.197106+00:00 [info] <0.4818.0> rabbit on node 'rabbit@controller-1' down
+2026-10-27 13:26:49.197322+00:00 [info] <0.4818.0> node 'rabbit@controller-1' down: net_tick_timeout
+2026-10-27 13:28:09.587387+00:00 [info] <0.4389.0> RabbitMQ metadata store: detected a new leader {rabbitmq_metadata,'rabbit@controller-1'} in term 3
+```
+
 To confirm, ask the nodes rather than the log:
 
 ```bash
@@ -149,6 +187,19 @@ On the client side, `oslo.messaging` logs the broker's block and unblock:
 |---|---|---|
 | `The broker has blocked the connection: <reason>` | ERROR | every OpenStack service connected to the cluster |
 | `The broker has unblocked the connection` | INFO | same |
+
+Captured on a lab (memory alarm forced on controller-2 with `rabbitmqctl set_vm_memory_high_watermark`, then undone):
+the node name is quoted and the "set" line ends with a full stop; the client gives the reason as `connection
+blocked, see broker logs`.
+
+```text
+2026-10-27 13:20:06.760571+00:00 [warning] <0.891.0> memory resource limit alarm set on node 'rabbit@controller-2'.
+2026-10-27 13:20:06.760571+00:00 [warning] <0.891.0> *** Publishers will be blocked until this alarm clears ***
+2026-10-27 13:20:07.693 7 ERROR oslo.messaging._drivers.impl_rabbit [-] The broker has blocked the connection: connection blocked, see broker logs
+2026-10-27 13:24:31.892180+00:00 [warning] <0.891.0> memory resource limit alarm cleared on node 'rabbit@controller-2'
+2026-10-27 13:24:31.892387+00:00 [warning] <0.891.0> memory resource limit alarm cleared across the cluster
+2026-10-27 13:24:31.893 7 INFO oslo.messaging._drivers.impl_rabbit [-] The broker has unblocked the connection
+```
 
 Source: `impl_rabbit.py`. Seeing the first in many services at the same second points at an alarm; read the broker
 log for which node and which resource.
@@ -192,6 +243,30 @@ On the client side, `oslo.messaging` logs (`impl_rabbit.py`; prefix `[<connectio
 | `Failed to publish message to topic '<topic>': <error>` | ERROR | A send failed after the retries. |
 | `Timed out waiting for a reply to message ID <msg-id>` (in a `MessagingTimeout`; a second form, `Timed out waiting for a reply <reply queue> to message ID <msg-id>.`, comes from the reply waiter, so grep `Timed out waiting for a reply`) | ERROR, in a traceback | An RPC call got no answer within `rpc_response_timeout` (60 s). Either the server side (conductor, agent, compute) did not process it, or the reply was lost. (`amqpdriver.py`) |
 
+Captured on a lab, when one of the three RabbitMQ nodes was restarted at 17:38:09: the broker being stopped logs one
+`connection_forced` line per client connection (64 here), and the clients log three different `<error>` texts, then
+reconnect to another node 3 to 5 s later. Two client lines not in the table above also appeared: `Connection failed:
+… (retrying in 0 seconds)` (ERROR) and `Stream Queue.declare: <topic>_fanout after offset …` (INFO, on reconnect).
+
+```text
+2026-10-27 17:38:09.253478+00:00 [error] <0.21712.0>  operation none caused a connection exception connection_forced: "broker forced connection closure with reason 'shutdown'"
+2026-10-27 17:38:09.259 260 ERROR oslo.messaging._drivers.impl_rabbit [-] [<conn-id>] AMQP server on 192.0.2.13:5672 is unreachable: [Errno 104] Connection reset by peer. Trying again in 1 seconds.: ConnectionResetError: [Errno 104] Connection reset by peer
+2026-10-27 17:38:09.265 293 ERROR oslo.messaging._drivers.impl_rabbit [-] [<conn-id>] AMQP server on 192.0.2.13:5672 is unreachable: (0, 0): (320) CONNECTION_FORCED - broker forced connection closure with reason 'shutdown'. Trying again in 1 seconds.: amqp.exceptions.ConnectionForced: (0, 0): (320) CONNECTION_FORCED - broker forced connection closure with reason 'shutdown'
+2026-10-27 17:38:09.279 7 ERROR oslo.messaging._drivers.impl_rabbit [-] [<conn-id>] AMQP server on 192.0.2.13:5672 is unreachable: <RecoverableConnectionError: unknown error>. Trying again in 1 seconds.: amqp.exceptions.RecoverableConnectionError: <RecoverableConnectionError: unknown error>
+2026-10-27 17:38:10.528 21 INFO oslo.messaging._drivers.impl_rabbit [-] A recoverable connection/channel error occurred, trying to reconnect: [Errno 104] Connection reset by peer
+2026-10-27 17:38:10.530 21 ERROR oslo.messaging._drivers.impl_rabbit [-] Connection failed: [Errno 111] ECONNREFUSED (retrying in 0 seconds): ConnectionRefusedError: [Errno 111] ECONNREFUSED
+2026-10-27 17:38:11.855 7 INFO oslo.messaging._drivers.impl_rabbit [-] [<conn-id>] Stream Queue.declare: compute-alt_fanout after offset last
+2026-10-27 17:38:12.277 7 INFO oslo.messaging._drivers.impl_rabbit [-] [<conn-id>] Reconnected to AMQP server on 192.0.2.12:5672 via [amqp] client with port 38502.
+```
+
+An unexpected close and a client-provided name, from the same lab (names are `<service>:<pid>:<uuid>`):
+
+```text
+2026-10-27 17:27:00.663544+00:00 [warning] <0.25062.0> closing AMQP connection <0.25062.0> (192.0.2.11:59952 -> 192.0.2.11:5672 - heat-engine:277:<uuid>, vhost: '/', user: 'openstack', duration: '16s'):
+2026-10-27 17:27:00.663544+00:00 [warning] <0.25062.0> client unexpectedly closed TCP connection
+2026-10-26 20:53:46.349944+00:00 [info] <0.16880.0> connection 192.0.2.11:58406 -> 192.0.2.11:5672 has a client-provided name: nova-scheduler:28:<uuid>
+```
+
 The client heartbeat is `heartbeat_timeout_threshold` (default 60 s), checked `heartbeat_rate` times (default 3) in
 that window (`[oslo_messaging_rabbit]`).
 
@@ -214,8 +289,11 @@ How the shared dependencies fail together: [VM creation fails platform-wide](../
 ## Validity and limits
 
 - Broker messages are quoted from the RabbitMQ **4.2.9** source and the RabbitMQ 4.2 guides; client messages from
-  `oslo.messaging` 2026.1. **No line on this page was captured on a lab**, apart from the guide's own examples,
-  which come from older RabbitMQ versions and show the shape, not 4.2 output. A lab request asks for real samples.
+  `oslo.messaging` 2026.1. The blocks marked "captured on a lab" come from Kolla-Ansible 2026.1 with RabbitMQ 4.2.9
+  on Erlang/OTP 27.3.4 (patch 18), Khepri, 3 RabbitMQ nodes on the controllers and 2 computes: a restart of one RabbitMQ node, a
+  network cut of one node, a forced memory alarm. Not seen on the lab: the Mnesia partition lines, `Node <node> was
+  restarted`, the disk and file descriptor alarms, `missed heartbeats from client`, `login refused`, `Failed to
+  publish message`, `MessagingTimeout`.
 - Kolla-Ansible 2026.1 enables `khepri_db` on deploy, reconfigure and upgrade, so its clusters are expected to run
   Khepri; check with the commands above. The partition lines marked "Mnesia" do not appear with Khepri, whose
   partition handling relies on Raft and logs leader elections instead (not detailed here).
