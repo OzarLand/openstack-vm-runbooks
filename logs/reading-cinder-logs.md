@@ -96,7 +96,8 @@ Sources: `cinder/volume/manager.py`, `cinder/volume/flows/manager/create_volume.
 | `Filtering removed all hosts for the request with volume ID '<volume-id>'. Filter results: <filter>: (start: <n>, end: <n>), ...` | INFO | Backends were up but the filters removed them all; the filter whose `end` is 0 is the cause (capacity, volume type extra specs, availability zone). | the backend's reported capabilities |
 | `Insufficient free virtual space (<n>GB) to accommodate thin provisioned <n>GB volume on host <host>@<backend>#<pool>.` (`cluster <name>` when the backend is clustered) | WARNING | The capacity filter rejected a thin-provisioned backend: its total capacity less `reserved_percentage`, times `max_over_subscription_ratio`, minus what is already provisioned, is below the size asked. The usual cause of `CapacityFilter: (start: <n>, end: 0)`. Related lines from the same filter: `Insufficient free space for thin provisioning. …` (over-subscription ratio exceeded) and `Insufficient free space for volume creation on host … (requested / avail): <n>/<n>`. | `openstack volume backend pool list --long`; `max_over_subscription_ratio` |
 | `No weighed backend found for volume with properties: <volume type>` | WARNING | No backend left after filtering and weighing. | same |
-| `Failed to schedule_<method>: <error>` (for example `Failed to schedule_create_volume: No valid backend was found. …`) | ERROR | Scheduling failed; the volume goes to `error`. | the lines just above |
+| `Failed to schedule_<method>: <error>` (extend, retype, migrate, manage; for example `Failed to schedule_extend_volume: Cannot place volume <volume-id> on <host>@<backend>#<pool>.`) | ERROR | Scheduling of that operation failed. | the lines just above |
+| `Failed to run task cinder.scheduler.flows.create_volume.ScheduleCreateVolumeTask;volume:create: <error>` | ERROR | The create's scheduling failed; the volume goes to `error` with no host. | the lines just above |
 
 Sources: `cinder/scheduler/host_manager.py`, `cinder/scheduler/base_filter.py`,
 `cinder/scheduler/filter_scheduler.py`, `cinder/scheduler/manager.py`, `cinder/scheduler/filters/capacity_filter.py`,
@@ -156,11 +157,15 @@ create the last line is `Failed to run task ...`, not `Failed to schedule_create
 was seen for an extend (`Failed to schedule_extend_volume: Cannot place volume <volume-id> on <host>@lvm-1#lvm-1.`):
 
 ```text
-WARNING cinder.scheduler.host_manager [...] volume service is down. (host: controller-1@lvm-1)
+WARNING cinder.scheduler.host_manager [...] volume service is down. (host: aio-1@lvm-1)
 INFO cinder.scheduler.base_filter [...] Filtering removed all hosts for the request with volume ID '<volume-id>'. Filter results: AvailabilityZoneFilter: (start: 0, end: 0), ...
 WARNING cinder.scheduler.filter_scheduler [...] No weighed backend found for volume with properties: {'id': '<type-id>', 'name': '__DEFAULT__', ...
 ERROR cinder.scheduler.flows.create_volume [...] Failed to run task cinder.scheduler.flows.create_volume.ScheduleCreateVolumeTask;volume:create: No valid backend was found. No weighed backends ...
 ```
+
+Both blocks below were captured during the lab run of
+[#133](https://github.com/OzarLand/openstack-vm-runbooks/pull/133) (see the *Lab observations* of
+[Volume stuck in deleting or error_deleting](../volumes/volume-stuck-in-deleting-or-error-deleting.md)).
 
 After the restart of a stopped `cinder-volume`, with a delete queued:
 

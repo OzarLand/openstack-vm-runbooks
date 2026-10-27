@@ -118,16 +118,19 @@ Captured on a lab (Kolla-Ansible 2026.1 all-in-one, kernel 6.8, open-iscsi 2.1.9
 `noop_out_timeout` 5 s, `replacement_timeout` 120 s, port 3260 dropped on the compute for 60 s, then for 180 s):
 
 ```text
-compute-1 kernel:  connection5:0: ping timeout of 5 secs expired, recv timeout 5, last rx <n>, last ping <n>, now <n>
-compute-1 kernel:  connection5:0: detected conn error (1022)
-compute-1 docker[<pid>]: iscsid: Kernel reported iSCSI connection 5:0 error (1022 - ISCSI_ERR_NOP_TIMEDOUT: A NOP has timed out) state (3)
-compute-1 docker[<pid>]: iscsid: re-opening session 5 (reopen_cnt 0)
-compute-1 docker[<pid>]: iscsid: connection5:0 login failed ISCSI_CONN_STATE_XPT_WAIT/R_STAGE_SESSION_REOPEN (reopen_cnt=0, reopen_max=0)
-compute-1 docker[<pid>]: iscsid: connection5:0 is operational after recovery (4 attempts)
-compute-1 kernel:  session5: session recovery timed out after 120 secs
-compute-1 kernel: sd 2:0:0:1: rejecting I/O to offline device
-compute-1 kernel: I/O error, dev sda, sector 1049536 op 0x1:(WRITE) flags 0x8800 phys_seg 2 prio class 2
+aio-1 kernel:  connection5:0: ping timeout of 5 secs expired, recv timeout 5, last rx <n>, last ping <n>, now <n>
+aio-1 kernel:  connection5:0: detected conn error (1022)
+aio-1 docker[<pid>]: iscsid: Kernel reported iSCSI connection 5:0 error (1022 - ISCSI_ERR_NOP_TIMEDOUT: A NOP has timed out) state (3)
+aio-1 docker[<pid>]: iscsid: re-opening session 5 (reopen_cnt 0)
+aio-1 docker[<pid>]: iscsid: connection5:0 login failed ISCSI_CONN_STATE_XPT_WAIT/R_STAGE_SESSION_REOPEN (reopen_cnt=0, reopen_max=0)
+aio-1 docker[<pid>]: iscsid: connection5:0 is operational after recovery (4 attempts)
+aio-1 kernel:  session5: session recovery timed out after 120 secs
+aio-1 kernel: sd 2:0:0:1: rejecting I/O to offline device
+aio-1 kernel: I/O error, dev sda, sector 1049536 op 0x1:(WRITE) flags 0x8800 phys_seg 2 prio class 2
 ```
+
+`re-opening session …` and the lower-case `login failed …` are debug lines (`initiator.c`): they appear because
+Kolla-Ansible runs `iscsid -d 8 -f`.
 
 On that lab: the error was detected 8 s after the cut; during it `iscsiadm -m session -P 1` showed `iSCSI Connection
 State: TRANSPORT WAIT`, `iSCSI Session State: FAILED`; the guest's writes blocked without error for a 60 s cut and
