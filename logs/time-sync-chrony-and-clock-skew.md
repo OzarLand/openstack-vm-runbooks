@@ -11,7 +11,8 @@ environment:
   storage: any
   os: any linux with systemd
 risk: read-only
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-27, note: "systemd-timesyncd (systemd 255) only: NTP blocked (no journal line, Packet count 0, synchronized flag stayed yes), clock set back 120 s and restored (restored-from-recorded-timestamp and initial synchronization lines); not observable on one host: the Neutron clock line, Nova flapping; not run: chrony" }
 upstream_refs:
   - https://gitlab.com/chrony/chrony/-/blob/4.9/doc/chronyc.adoc
   - https://gitlab.com/chrony/chrony/-/blob/4.9/doc/chrony.conf.adoc
@@ -120,6 +121,12 @@ systemd v259 (format strings):
 | `Timed out waiting for reply from <address> (<name>).` | The server did not answer |
 | `Server has too large root distance. Disconnecting.` | The server is rejected |
 | `Failed to find suitable address for host <name>.` | Name resolution or address family problem |
+| `System clock time unset or jumped backwards, restored from recorded timestamp: <date>` | At start, the clock was behind the time timesyncd recorded when it last ran: it was moved forward to that time (seen on a lab with systemd 255) |
+
+On a lab with systemd 255 (Ubuntu 24.04), timesyncd logged **nothing** while its only server was unreachable for 5.5
+minutes (NTP blocked, unit restarted): no `Timed out waiting for reply` line; `timedatectl timesync-status` showed
+`Packet count: 0` and a growing poll interval, and `timedatectl` still said `System clock synchronized: yes`. Use
+`timesync-status` rather than the journal or `timedatectl`'s flag to see a recent loss with timesyncd.
 
 ```bash
 journalctl -u systemd-timesyncd --since "-2d"
@@ -198,19 +205,40 @@ timestamps jumped.
 
 ## A short reading order
 
-1. `timedatectl` on every host: which hosts are not synchronised?
+1. `timedatectl` on every host: which hosts are not synchronised? The flag can stay `yes` for a while after the
+   source is lost; with timesyncd, `timedatectl timesync-status` (`Packet count`, `Offset`) tells more.
 2. On those hosts, the time service's journal: when did it stop synchronising (`Can't synchronise`, `Timed out
    waiting for reply`), and was the clock stepped since?
 3. On the controllers: `neutron-server.log` for `This differs from the current server timestamp`, and the compute
    service list for flapping states.
 4. Correct each host's timestamps by its offset before comparing logs.
 
+## Lab observations
+
+Kolla-Ansible 22.2.0 (2026.1) all-in-one with systemd-timesyncd (systemd 255), one NTP server, on 2026-10-27:
+
+- NTP blocked 5.5 min: no timesyncd line, `Packet count: 0`, `System clock synchronized: yes` (see the timesyncd
+  section).
+- Time service stopped, clock set back 120 s, Neutron OVS agent restarted with `systemctl restart
+  kolla-neutron_openvswitch_agent-container.service`, time service started again:
+
+  ```text
+  2026-10-27T13:51:10+00:00 compute-1 systemd-journald[361]: Time jumped backwards, rotating.
+  2026-10-27T13:53:07+00:00 compute-1 systemd-timesyncd[<pid>]: System clock time unset or jumped backwards, restored from recorded timestamp: Tue 2026-10-27 13:53:07 UTC
+  2026-10-27T13:54:42+00:00 compute-1 systemd-timesyncd[<pid>]: Contacted time server 192.0.2.123:123 (192.0.2.123).
+  2026-10-27T13:54:42+00:00 compute-1 systemd-timesyncd[<pid>]: Initial clock synchronization to Tue 2026-10-27 13:54:42.992145 UTC.
+  ```
+
+- No `This differs from the current server timestamp` line: on an all-in-one the agent and `neutron-server` read the
+  same clock. Every Nova service and Neutron agent stayed `up`.
+- Not run: chrony (not installed), a Neutron agent on another host than the server, a controller clock ahead.
+
 ## Validity and limits
 
-- Written from upstream source and documentation only: chrony 4.9, systemd v259.10, Kolla-Ansible, Nova, Neutron and
-  Keystone `stable/2026.1`. Every message above is a format string from that source, not a captured line.
-- Not run on a lab yet. A lab capture is requested of chrony losing its sources and being stepped back, and of a
-  Neutron agent started on a host whose clock is off by more than 75 s.
+- Written from upstream source and documentation: chrony 4.9, systemd v259.10, Kolla-Ansible, Nova, Neutron and
+  Keystone `stable/2026.1`. The timesyncd lines were checked on an all-in-one lab with systemd 255 (*Lab
+  observations*); the chrony lines, the Neutron clock line and Nova's flapping were not observed (one host, no
+  chrony).
 - ntpd is not covered.
 - The effects of clock skew on Galera, RabbitMQ and TLS certificate checks are not covered here.
 - The reading of a negative elapsed time in Nova's debug line follows from `is_up`; not observed.
