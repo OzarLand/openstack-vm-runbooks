@@ -1,7 +1,7 @@
 ---
 title: New instance in ERROR with "Exceeded maximum number of retries". The real error is on the computes that tried
 kind: runbook
-status: draft
+status: lab-verified
 openstack_releases: ["2026.1"]
 components: [nova, placement]
 deployment_methods: [kolla-ansible, any]
@@ -11,14 +11,16 @@ environment:
   storage: any
   os: any
 risk: state-changing
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, multinode (3 controllers, 2 computes)", date: 2026-10-27, note: "on a disposable lab: cause 3 (an image property both computes reject at spawn) and cause 1 (one compute broken the same way by a nova.conf change) reproduced; quick checks, disable, enable and Verification run; cause 2 not reproduced as such, the Any: lines not run" }
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, multinode (3 controllers, 2 computes)", date: 2026-10-27, note: "on a disposable lab: cause 3 (an image property both computes reject at spawn) and cause 1 (one compute broken the same way by a nova.conf change) reproduced; quick checks, disable, enable and Verification run; cause 2 not reproduced as such, the Any: lines not run" }
 upstream_refs:
   - https://docs.openstack.org/nova/2026.1/configuration/config.html#scheduler.max_attempts
   - https://docs.openstack.org/nova/2026.1/configuration/config.html#filter_scheduler.build_failure_weight_multiplier
   - https://docs.openstack.org/nova/2026.1/configuration/config.html#compute.consecutive_build_service_disable_threshold
   - https://docs.openstack.org/nova/2026.1/admin/scheduling.html
 authored_by: agent:ozarland-author
-last_verified: 2026-10-26
+last_verified: 2026-10-27
 ---
 
 # New instance in ERROR with "Exceeded maximum number of retries". The real error is on the computes that tried
@@ -54,9 +56,12 @@ openstack server show <server-id> -c status -c fault -c created
 # 2. The instance's actions: each compute that tried left an event, with its own error
 openstack server event list <server-id>
 openstack --os-compute-api-version 2.84 server event show <server-id> <request-id>
-#    look for the compute_... events, their host and result Error.
+#    look for the compute_... events and their host: one per compute that tried.
 #    The per-compute traceback is shown to admins only (default policy). From compute API 2.84 each failed event
 #    also has a details field with the fault message; with an older microversion a non-admin sees no error text.
+#    On a Kolla-Ansible 22.2.0 lab the events did not show the error: the compute that failed and rescheduled had
+#    result Success, the last one no result, and none had details or a traceback. Use them for the hosts, and the
+#    compute logs below for the error.
 
 # 3. Are the computes and the agents they need up?
 openstack compute service list --service nova-compute
@@ -66,6 +71,15 @@ openstack network agent list
 On each compute named in check 2, the `nova-compute` log for the server ID has the real exception:
 
 **Kolla-Ansible:** `sudo grep <server-id> /var/log/kolla/nova/nova-compute.log`
+
+On the lab, with an image property both computes rejected, each compute logged:
+
+```text
+ERROR nova.compute.manager [...] [instance: <server-id>] Instance failed to spawn: nova.exception.InvalidMachineType: 'pc-i440fx-1.0' is not valid/supported machine type, Supported machine types are: [...]
+```
+
+and the conductor `WARNING nova.scheduler.utils [...] Failed to compute_task_build_instances: Exceeded maximum number
+of retries. ...` then `Setting instance to ERROR state.`
 
 **Any:** the `nova-compute` service log on that compute.
 
@@ -164,12 +178,27 @@ openstack server delete --wait <test-name>
 
 > ⚠️ **State-changing.** Creates a test instance, deleted at the end. Needs quota, an image, a flavor and a network.
 
+## Lab observations
+
+On a Kolla-Ansible 22.2.0 lab (2026.1, 3 controllers, 2 computes, `max_attempts = 10` in the `nova-scheduler` and
+`nova-conductor` `nova.conf`):
+
+- Cause 3: an image with `hw_machine_type=pc-i440fx-1.0`, which neither compute supports. The build tried compute-1,
+  then compute-2, and ended in `ERROR` with the fault above after 34 s. Two attempts only: with two computes there is
+  one alternate, whatever `max_attempts` says.
+- Cause 1: the same machine type set in `[libvirt] hw_machine_type` of compute-1 only. Of four builds in a row, the
+  first tried compute-1, failed and was retried on compute-2 (37 s); the next three went straight to compute-2
+  (20 to 22 s). All four `ACTIVE`.
+- `compute service set --disable` and `--enable` behaved as written. After the repair (which restarted
+  `nova_compute`) and `--enable`, the Verification instance was built on compute-1.
+
 ## Validity and limits
 
 - Written from Nova 2026.1 (`nova/conductor/manager.py`, `nova/compute/manager.py`, `nova/exception.py`, the
   `max_attempts`, `consecutive_build_service_disable_threshold` and `build_failure_weight_multiplier` options) and
-  Kolla-Ansible 2026.1 (`max_attempts = 10` in the `nova` and `nova-cell` `nova.conf` templates). Not reproduced on a
-  lab.
+  Kolla-Ansible 2026.1 (`max_attempts = 10` in the `nova` and `nova-cell` `nova.conf` templates). Causes 1 and 3
+  reproduced on a lab with two computes (see *Lab observations*); cause 2 not reproduced as such (cause 3 shows the
+  same picture: every compute fails with the same error). The weigher was seen only through where builds landed.
 - The option `consecutive_build_service_disable_threshold` has "disable" in its name, but its 2026.1 help describes
   only reporting failures for the weigher. On another release, read that release's help.
 - Not covered: retries of move operations (resize, cold migration), Ironic, and custom weigher configurations.
