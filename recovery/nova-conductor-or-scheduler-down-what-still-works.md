@@ -212,17 +212,27 @@ A start, stop or reboot sent while the conductor was down can leave the instance
 openstack server show <server-id> -c status -c OS-EXT-STS:power_state -c OS-EXT-STS:task_state
 ```
 
-Choose the state from the power state: `active` if the guest runs (`Running`), otherwise `error`, then start it or
-hard-reboot it. When a stop timed out, the compute has often powered the guest off already: setting `active` would
-leave a record that says it runs.
+Choose the state from the power state: `active` if the guest runs (`Running`), otherwise `error`, then hard-reboot
+it (a plain start is refused from `error`: `start` accepts only a stopped instance). When a stop timed out, the
+compute has often powered the guest off already: setting `active` would leave a record that says it runs. Resetting
+the state is an admin action (`os_compute_api:os-admin-actions:reset_state` is admin-only by default).
 
 > ⚠️ **State-changing.** Changes the instance record only (its `vm_state`, and clears `task_state`); nothing happens
 > to the guest. Precondition: the conductor is back and the power state has been checked as above. Undo: set the
-> other state with the same command.
+> other state with the same command; the old `task_state` cannot be restored, which is the point.
 
 ```bash
 openstack server set --state active <server-id>     # the guest runs
-openstack server set --state error <server-id>      # the guest is off, then:
+openstack server set --state error <server-id>      # the guest is off
+```
+
+If the guest is off and was set to `error`, bring it back with a hard reboot:
+
+> ⚠️ **State-changing.** Powers the guest on and recreates its libvirt domain from Nova's records. Precondition: the
+> power state shows the guest off (`Shutdown` or `NOSTATE`), and its owner expects it to run. Undo:
+> `openstack server stop <server-id>`.
+
+```bash
 openstack server reboot --hard <server-id>
 ```
 
