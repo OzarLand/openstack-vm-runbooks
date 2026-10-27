@@ -44,7 +44,8 @@ client. This page shows where they are and which lines matter.
 
 The kernel's block layer and filesystem errors, and hung tasks, are on the page
 [reading the kernel log of a compute](kernel-messages-on-computes.md). The errors that `os-brick` raises in
-`nova-compute.log` during an attach are covered with the volume error messages; for a stuck attach, see
+`nova-compute.log` during an attach are covered on [reading the Cinder logs](reading-cinder-logs.md) and with the
+volume error messages; for a stuck attach, see
 [volume stuck in attaching or detaching](../volumes/volume-stuck-in-attaching-or-detaching.md).
 
 All commands on this page are read-only, except the Ceph client logging setup, which carries its own warning.
