@@ -78,6 +78,7 @@ A page written for one deployment method is welcome; variants for other methods 
 | A new instance is ACTIVE but never got an IP address | [DHCP agents down](networking/new-instance-gets-no-ip-dhcp-agents-down.md) |
 | A new instance has an address but no SSH key, default hostname | [Metadata agents down](networking/new-instance-boots-without-metadata.md) |
 | A build or live migration fails with "Binding failed for port" | [Port binding failed](networking/port-binding-failed.md) |
+| A security group rule changes nothing: allowed traffic still blocked, or blocked traffic still passing | [Security group rules not applied](networking/security-group-rules-not-applied.md) |
 | An instance answers from inside its network, not from outside | [Unreachable from outside](networking/instance-unreachable-from-outside.md) |
 | The console of an instance does not open, or fails at once | [Console not available](lifecycle/console-not-available-or-disconnects.md) |
 | An instance stays in BUILD, then ERROR after about 5 minutes | [Waiting for vif_plugged](lifecycle/instance-stuck-in-build-waiting-for-vif-plugged.md) |
@@ -141,6 +142,7 @@ lab), **documentation** (upstream documentation and source), **production incide
 | [Every instance on one compute loses the network while Nova shows them ACTIVE (ovs-vswitchd down)](networking/ovs-vswitchd-down-on-compute.md) | neutron, ovs | 2026.1 | draft | lab run |
 | [I need to restart the Open vSwitch agent on a compute. Its instances keep their network](networking/restarting-the-ovs-agent-does-not-cut-instances.md) | neutron, ovs | 2026.1 | lab-verified | lab run |
 | [L3 agent dead, instances still reachable, router not moved](networking/router-stuck-on-dead-l3-agent.md) | neutron | 2026.1 | lab-verified | lab run |
+| [A security group rule has no effect. Traffic it allows is still blocked, or traffic it should block still passes](networking/security-group-rules-not-applied.md) | neutron, ovs, ovn, iptables | 2026.1 | draft | documentation |
 | [Instances of one compute answer ping, but large transfers stall](networking/tunnel-mtu-mismatch-large-packets-dropped.md) | neutron, ovs | 2026.1 | lab-verified | lab run |
 
 ### Volumes
