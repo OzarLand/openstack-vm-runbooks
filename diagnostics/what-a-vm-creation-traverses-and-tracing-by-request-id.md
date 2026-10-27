@@ -1,8 +1,8 @@
 ---
 title: What a VM creation traverses, and how to trace one failed boot by request id
 kind: diagnostic
-status: draft
-openstack_releases: [unrecorded]
+status: lab-verified
+openstack_releases: ["2026.1"]
 components: [nova, placement, neutron, glance, cinder, keystone, rabbitmq]
 deployment_methods: [any]
 environment:
@@ -11,12 +11,13 @@ environment:
   storage: any
   os: any
 risk: read-only
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-26, note: "full procedure on a disposable lab: two failed boots (no valid host; port binding to a dead OVS agent) traced by request id across nova, placement and neutron logs" }
 upstream_refs:
   - https://docs.openstack.org/nova/latest/admin/architecture.html
   - https://docs.openstack.org/nova/latest/admin/cells.html
 authored_by: agent:ozarland-author
-last_verified: 2026-10-18
+last_verified: 2026-10-26
 ---
 
 # What a VM creation traverses, and how to trace one failed boot by request id
@@ -53,7 +54,7 @@ Where each step fails, and what it looks like:
 | Cell mapping | `Host '<host>' is not mapped to any cell` | `nova-conductor.log`, `nova-manage cell_v2 list_hosts` |
 | Glance | `BUILD`/`spawning` then image download error | `nova-compute.log`, `glance-api.log`, image store backend |
 | Cinder (boot from volume) | `BUILD`/`block_device_mapping` stuck; volume stays `creating` | `cinder-volume.log`, storage backend |
-| Neutron port create/bind | `binding_failed`; `Failed to bind port` | `neutron-server.log` |
+| Neutron port create/bind | `binding_failed`; `Failed to bind port` (the user may only see `Exceeded maximum number of retries`) | `neutron-server.log` |
 | vif plug on the host | `BUILD`/`spawning` for `vif_plugging_timeout` then `ERROR` | Agent / `ovn-controller` on the host ([runbook](../lifecycle/instance-stuck-in-build-waiting-for-vif-plugged.md)) |
 | libvirt / QEMU | `ERROR` with a libvirt error in `fault` | `nova-compute.log`, `libvirtd` log on the host |
 
@@ -73,26 +74,32 @@ follow it.
 openstack server event list <server-id>
 openstack server event show <server-id> <request-id>       # per-service events and tracebacks (admin)
 
-# Or from the client that made the call
-openstack --debug server create ... 2>&1 | grep -i x-openstack-request-id
+# Or from the client that made the call: the create's id is on the 202 response; the other ids are lookups
+openstack --debug server create ... 2>&1 | grep -E "^RESP: \[202\]" | grep -ioE "x-openstack-request-id: req-[0-9a-f-]+"
 ```
+
+`server event show` can be thin: after a build failure that was rescheduled and then gave up, it may list only
+`compute__do_build_and_run_instance` with result `Success`, and the instance `fault` says `Exceeded maximum number of
+retries`. The cause is then only in the logs.
 
 Then search every service's logs for that id, in path order:
 
 **Kolla-Ansible:** logs are under `/var/log/kolla/<service>/` on each node.
 ```bash
-grep -h "<request-id>" /var/log/kolla/nova/nova-api.log /var/log/kolla/nova/nova-conductor.log \
+sudo grep -h "<request-id>" /var/log/kolla/nova/nova-api.log /var/log/kolla/nova/nova-conductor.log \
      /var/log/kolla/nova/nova-scheduler.log /var/log/kolla/placement/placement-api.log \
      /var/log/kolla/neutron/neutron-server.log /var/log/kolla/glance/glance-api.log | sort
 # and on the selected compute host
-grep "<request-id>" /var/log/kolla/nova/nova-compute.log
+sudo grep "<request-id>" /var/log/kolla/nova/nova-compute.log
 ```
 **Any:** `journalctl -u <service> | grep <request-id>`, or the configured log files. A platform whose logs are
 centralised and searchable by request id follows one boot across Nova, Placement, Neutron and Glance in minutes.
 
-Note that Neutron and Glance log their own request ids for the calls Nova makes to them; Nova logs the
-downstream id next to its own (`req-... req-...` pairs in recent releases), which is how you hop from one service
-to the next.
+Note that Neutron and Placement log Nova's request id (the global request id) next to their own for the calls
+Nova makes to them (`[req-<nova-id> req-<own-id> ...]`), so the one grep above finds their lines too. Glance, at
+the default log level (observed on Kolla-Ansible with `debug = False`), logged no line for a successful call, so finding nothing there does not mean Glance was not
+called. A few unrelated lines can carry the id as well (on a lab, a later `GET /v2.1` version request in
+`nova-api.log`); check that each line belongs to the request.
 
 ## Reading what you find
 
@@ -105,11 +112,25 @@ to the next.
 - If one request fails and others succeed, compare them: same host? same network type? same image? The difference
   is the lead.
 
+## Lab observations
+
+Kolla-Ansible 2026.1 all-in-one, ML2/OVS. Two failed boots traced with the commands above:
+
+- **No valid host** (a flavor larger than the host): Nova's id found in `nova-api`, `placement-api`
+  (`GET /allocation_candidates`), `nova-scheduler` (`Got no allocation candidates from the Placement API`) and
+  `nova-conductor` (`NoValidHost`), in about 2 s; `server event show` gave the conductor event with the error.
+- **Port binding failed** (Open vSwitch agent stopped until reported dead): the same grep found the
+  `neutron-server` lines `Refusing to bind port ... to dead agent` and `Failed to bind port ... on host`, with
+  Nova's id; `nova-compute.log` had `PortBindingFailed`. The instance went to `ERROR` 15 s after the request with
+  the fault `Exceeded maximum number of retries`, and `server event show` reported the compute event as `Success`.
+
 ## Validity and limits
 
 Describes the Nova cells v2 architecture (mandatory since Ocata) with the libvirt driver and the Neutron ML2 or OVN
 backends. Log paths are given for Kolla-Ansible; other deployments differ. Request-id pairing in logs depends on
-release and on `oslo.log` configuration.
+release and on `oslo.log` configuration. The lab confirmation (OpenStack 2026.1, Kolla-Ansible all-in-one, ML2/OVS)
+traced two failures, no valid host and a port binding failure; it did not reach the Cinder, Glance download,
+libvirt and cell-mapping rows of the table.
 
 ## Related
 

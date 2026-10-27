@@ -2,7 +2,7 @@
 title: Every API call fails at once. Expired TLS certificates or inconsistent Keystone Fernet keys
 kind: diagnostic
 status: draft
-openstack_releases: [unrecorded]
+openstack_releases: ["2026.1"]
 components: [keystone, haproxy, rabbitmq, mariadb, memcached]
 deployment_methods: [any]
 environment:
@@ -11,12 +11,13 @@ environment:
   storage: any
   os: any
 risk: read-only
-confirmed_by: []
+confirmed_by:
+  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-26, note: "Fernet part only, on a disposable lab: key set replaced, old tokens 401 once the memcached cache was cleared, fixed by restoring the set; certificate part not tested (no TLS), one Keystone node" }
 upstream_refs:
   - https://docs.openstack.org/keystone/latest/admin/fernet-token-faq.html
   - https://docs.openstack.org/kolla-ansible/latest/admin/tls.html
 authored_by: agent:ozarland-author
-last_verified: 2026-10-18
+last_verified: 2026-10-26
 ---
 
 # Every API call fails at once. Expired TLS certificates or inconsistent Keystone Fernet keys
@@ -34,8 +35,10 @@ any monitoring.
   starts at an exact timestamp.
 - Fernet keys: `openstack token issue` works on some Keystone nodes and not others, or tokens just issued are
   rejected (`401 Unauthorized`, `The request you have made requires authentication`) by the next service in the
-  chain. Keystone logs `Could not recognize Fernet token` or key-loading errors. It starts right after a key
-  rotation or a Keystone node rebuild.
+  chain. Keystone logs `Could not recognize Fernet token` or key-loading errors (on 2026.1 at the default log
+  level: `Invalid user token` then `Authorization failed. The request you have made requires authentication.`).
+  It starts right after a key rotation or a Keystone node rebuild, or later: Keystone and the services cache token
+  validations in memcached, so a token already validated keeps working until its cache entry expires.
 
 ## Impact
 
@@ -52,13 +55,18 @@ openssl s_client -connect <controller>:5671 </dev/null 2>/dev/null | openssl x50
 openssl s_client -connect <controller>:3306 -starttls mysql </dev/null 2>/dev/null | openssl x509 -noout -enddate
 
 # Fernet keys identical on every Keystone node (same files, same checksums)
-# Kolla-Ansible: docker exec keystone ls -l /etc/keystone/fernet-keys ; md5sum of each key
+# Kolla-Ansible: sudo docker exec keystone ls -l /etc/keystone/fernet-keys
+#                sudo docker exec keystone sh -c 'md5sum /etc/keystone/fernet-keys/*'   # the glob needs a shell
 # Any: ls -l /etc/keystone/fernet-keys && md5sum /etc/keystone/fernet-keys/*
 # Compare across nodes. Key "0" is the staged key, the highest number is the primary.
 
 # Does a token issued on one node validate on another?
-openstack token issue -f value -c id
+T=$(openstack token issue -f value -c id)
+curl -s -o /dev/null -w "%{http_code}\n" -H "X-Auth-Token: $T" -H "X-Subject-Token: $T" <scheme>://<other-keystone-node>:5000/v3/auth/tokens   # 200 or 401
 ```
+
+On an endpoint without TLS, the `openssl` checks print `Could not read certificate from <stdin>` and `Unable to load
+certificate`: there is no certificate on that port, not an expired one.
 
 ## Diagnosis
 
@@ -91,8 +99,10 @@ This page is read-only. Fixing is a deployment-tool procedure: regenerate and di
 distribute one consistent Fernet key set to every Keystone node and restart Keystone, with the tool you deployed
 with (Kolla-Ansible: `kolla-ansible certificates` then `reconfigure`; Fernet keys live in the `keystone_fernet_tokens`
 volume on each controller, and `kolla-ansible reconfigure -t keystone` re-runs the Keystone deployment that
-distributes them). After the fix, every service and agent that cached the old certificate may need
-a restart.
+distributes them). That distribution copies the key set of the first host where `keystone_fernet` runs
+(`fernet-push.sh`, run once); make sure that host holds the right set before running it. After the fix, every
+service and agent that cached the old certificate may need a restart. For Fernet keys alone, the services did not
+need a restart on a lab: their cached service token got one 401, then they re-authenticated by themselves.
 
 ## Prevention, which is the actual runbook
 
@@ -104,10 +114,25 @@ a restart.
   keys has never tested that it can.
 - Include both in recovery exercises.
 
+## Lab observations
+
+Kolla-Ansible 2026.1 all-in-one (one Keystone node), no TLS. The Fernet key set was replaced by a new one made with
+`keystone-manage fernet_setup`, as a rebuilt node would do.
+
+- Right after the swap, and after a Keystone restart, a token issued before kept validating (200) on Keystone, Nova,
+  Neutron and Glance: the validation was cached in memcached. After a memcached restart, the same token got 401 on
+  all four; `openstack token issue` and new commands worked.
+- Nova and the scheduler got one 401 from Placement each with their cached service token, then re-authenticated; an
+  instance created right after reached `ACTIVE` in 22 s.
+- Restoring the saved key set and restarting Keystone made the old token valid again (tokens issued with the wrong
+  set were then invalid). `kolla-ansible reconfigure -t keystone` then ran in 1 min 40 s and left the keys unchanged.
+- The certificate part was not tested: no TLS on that lab.
+
 ## Validity and limits
 
 Derived from an operator's account of long-lived platforms where certificate expiry was one of the most common
-causes of a complete control-plane outage; release not recorded. Paths and commands are given for Kolla-Ansible;
+causes of a complete control-plane outage. The Fernet part was confirmed on a lab (OpenStack 2026.1, Kolla-Ansible
+all-in-one, one Keystone node); the certificate part and the differences between Keystone nodes were not. Paths and commands are given for Kolla-Ansible;
 other deployment tools manage certificates and Fernet keys their own way.
 
 ## Related
