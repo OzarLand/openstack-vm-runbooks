@@ -3,7 +3,7 @@ title: Reading the MariaDB and Galera logs, and the oslo.db lines that go with t
 kind: diagnostic
 status: draft
 openstack_releases: ["2026.1"]
-components: [mariadb, nova, neutron, keystone]
+components: [mariadb, proxysql, haproxy, nova, neutron, keystone]
 deployment_methods: [kolla-ansible, any]
 environment:
   topology: multinode, 3 database nodes
@@ -30,7 +30,8 @@ Every OpenStack service depends on the database cluster. When Galera loses a nod
 a node, the services log `DBConnectionError` or deadlocks, and the explanation is in the MariaDB error log of each
 database node, in the lines that start with `WSREP:`. This page reads both sides. Galera messages are quoted from
 the Galera 26.4.27 source, MariaDB messages from MariaDB 11.4.13 (the series Kolla 2026.1 installs, from the
-`mariadb-server/11.4` repositories in `kolla/template/repos.yaml`), client messages from `oslo.db` 2026.1.
+`mariadb-server/11.4` repositories in `kolla/template/repos.yaml`; the patch level in your image may differ), client
+messages from `oslo.db` 2026.1.
 
 Recovering a cluster that lost quorum is a runbook, not this page.
 
@@ -59,7 +60,9 @@ grep -n 'WSREP' /var/log/kolla/mariadb/mariadb.log | tail -50
 grep -nE '\[(ERROR|Warning)\]' /var/log/kolla/mariadb/mariadb.log | tail -30
 ```
 
-The state now, rather than the history, is in the status variables (read-only):
+The state now, rather than the history, is in the status variables (read-only). On Kolla-Ansible, run the query on
+each database node with `docker exec -it mariadb mariadb -u root -p` (the root password is `database_password` in
+`passwords.yml`):
 
 ```sql
 SHOW GLOBAL STATUS WHERE Variable_name IN
@@ -104,7 +107,8 @@ Sources: `gcs/src/gcs_group.cpp`, `gcomm/src/gmcast.cpp`, `gcomm/src/evs_proto.c
 `galera/src/replicator_smm.cpp` (Galera 26.4.27).
 
 Which recovery applies to which case (one node lost, quorum lost, every node stopped) and how to compare positions
-safely: see the recovery notes in
+safely: [Galera cluster lost quorum or stopped on every node](../recovery/galera-cluster-lost-quorum-database-unavailable.md)
+is the main reference; reopening the platform afterwards is in
 [reopening provisioning after a control-plane incident](../recovery/reopening-provisioning-after-control-plane-incident.md).
 
 ## State transfers: IST and SST
@@ -135,12 +139,13 @@ quorum problem: read the lines before `SST failed`.
 
 | Line or error | Where | What it means |
 |---|---|---|
-| `Aborted connection <id> to db: '<db>' user: '<user>' (<reason>)` | MariaDB log, `[Warning]` | A client connection ended without a clean close: the client process died, a timeout (`Got timeout reading communication packets`), or a proxy closed it. Some are normal; a burst at one moment is a client-side or network event. |
+| `Aborted connection <id> to db: '<db>' user: '<user>' host: '<host>' (<reason>)` | MariaDB log, `[Warning]` | A client connection ended without a clean close: the client process died, a timeout (`Got timeout reading communication packets`), or a proxy closed it. Some are normal; a burst at one moment is a client-side or network event. |
 | `Too many connections` (error 1040) | the client | `max_connections` reached. Kolla-Ansible sets `max_connections=10000` (`galera.cnf.j2`). |
-| `WSREP has not yet prepared node for application use` (error 1047) | the client | The node is not in a primary component, or not synced: it refuses queries. HAProxy should not have sent the client there. |
-| `Deadlock: wsrep aborted transaction` (error 1213) | the client | Galera certification conflict: two nodes committed conflicting writes at the same time, and this one lost. |
+| `WSREP has not yet prepared node for application use` (error 1047) | the client | The node is not in a primary component, or not synced: it refuses queries. The proxy (ProxySQL, or HAProxy) should not have sent the client there. |
+| `Deadlock found when trying to get lock; try restarting transaction` (error 1213) | the client | An InnoDB deadlock, **or** a Galera certification conflict: MariaDB 11.4 reports a conflict with the same error (`wsrep_override_error(thd, ER_LOCK_DEADLOCK)`), so the two look identical to the client. |
 
-Sources: `sql/share/errmsg-utf8.txt`, `sql/sql_parse.cc` (MariaDB 11.4.13).
+Sources: `sql/share/errmsg-utf8.txt`, `sql/sql_parse.cc`, `sql/wsrep_high_priority_service.cc`, `sql/wsrep_mysqld.cc`
+(MariaDB 11.4.13).
 
 ## The oslo.db side, in the OpenStack services
 
@@ -149,15 +154,19 @@ services' tracebacks:
 
 | In the service log | Comes from | What it means |
 |---|---|---|
-| `DBConnectionError` with `(2002 …)`, `(2003 …)`, `(2006 …)`, `(2013 …)` or `(1047 …)` in the message | MySQL errors 2002/2003 (cannot connect), 2006 (server has gone away), 2013 (lost connection during query), 1047 (node not ready) | The service could not reach a usable database node through HAProxy. |
-| `DBDeadlock` with `1213` and `Deadlock found when trying to get lock` or `Deadlock: wsrep aborted` | InnoDB deadlock, or a Galera certification conflict | Usually retried by the service (`oslo_db.api.wrap_db_retry`); a flood means many nodes take writes for the same rows at once. |
+| `DBConnectionError` with `(2002 …)`, `(2003 …)`, `(2006 …)`, `(2013 …)` or `(1047 …)` in the message | MySQL errors 2002/2003 (cannot connect), 2006 (server has gone away), 2013 (lost connection during query), 1047 (node not ready) | The service could not reach a usable database node through the proxy (ProxySQL by default on Kolla-Ansible). |
+| `DBDeadlock` with `1213` and `Deadlock found when trying to get lock` | InnoDB deadlock, or a Galera certification conflict (they look the same; `oslo.db` also matches an older `Deadlock: wsrep aborted` text that MariaDB 11.4 no longer sends) | Usually retried by the service (`oslo_db.api.wrap_db_retry`); a flood means many nodes take writes for the same rows at once. |
 | `SQL connection failed. <n> attempts left.` | `engines.py`, WARNING | The service is starting and cannot connect; it retries. |
 | `DB exceeded retry limit.` with a traceback | `api.py`, ERROR | A retried operation kept failing. |
 | `DBAPIError exception wrapped.` / `DB exception wrapped.` with a traceback | `exc_filters.py`, WARNING | A database error that `oslo.db` did not classify; read the wrapped error. |
 
-Kolla-Ansible sends all database clients through HAProxy to one active node at a time (the others are backups in the
-`mariadb` backend), so a burst of `DBConnectionError` in many services at the same second is usually that node going
-away and HAProxy failing over; read the HAProxy log and the database node logs at that second.
+**Which proxy is in front of the database.** In Kolla-Ansible 2026.1 the default is **ProxySQL**
+(`mariadb_loadbalancer: proxysql`, `enable_proxysql: "{{ enable_mariadb }}"`). It sends writes to one node at a time
+(`mysql_galera_hostgroups` with `max_writers: 1` in `proxysql.yaml.j2`) and logs to
+`/var/log/kolla/proxysql/proxysql.log` on each load balancer node. With `enable_proxysql: false` (or an external
+database), HAProxy's `mariadb` backend does the same job: one active server, the others `backup`. Either way, a burst
+of `DBConnectionError` in many services at the same second is usually the active node going away and the proxy
+failing over: read the proxy's log and the database node logs at that second.
 
 ## Reading a database incident in order
 
@@ -169,14 +178,15 @@ away and HAProxy failing over; read the HAProxy log and the database node logs a
 
 ## Validity and limits
 
-- Every message on this page is quoted from the Galera 26.4.27, MariaDB 11.4.13 and `oslo.db` 2026.1 sources.
+- Every MariaDB and Galera message on this page is quoted from the Galera 26.4.27 and MariaDB 11.4.13 sources; the
+  `oslo.db` table also names an older deadlock text that `oslo.db` still matches but MariaDB 11.4 no longer sends.
   **None was captured on a lab.** The exact Galera build in a Kolla 2026.1 image may be another 26.4 release, with the
   same messages or close to them. A lab request asks for real samples.
 - `connection to peer … timed out` names `gmcast.peer_timeout`; the related `evs.*` timeouts that decide when a node
   is declared inactive are not detailed here.
 - The SST script messages (for `mariabackup`) are not covered.
-- HAProxy's `mariadb` backend layout is described from Kolla-Ansible's defaults; check `haproxy` configuration on your
-  platform.
+- ProxySQL's own log lines are not described here; only its log path and hostgroup layout, from Kolla-Ansible's
+  templates. HAProxy's `mariadb` backend applies only when ProxySQL is disabled.
 
 ## Related
 
