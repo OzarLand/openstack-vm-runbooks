@@ -174,9 +174,12 @@ How to read the RabbitMQ broker log itself is on
 
   The text in brackets after 2003 varied with the state of the VIP: `timed out`, `[Errno 113] No route to host`,
   `[Errno 113] EHOSTUNREACH`, `[Errno 111] Connection refused`.
-- **Behind ProxySQL:** when ProxySQL runs but has no backend for the query, the code is ProxySQL's own `9001` (`Max
-  connect timeout reached while reaching hostgroup 0 after 10000ms`); on a lab it reached the logs mostly as
-  `sqlalchemy.exc.OperationalError`, and twice as `DBConnectionError`.
+- **Behind ProxySQL, look for `OperationalError (9001, …)` too:** when ProxySQL runs but has no healthy backend for
+  the query, the code is ProxySQL's own `9001` (`Max connect timeout reached while reaching hostgroup 0 after
+  10000ms`). 9001 is **not** in oslo.db's `DBConnectionError` filter (2002, 2003, 2006, 2013, 1047), so this cause
+  mostly shows as a plain `sqlalchemy.exc.OperationalError` or `pymysql.err.OperationalError (9001, …)`, not as
+  `DBConnectionError`; on a lab it appeared twice as `DBConnectionError` and otherwise as `OperationalError`. Search
+  for both.
 - **Means, by code** (names from PyMySQL's
   [`CR.py`](https://github.com/PyMySQL/PyMySQL/blob/main/pymysql/constants/CR.py) and
   [`ER.py`](https://github.com/PyMySQL/PyMySQL/blob/main/pymysql/constants/ER.py)):
@@ -190,7 +193,8 @@ How to read the RabbitMQ broker log itself is on
   | 1047 | `UNKNOWN_COM_ERROR` | The server refused the command; with Galera, a node that is not synced (`WSREP has not yet prepared node for application use`) answers this |
 
 - **Usual causes:** the database proxy has no healthy node (ProxySQL by default on Kolla-Ansible 2026.1, since
-  `enable_proxysql` follows `enable_mariadb`; HAProxy's `mariadb` backend only when ProxySQL is disabled), the MariaDB
+  `enable_proxysql` follows `enable_mariadb`, then usually with code 9001 as above; HAProxy's `mariadb` backend only
+  when ProxySQL is disabled), the proxy itself or its VIP is gone (code 2003), the MariaDB
   container or service is down, Galera lost
   quorum or a node is not synced, or the connection was idle longer than the server or the proxy allows (2006/2013
   appearing once after a quiet period).
@@ -206,15 +210,17 @@ How to read the RabbitMQ broker log itself is on
 
 - **Where:** WARNING, when a service starts and tests its database connection
   ([`engines.py`](https://github.com/openstack/oslo.db/blob/stable/2026.1/oslo_db/sqlalchemy/engines.py)).
-- **Means:** the first connection failed with `DBConnectionError`; oslo.db retries up to `max_retries` (10 by
-  default) every `retry_interval` (10 s by default)
-  ([`options.py`](https://github.com/openstack/oslo.db/blob/stable/2026.1/oslo_db/options.py)). After the last
-  attempt, the service fails to start and, on Kolla-Ansible, its unit restarts it. With `max_retries = -1`, oslo.db
-  retries forever (`itertools.count()` in `_test_connection`). Kolla-Ansible sets `max_retries = -1`, and the counter
-  then goes negative: on a lab, a `nova_scheduler` restarted while the database VIP was gone logged
-  `SQL connection failed. -1 attempts left.` up to `-5 attempts left.` (07:41:44 to 07:42:33), then started normally.
-- **Read next:** same as `DBConnectionError`; on a service in a restart loop, see
-  [the systemd journal and the container engine](systemd-journal-and-container-engine.md).
+- **Means:** the first connection failed with `DBConnectionError`, and oslo.db retries every `retry_interval` (10 s by
+  default) ([`options.py`](https://github.com/openstack/oslo.db/blob/stable/2026.1/oslo_db/options.py)). How it ends
+  depends on `[database] max_retries`:
+  - **oslo.db default, `max_retries = 10`:** after the last attempt, the service fails to start.
+  - **Kolla-Ansible 2026.1, `max_retries = -1`** (set in the services' configuration templates): oslo.db retries
+    forever (`itertools.count()` in `_test_connection`), so the service **never gives up**; it waits until the
+    database answers. The warning logs `max_retries - attempt`, so the counter goes negative: on a lab, a
+    `nova_scheduler` restarted while the database VIP was gone logged `SQL connection failed. -1 attempts left.` up to
+    `-5 attempts left.` (07:41:44 to 07:42:33), then started normally once the database was back.
+- **Read next:** same as `DBConnectionError`. With the oslo.db default, a service that failed to start can then loop
+  under its unit; see [the systemd journal and the container engine](systemd-journal-and-container-engine.md).
 
 ### `DBDeadlock` (MySQL error 1213, `Deadlock found when trying to get lock`)
 
