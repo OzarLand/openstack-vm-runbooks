@@ -11,8 +11,7 @@ environment:
   storage: any
   os: any
 risk: read-only
-confirmed_by:
-  - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: "kolla-ansible 22.2.0, all-in-one, convergence engine", date: 2026-10-27, note: "PR lab test (No valid host stack), stack commands and greps, a stack timeout, Nova request-id check; Timed out waiting for operation to start, Unexpected exception, Failed to retrieve user_creds, client-error tracebacks (Neutron, Cinder, Keystone) and the legacy engine not run" }
+confirmed_by: []
 upstream_refs:
   - https://opendev.org/openstack/heat/src/branch/stable/2026.1/heat/engine/stack.py
   - https://opendev.org/openstack/heat/src/branch/stable/2026.1/heat/engine/resource.py
