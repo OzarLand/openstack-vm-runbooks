@@ -3,7 +3,7 @@ title: Reading the HAProxy, keepalived and memcached logs in front of the OpenSt
 kind: diagnostic
 status: draft
 openstack_releases: ["2026.1"]
-components: [haproxy, keepalived, memcached, keystone]
+components: [haproxy, keepalived, proxysql, memcached, keystone]
 deployment_methods: [kolla-ansible, any]
 environment:
   topology: multinode, 3 controllers behind a virtual IP
@@ -45,7 +45,7 @@ The state now is in the stats socket (Kolla-Ansible: `/var/lib/kolla/haproxy/hap
 
 ```bash
 # the keepalived container mounts the same socket and has socat (its check_alive script uses it)
-echo "show stat" | docker exec -i keepalived socat stdio unix-connect:/var/lib/kolla/haproxy/haproxy.sock \
+echo "show stat" | sudo docker exec -i keepalived socat stdio unix-connect:/var/lib/kolla/haproxy/haproxy.sock \
   | cut -d, -f1,2,18 | column -s, -t          # proxy, server, status (UP, DOWN, MAINT)
 ```
 
@@ -60,12 +60,14 @@ When a health check changes a server's state, HAProxy logs (`src/server.c`, `src
 | `<proxy type> <backend> has no server available!` | emergency | The last server of that backend went down. Every request to this API now gets a 503 from HAProxy itself. |
 
 The `code` and `info` parts appear only when the check has them (`check_append_info` in `src/check.c`). The `reason` is the health check result, with HAProxy's own descriptions, for example
-`Layer4 connection problem` (connection refused or reset: the service is not listening), `Layer4 timeout` (no answer
-within `timeout check`, 10 s on Kolla-Ansible), or `Layer7 wrong status` (the HTTP check answered with an unexpected
-status; Kolla-Ansible checks some APIs with `option httpchk GET /healthcheck` and expects 200).
+`Layer4 connection problem` (connection refused or reset: the service is not listening), `Layer4 timeout` (the TCP
+connection did not complete in time, bounded by `timeout connect` and the check interval, so about 2 s on
+Kolla-Ansible), `Layer7 timeout` (connected, but no HTTP answer within `timeout check`, 10 s on Kolla-Ansible: the
+typical busy-workers case), or `Layer7 wrong status` (the HTTP check answered with an unexpected status; Kolla-Ansible
+checks some APIs with `option httpchk GET /healthcheck` and expects 200).
 
 ```bash
-grep -E "is DOWN|is UP|has no server available" /var/log/kolla/haproxy/* | tail -30
+sudo grep -E "is DOWN|is UP|has no server available" /var/log/kolla/haproxy/haproxy_latest* | tail -30
 ```
 
 ### Request lines
@@ -102,7 +104,7 @@ Termination states worth knowing (manual section 8.5):
 
 ```bash
 # requests that ended in 502, 503 or 504: the status follows the five timers
-grep -E ' -?[0-9]+/-?[0-9]+/-?[0-9]+/-?[0-9]+/-?[0-9]+ 50[234] ' /var/log/kolla/haproxy/* | tail -20
+sudo grep -E ' -?[0-9]+/-?[0-9]+/-?[0-9]+/-?[0-9]+/-?[0-9]+ 50[234] ' /var/log/kolla/haproxy/haproxy_latest* | tail -20
 ```
 
 Next step for each: `SC`/`<NOSRV>` → the backend's service and its health; `sH` → the API's own log for the same
@@ -116,14 +118,27 @@ time (the request reached it and was slow); `SH` → the API's log and its conta
 is the container's output:
 
 ```bash
-docker logs --since 1h keepalived
+sudo docker logs --since 1h keepalived
 ```
 
 **Any:** the journal of the `keepalived` unit, or syslog.
 
 Kolla-Ansible's VRRP instance is named `kolla_internal_vip_<virtual_router_id>`, starts every node as `BACKUP` with
-`nopreempt`, and tracks the script `check_alive`, which asks HAProxy's stats socket for `show info` every 2 s
-(`keepalived.conf.j2`, `check_alive_haproxy.sh.j2`).
+`nopreempt`, and tracks the script `check_alive` every 2 s (`interval 2`, `fall 2`, `rise 10` in
+`keepalived.conf.j2`). `check_alive` is `/check_alive.sh` from the Kolla image, which **runs every script in
+`/checks`** and returns non-zero if any of them fails (`docker/keepalived/check_alive.sh`). On a default 2026.1
+deployment `/checks` holds:
+
+- `check_alive_haproxy.sh`: asks HAProxy's stats socket for `show info`;
+- `check_alive_proxysql.sh`: runs `SELECT 1` on ProxySQL's admin socket, because ProxySQL is enabled by default
+  (`enable_proxysql: "{{ enable_mariadb }}"`).
+
+So a failing `check_alive` means **HAProxy or ProxySQL** does not answer. Run each check by hand to know which:
+
+```bash
+sudo docker exec keepalived /checks/check_alive_haproxy.sh; echo $?
+sudo docker exec keepalived /checks/check_alive_proxysql.sh; echo $?
+```
 
 ### Lines
 
@@ -131,8 +146,10 @@ Kolla-Ansible's VRRP instance is named `kolla_internal_vip_<virtual_router_id>`,
 |---|---|
 | `(<instance>) Entering MASTER STATE` | This node now holds the virtual IP(s). Exactly one node should log this per failover. |
 | `(<instance>) Entering BACKUP STATE` (`(init)` at start) | This node does not hold the VIP. |
-| `(<instance>) Entering FAULT STATE` (`(init)` at start) | A tracked script or interface failed: this node cannot take the VIP. With Kolla-Ansible, usually `check_alive` failing because HAProxy is not running. |
-| `Script \`check_alive\` now returning <n>` | The track script's result changed (0 = HAProxy answers on its socket, non-zero = it does not). Read the next state change. |
+| `(<instance>) Entering FAULT STATE` (`(init)` at start) | A tracked script or interface failed: this node cannot take the VIP. With Kolla-Ansible, usually `check_alive` failing because HAProxy or ProxySQL does not answer (run the checks above). |
+| `Script \`check_alive\` now returning <n>` | The track script's result changed (0 = every check in `/checks` passed, non-zero = at least one failed). Read the next state change. |
+| `VRRP_Script(check_alive) failed (exited with status <n>)` / `VRRP_Script(check_alive) succeeded` | Logged when the result crosses `fall` (2 failures) or `rise` (10 successes): this is when keepalived acts on it. |
+| `(<instance>) Receive advertisement timeout` | A backup node stopped hearing the master's adverts and will take over: the master died, or VRRP traffic between them is lost. |
 | `(<instance>) Received advert from <address> with lower priority <n>, ours <n>` | Another node advertises for the same VRID with a lower priority. |
 | `(<instance>) ip address associated with VRID <id> not present in advert from <address>: <address>` | Two VRRP instances with the same `virtual_router_id` but different VIPs on the same network: usually another cluster (or another deployment) reusing the VRID. |
 
@@ -142,25 +159,26 @@ Two nodes logging `Entering MASTER STATE` without one of them logging `Entering 
 hold the VIP: VRRP adverts are not getting through between them (network, firewall, multicast or unicast peers).
 
 ```bash
-docker logs keepalived 2>&1 | grep -E "Entering (MASTER|BACKUP|FAULT) STATE|now returning" | tail -20
+sudo docker logs keepalived 2>&1 | grep -E "Entering (MASTER|BACKUP|FAULT) STATE|now returning|VRRP_Script|advertisement timeout" | tail -20
 ```
 
 ## memcached
 
 Kolla-Ansible runs `memcached -v … -c <memcached_connection_limit> -m <memcached_max_memory>` (`memcached.json.j2`;
 defaults 5000 connections and 256 MB). With `-v` it prints errors and warnings to standard error, which on
-Kolla-Ansible is `docker logs memcached`. memcached says little in its log; its counters say more. They are
+Kolla-Ansible is `sudo docker logs memcached`. memcached says little in its log; its counters say more. They are
 defined in memcached's [protocol documentation](https://github.com/memcached/memcached/blob/master/doc/protocol.txt):
 
 | Counter | Meaning |
 |---|---|
 | `curr_connections` / `max_connections` | Open connections and the limit. |
-| `listen_disabled_num` | Times the server stopped accepting new connections because it reached the limit. Non-zero and growing: clients are being refused. |
-| `rejected_connections` | Connections rejected (in `maxconns_fast` mode). |
+| `rejected_connections` | Connections refused because the limit was reached, in `maxconns_fast` mode (memcached's default): non-zero and growing means clients are being refused. |
+| `listen_disabled_num` | Times the server stopped accepting new connections at the limit; with `maxconns_fast` it can stay at 0 while connections are refused, so read `rejected_connections` first. |
 | `evictions` | Valid items removed to make room. Growing fast with a small `-m`: cached tokens and data do not stay cached. |
 
 ```bash
 # On a memcached node (Kolla-Ansible binds memcached to the API interface address)
+# Debian/Ubuntu netcat; on RHEL-family hosts use: printf 'stats\r\nquit\r\n' | nc <api-interface-address> 11211
 echo stats | nc -q1 <api-interface-address> 11211 | grep -E 'curr_connections|max_connections|listen_disabled_num|rejected_connections|evictions'
 ```
 
@@ -172,7 +190,8 @@ answering shows up in those services as slow token validation rather than as a c
 ## Reading an API outage in order
 
 1. **Which node holds the VIP?** keepalived's last `Entering MASTER STATE`, and `ip address show` on that node.
-2. **Is HAProxy up there?** The container, and `check_alive` results in keepalived's log.
+2. **Are HAProxy and ProxySQL up there?** Their containers, `check_alive` results in keepalived's log, and the two
+   checks run by hand.
 3. **Which backend lost its servers?** `is DOWN` and `has no server available!` lines, then `show stat`.
 4. **What did the client get?** Request lines with the status and termination state.
 5. **Then the API itself:** its own log and its `-uwsgi.log` for the same minute, on the server named in `%b/%s`.
