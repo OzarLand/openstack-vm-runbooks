@@ -94,13 +94,12 @@ are from keepalived's `vrrp.c`, `vrrp_scheduler.c` and `vrrp_track.c`; the insta
 Script `check_alive` now returning 1
 VRRP_Script(check_alive) failed (exited with status 1)
 (kolla_internal_vip_51) Entering FAULT STATE
-(kolla_internal_vip_51) Receive advertisement timeout
 ```
 
 While two nodes hold the VIP, the one with the higher priority logs, every second:
 
 ```text
-(kolla_internal_vip_51) Received advert from <other-node-address> with lower priority 1, ours 2, forcing new election
+(kolla_internal_vip_51) Received advert from <other-node-address> with lower priority <n>, ours <n>, forcing new election
 ```
 
 When another VRRP cluster uses the same virtual router ID on the same layer 2 segment:
@@ -208,8 +207,9 @@ sudo docker exec keepalived /checks/check_alive_proxysql.sh >/dev/null; echo $?
 # "Keepalived check script <path> succeeded." or "Keepalived check script <path> failed."
 ```
 
-A backup takes the VIP when it stops receiving the master's advertisements (`Receive
-advertisement timeout`). With `nopreempt`, the VIP does not move back when the old master recovers.
+A backup takes the VIP when it stops receiving the master's advertisements; it then logs only `Entering MASTER
+STATE`. keepalived 2.2.8 logs `Receive advertisement timeout` only with detail logging (`vrrp_scheduler.c`), and
+Kolla-Ansible runs `keepalived -nld` without `-D`, so that line does not appear on Kolla-Ansible. With `nopreempt`, the VIP does not move back when the old master recovers.
 
 Advertisements go by multicast by default (`keepalived_traffic_mode: "multicast"`), IP protocol 112, or by unicast
 to the other nodes when `keepalived_traffic_mode: "unicast"`.
@@ -223,7 +223,7 @@ to the other nodes when `keepalived_traffic_mode: "unicast"`.
 | One server DOWN, the others UP | Cause 3: one controller's container or network |
 | No 503 but connection refused or timeout on the VIP; VIP on no node | Cause 4: HAProxy down on every load balancer node, every keepalived in FAULT |
 | VIP moves every few minutes, `VRRP_Script(check_alive) failed` | Cause 5: HAProxy or ProxySQL failing or restarting on the master |
-| VIP moves, `Receive advertisement timeout` without script failures | Cause 6: advertisements lost between the nodes |
+| VIP moves, `Entering MASTER STATE` without a script failure; with the VIP on two nodes, the master logs `Received advert … with lower priority …` | Cause 6: advertisements lost between the nodes |
 | VIP on two nodes at once | Cause 6; more rarely cause 7, another VRRP cluster with the same virtual router ID and the same password |
 
 ### Cause 1: the service is down on every controller

@@ -174,8 +174,8 @@ still validates everywhere.
 Tokens break only when a node's primary is missing from another node's set:
 
 - a second rotation on the same node without a push in between: its new primary is its own new `0`, which no other
-  node has. With three nodes and the default interval (`max_active_keys = 3`), that rotation also purges the key
-  that is still the other nodes' primary (`Excess key to purge: /etc/keystone/fernet-keys/1` in its log), so the
+  node has. With the default `max_active_keys = 3`, that rotation also purges the key that is still the other
+  nodes' primary (`Excess key to purge: /etc/keystone/fernet-keys/1` in its log), so the
   node rejects their tokens too: the failure goes both ways (seen on the lab);
 - rotations on two nodes without pushing, where at least one of them rotates twice (two nodes that each rotate once
   from the same pushed set promote the same key `0`, so they share a primary);
@@ -334,6 +334,10 @@ sudo chronyc makestep
 
 On a host with systemd-timesyncd instead of chrony (no `chronyc`), turn NTP back on; timesyncd steps the clock at
 its first synchronisation (on the lab, 2 seconds after the command, for a clock 300 seconds behind):
+
+> ⚠️ **State-changing.** Enables and starts systemd-timesyncd, which steps the clock at its first synchronisation:
+> services on that node see time jump. Precondition: the NTP server is reachable and no other time daemon runs.
+> Undo: `sudo timedatectl set-ntp false`.
 
 ```bash
 sudo timedatectl set-ntp true

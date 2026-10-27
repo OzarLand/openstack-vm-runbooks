@@ -117,7 +117,7 @@ sudo tail -n 100 /var/log/kolla/rabbitmq/rabbit@<hostname>.log
   `The broker has blocked the connection: connection blocked, see broker logs`, both computes went `down` and every
   Neutron agent dead, without `MessagingTimeout` or `Lost connection to nova-conductor` on the computes; a
   `server create` got `502 Bad Gateway` from HAProxy after 60 s, while `nova-api` finished the request (`202`) once
-  the alarm cleared and the instance then went `ACTIVE`: a client that retries creates a second instance.
+  the alarm cleared and the instance then went `ACTIVE`: a client that retries can create a second instance.
 - **Streams** for fanout keep messages until the retention policy deletes them (Kolla-Ansible's defaults: 500 MB
   segments, kept 1800 s once full). Many ready messages in a `stream` queue are expected, not a backlog
   (Kolla-Ansible RabbitMQ guide).
@@ -157,7 +157,7 @@ own once RabbitMQ is reachable again.
 ### For cause 1: start the node again
 
 > ⚠️ **State-changing.** Starts RabbitMQ on that node; it rejoins the cluster, and its quorum queue replicas catch
-> up from the leaders. Undo: stop the container.
+> up from the leaders. Undo: `sudo systemctl stop kolla-rabbitmq-container.service`.
 
 ```bash
 sudo systemctl start kolla-rabbitmq-container.service      # Kolla-Ansible 2026.1; other methods: start the service
@@ -168,7 +168,7 @@ The node takes some time to boot (40 s on the lab): until then `cluster_status` 
 'rabbit' not running at all`. Wait for it:
 
 ```bash
-until sudo docker exec rabbitmq rabbitmq-diagnostics -q check_running; do sleep 2; done
+sudo timeout 300 sh -c 'until docker exec rabbitmq rabbitmq-diagnostics -q check_running; do sleep 2; done'
 ```
 
 Streams do not get a replica back on a node that was down when they were declared. Once the cluster is healthy,
