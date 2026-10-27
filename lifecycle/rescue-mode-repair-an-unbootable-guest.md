@@ -60,18 +60,22 @@ log is empty.
 `openstack server rescue` stops the guest (a clean shutdown first, within `shutdown_timeout`), then starts it from a
 **rescue disk**, with the instance's own disks attached to it as data disks. The instance goes to `RESCUE`. From the
 rescue system, the operator mounts the original root disk and repairs it. `openstack server unrescue` stops the rescue
-system and boots the instance from its own disk again (Nova user guide, *Rescue an instance*).
+system and boots the instance from its own disk again (Nova user guide, *Rescue an instance*). The API accepts a
+rescue only for an instance in `ACTIVE`, `SHUTOFF` or `ERROR`; any other state returns HTTP 409.
 
 Two modes (`nova/virt/libvirt/blockinfo.py`):
 
 - **Legacy rescue** (default): the rescue disk is the first disk, the original root disk comes second (`vdb` on a
   `virtio` bus), then the config drive if any. The rescue disk is a fresh copy of the rescue image: the image given
-  with `--image`, otherwise the instance's own image. Not possible for a volume-backed instance (`Cannot rescue a
+  with `--image`, otherwise `[libvirt] rescue_image_id` if set, otherwise the instance's own image, which must then
+  still exist in Glance. Not possible for a volume-backed instance (`Cannot rescue a
   volume-backed instance`).
-- **Stable device rescue** (since Ussuri, libvirt only, not LXC): chosen when the rescue image has the
-  `hw_rescue_device` and `hw_rescue_bus` properties. Every original device stays where it was, and the rescue disk is
-  added at the end. It is the only way to rescue a **volume-backed** instance, and needs compute API 2.87 or later and a
-  compute that reports the `COMPUTE_RESCUE_BFV` trait.
+- **Stable device rescue** (since Ussuri, libvirt only, not LXC): the libvirt driver uses it as soon as the rescue
+  image has `hw_rescue_device` **or** `hw_rescue_bus` (`check_hw_rescue_props` in `nova/virt/hardware.py`), with or
+  without API 2.87, and logs `Attempting a stable device rescue`. Every original device stays where it was, so the
+  original root disk stays **first**, and the rescue disk is added at the end. It is the only way to rescue a
+  **volume-backed** instance, which needs compute API 2.87 or later, both properties on the image (the API checks
+  both for that case), and a compute that reports the `COMPUTE_RESCUE_BFV` trait.
 
 While in `RESCUE`, the upstream guide says not to pause, suspend or stop the instance: that loses the original
 instance state and makes unrescue impossible.
@@ -95,6 +99,9 @@ the guest off, an SSH key or password lost.
 
 ### 1. Rescue the instance
 
+Check `[DEFAULT] rescue_timeout` on the instance's compute first (default 0, off): if it is set, Nova unrescues the
+instance without warning when it expires, possibly while you have its disk mounted.
+
 Choose the rescue image: the instance's own image works for most Linux guests; a dedicated rescue image is safer when
 the guest finds its root file system by label or UUID: with the instance's own image, the rescue disk is a copy of
 the same image, so both disks carry the same label and UUID, and the rescue system may mount the wrong one.
@@ -106,6 +113,8 @@ the same image, so both disks carry the same label and UUID, and the rescue syst
 ```bash
 openstack server rescue <server-id>                                  # legacy rescue, the instance's image
 openstack server rescue --image <rescue-image> <server-id>          # another image
+openstack server rescue --password <password> <server-id>          # a password for the rescue system, if the driver
+                                                                     # and image support setting it
 openstack --os-compute-api-version 2.87 server rescue --image <image-with-hw_rescue-properties> <server-id>
                                                                      # volume-backed instance (stable device rescue)
 openstack server show <server-id> -c status                         # RESCUE
@@ -116,7 +125,9 @@ it.
 
 ### 2. Repair the original disk
 
-From the rescue system, find the original root disk (`lsblk`; with legacy rescue it is the second disk), mount it, and
+From the rescue system, find the original root disk with `lsblk` and `blkid`: with legacy rescue it is the second
+disk; with stable device rescue (an image with `hw_rescue_*` properties) it keeps its place, usually the first, and the
+rescue disk is the last. Check its size and file systems before mounting it, and
 fix the cause: the `fstab` line, the boot entry, free space, the network or SSH configuration.
 
 > ⚠️ **State-changing.** Changes files on the instance's own disk. Precondition: the owner agreed to the change and
@@ -134,7 +145,7 @@ openstack server show <server-id> -c status        # ACTIVE
 ```
 
 `[DEFAULT] rescue_timeout` (default 0, off) makes `nova-compute` unrescue instances that stay in `RESCUE` longer than
-that many seconds; if it is set, finish the repair within it.
+that many seconds, without warning; if it is set, finish the repair and unmount within it.
 
 ## Verification
 
