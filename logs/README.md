@@ -16,6 +16,7 @@ These pages explain how to read; the fixes are in the runbooks of the other fold
 | [Following one request, instance, port or volume through the logs of every service and host](tracing-one-request-across-services-and-hosts.md) | Which id links which hop, grep and journalctl recipes across hosts, the port-id chain of network-vif-plugged, time zones and clock offset | 2026.1 | draft |
 | [Reading the Nova logs. What normal looks like, and what the common lines mean](reading-nova-logs.md) | nova-api, nova-scheduler, nova-conductor, nova-compute: start-up, periodic lines, common error lines and what to read next | 2026.1 | draft |
 | [Reading the RabbitMQ logs, and the oslo.messaging lines that go with them](reading-rabbitmq-logs.md) | Broker log format, Khepri or Mnesia, nodes down and partitions, memory and disk alarms, flow control, connection churn and heartbeats, client reconnect lines | 2026.1 | draft |
+| [Reading the Neutron logs with ML2/OVS](reading-neutron-logs-ml2-ovs.md) | neutron-server, RPC server and periodic workers, OVS, L3, DHCP and metadata agents: heartbeats, port binding, the vif-plugged notification, common lines | 2026.1 | draft |
 | [Reading the kernel log of a compute (dmesg, journalctl -k)](kernel-messages-on-computes.md) | journalctl -k and dmesg, then the OOM killer, KVM, NIC link flaps, bonding and LACP, over-MTU drops, disk and filesystem errors, conntrack table full, hung tasks | 2026.1 | draft |
 
 ## Planned
