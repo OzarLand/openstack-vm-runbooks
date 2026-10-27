@@ -190,6 +190,7 @@ answering shows up in those services as slow token validation rather than as a c
 
 ## Related
 
+- [API returns 503, HAProxy backend DOWN, VIP flapping or on two nodes](../recovery/api-returns-503-haproxy-backend-down-or-vip-flapping.md) (the fix)
 - [Where the OpenStack logs are, and how to read one log line](where-openstack-logs-are-and-how-to-read-a-line.md)
 - [Every API call fails at once: certificates or Fernet keys](../diagnostics/expired-certificates-and-fernet-keys-break-every-api-call.md)
 - [VM creation fails platform-wide: check the shared dependencies first](../diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md)
