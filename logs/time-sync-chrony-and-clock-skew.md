@@ -28,6 +28,8 @@ upstream_refs:
   - https://github.com/openstack/neutron/blob/stable/2026.1/neutron/db/agents_db.py
   - https://github.com/openstack/neutron/blob/stable/2026.1/neutron/conf/agent/database/agents_db.py
   - https://github.com/openstack/keystone/blob/stable/2026.1/keystone/token/provider.py
+  - https://github.com/openstack/keystonemiddleware/blob/stable/2026.1/keystonemiddleware/auth_token/__init__.py
+  - https://github.com/openstack/neutron/blob/stable/2026.1/neutron/plugins/ml2/drivers/ovn/agent/neutron_agent.py
 authored_by: agent:ozarland-author
 last_verified: 2026-10-27
 ---
@@ -91,7 +93,7 @@ not captured lines; `##` and `%s` are replaced by the source name or address:
 | `Selected source ##` | chrony now synchronises to this source | `sources.c` |
 | `Can't synchronise: no selectable sources` (also `no sources`, `no majority`) | chrony is not synchronising any more: the clock now drifts freely | `sources.c` |
 | `Detected falseticker ##` | This source disagrees with the others and is ignored | `sources.c` |
-| `Root distance of ## exceeds maxdistance of <n> seconds`, `Jitter of ## exceeds maxjitter of <n> seconds`, `Stratum of ## above max stratum of <n>` | This source is rejected | `sources.c` |
+| `Root distance of ## exceeds maxdistance of <n> seconds`, `Jitter of ## exceeds maxjitter of <n> seconds`, `Stratum of ## above maxstratum of <n>`, `Stratum of ## below minstratum of <n>` | This source is rejected | `sources.c` |
 | `System clock wrong by <offset> seconds` | An offset larger than `logchange` (1 second by default) was detected | `reference.c`, `conf.c` |
 | `System clock wrong by <offset> seconds (step)` or `(ignored)` | With `chronyd -q`/`-Q`, the offset found once | `reference.c` |
 | `System clock was stepped by <offset> seconds` | chrony stepped the clock (allowed by `makestep`): every log on this host jumps by that much | `reference.c`, `local.c` |
@@ -132,7 +134,8 @@ With the default database service group driver, each service's heartbeat stores 
 clock of the process that writes it to the database** (`service_update` in
 [`nova/db/main/api.py`](https://github.com/openstack/nova/blob/stable/2026.1/nova/db/main/api.py)). For
 `nova-compute`, that is `nova-conductor` on a controller; for the controller services, it is the service itself. The
-API decides that a service is up when `abs(now - last_seen_up)` is at most `service_down_time` (60 s by default),
+API decides that a service is up when `abs(now - last_seen_up)` is at most `[DEFAULT] service_down_time` (60 s by
+default),
 with the clock of the host that answers the API call (`is_up` in
 [`servicegroup/drivers/db.py`](https://github.com/openstack/nova/blob/stable/2026.1/nova/servicegroup/drivers/db.py)).
 
@@ -146,17 +149,24 @@ Seems service <binary> on host <host> is down. Last heartbeat was <time>. Elapse
 
 A negative elapsed time means the heartbeat is in the future for the host that checks: a clock is behind.
 
-### Neutron: agent registration rejected with a timestamp difference
+### Neutron: an ERROR at agent start when the agent's clock differs
 
 When an agent starts, it sends its own time with its first report. If it differs from the server's clock by more than
-`agent_down_time` (75 s by default), `neutron-server` logs at ERROR
-([`agents_db.py`](https://github.com/openstack/neutron/blob/stable/2026.1/neutron/db/agents_db.py)):
+`agent_down_time` (75 s by default), `neutron-server` logs at ERROR (`_check_clock_sync_on_agent_start` in
+[`agents_db.py`](https://github.com/openstack/neutron/blob/stable/2026.1/neutron/db/agents_db.py)):
 
 ```text
 Message received from the host: <host> during the registration of <agent type> has a timestamp: <agent time>. This differs from the current server timestamp: <server time> by <n> seconds, which is more than the threshold agent down time: <n>.
 ```
 
-This is the one OpenStack line that names a clock offset directly, with both times and the difference.
+This is only a log line: **the agent still registers and reports normally**. Its `heartbeat_timestamp` is set with
+the server's clock (`current_time` in `create_or_update_agent`, same file), so the offset does not make the agent show
+down either. Do not restart or chase the agent: fix the host's clock. It is the one OpenStack line that names a clock
+offset directly, with both times and the difference.
+
+With ML2/OVN this line never appears: the agents that Neutron shows come from the OVN Southbound chassis records
+([`ovn/agent/neutron_agent.py`](https://github.com/openstack/neutron/blob/stable/2026.1/neutron/plugins/ml2/drivers/ovn/agent/neutron_agent.py)),
+not from agent reports over RPC.
 
 ```bash
 # On the controllers (Kolla-Ansible path)
@@ -169,8 +179,14 @@ A token's `expires_at` is set by the Keystone node that issues it. The node that
 with **its own** clock (`_is_valid_token` in
 [`keystone/token/provider.py`](https://github.com/openstack/keystone/blob/stable/2026.1/keystone/token/provider.py)),
 and an expired token gives `Failed to validate token`. A Keystone node whose clock is ahead rejects tokens before they
-expire; the services then return 401 for tokens that look valid. A runbook for this case (Fernet keys or clocks that
-differ between Keystone nodes) is proposed in #71.
+expire; the services then return 401 for tokens that look valid.
+
+The API services check expiry too: keystonemiddleware's `auth_token` rejects a token that `will_expire_soon` with a
+stale duration of 0, against the API node's own clock, with `Token authorization failed` (`_validate_token` in
+[`auth_token/__init__.py`](https://github.com/openstack/keystonemiddleware/blob/stable/2026.1/keystonemiddleware/auth_token/__init__.py)).
+So an API node whose clock is ahead returns 401 even when all the Keystone nodes agree.
+
+Runbook: [401 for tokens that should be valid, Fernet keys or a clock](../recovery/keystone-401-for-every-request-fernet-keys-or-clock.md).
 
 ### The logs themselves
 
