@@ -7,10 +7,12 @@
 **Community runbooks for diagnosing and resolving virtual machine problems in OpenStack.**
 
 <p>
+<!-- status-badges:start -->
   <img src="https://img.shields.io/badge/pages-72-informational.svg" alt="72 pages">
   <img src="https://img.shields.io/badge/lab--verified-44-16a34a.svg" alt="44 pages lab-verified">
   <img src="https://img.shields.io/badge/draft-28-9ca3af.svg" alt="28 pages draft">
   <img src="https://img.shields.io/badge/validated-0-2563eb.svg" alt="0 pages validated">
+<!-- status-badges:end -->
   <img src="https://img.shields.io/badge/OpenStack-2026.1-ED1944.svg" alt="OpenStack 2026.1">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
 </p>
@@ -119,9 +121,10 @@ flowchart LR
 
 </details>
 
-**Where things stand (2026-10-28):** 72 pages, 44 `lab-verified`, 28 `draft`, none `validated` or `experimental`.
+<!-- status-progress:start -->
+**Where things stand:** 72 pages, 44 `lab-verified`, 28 `draft`, none `validated` or `experimental`.
 
-| Folder | Progress | Lab-verified |
+| Folder | Progress | Lab-verified or validated |
 |---|---|---:|
 | 🔄 Lifecycle | 🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜ | 8 / 10 |
 | 📅 Scheduling | 🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜ | 6 / 7 |
@@ -133,7 +136,7 @@ flowchart LR
 | 🚑 Recovery | 🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜ | 9 / 11 |
 
 <sub>🟩 lab-verified · ⬜ draft · one square is about 10 % of the folder's pages</sub>
-
+<!-- status-progress:end -->
 > [!WARNING]
 > Nothing here has been confirmed on a production platform by an operator other than the author. Lab verification
 > so far was done by OzarLand's AI lab agent, on OpenStack 2026.1 deployed with Kolla-Ansible 22.2.0 (all-in-one,
