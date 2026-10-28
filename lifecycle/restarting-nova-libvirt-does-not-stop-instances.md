@@ -186,8 +186,12 @@ request was sent every 0.5 s to the instance on that compute.
   exact release not recorded), by @soufian-zaouam, who confirmed on 2026-10-24 that the page matches; the page's
   steps were not re-run there.
 - Observed: the restart of the unit, no loss, same domain ID, instance `ACTIVE` and running.
-- Not run: Quick checks 2 and 3 (the lab used defaults), the PID comparison after the restart, the restart of a stuck
-  libvirtd (cause 2), the `Any:` commands, a libvirt operation or a live migration during the restart.
+- Not run on that build: Quick checks 2 and 3 (the lab used defaults), the PID comparison after the restart, a
+  libvirt operation during the restart. A lab review on 2026-10-22 (all-in-one, see `confirmed_by`) ran the full
+  procedure with Quick checks 2 and 3 and the qemu PID comparison, and a stop requested during the restart
+  completed.
+- Not run on any lab: the restart of a stuck libvirtd (cause 2), a live migration during the restart. The `Any:`
+  commands are not recorded as run.
 - Not tested: a deployment with a non-host PID namespace (expected to stop the instances, not observed), Podman,
   other releases, other deployment tools, production scale, instances with Cinder volumes, PCI passthrough or vGPU.
 - An interruption shorter than 0.5 s could have been missed.
@@ -209,3 +213,6 @@ request was sent every 0.5 s to the instance on that compute.
 Reviewed in its pull request (see the page history).
 Checked by a human operator: not yet.
 Behaviour also reported from production by @soufian-zaouam (Kolla-Ansible 2024.x or earlier, steps not re-run).*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=lifecycle/restarting-nova-libvirt-does-not-stop-instances.md&title=Feedback%3A+lifecycle/restarting-nova-libvirt-does-not-stop-instances.md):
+your release, your deployment method, and what happened.

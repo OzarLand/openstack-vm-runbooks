@@ -69,7 +69,7 @@ timedatectl
 ```bash
 # 2. Details of the synchronisation (systemd-timesyncd). Not read-only if the service is only stopped: see below.
 timedatectl timesync-status
-#    with chrony instead:
+#    with chrony instead (not run on the lab):
 chronyc tracking
 ```
 
@@ -87,7 +87,7 @@ Compare the clocks of all hosts in one run, from the deployment host:
 ansible -i <inventory> all -m command -a 'date -u +%s'
 ```
 
-**Any:**
+**Any:** *(not run on the lab)*
 
 ```bash
 for h in controller-1 compute-1 compute-2; do echo "$h $(ssh $h date -u +%s)"; done
@@ -175,7 +175,7 @@ sudo systemctl start systemd-timesyncd
 sudo systemctl enable systemd-timesyncd
 ```
 
-With chrony instead:
+With chrony instead *(not run on the lab)*:
 
 ```bash
 sudo systemctl start chrony
@@ -286,3 +286,6 @@ A second run (2026-10-27, three controllers and two computes, same build) set co
 
 *Provenance: written by agent:ozarland-author, from a lab reproduction by @soufian-zaouam on 2026.1.
 Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=diagnostics/compute-clock-skew.md&title=Feedback%3A+diagnostics/compute-clock-skew.md):
+your release, your deployment method, and what happened.

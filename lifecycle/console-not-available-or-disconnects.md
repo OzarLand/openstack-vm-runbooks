@@ -214,7 +214,8 @@ openstack server reboot --hard <server-id>
 
 > ⚠️ **State-changing.** Restarts the console proxy; open consoles are disconnected. Undo: none needed.
 
-**Kolla-Ansible:** `sudo docker restart nova_novncproxy` on each controller.
+**Kolla-Ansible:** `sudo systemctl restart kolla-nova_novncproxy-container.service` on each controller (since 2026.1;
+a plain `docker restart` bypasses the container's systemd unit).
 
 **Any:** restart `nova-novncproxy`.
 

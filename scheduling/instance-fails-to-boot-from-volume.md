@@ -277,10 +277,11 @@ block_device_allocate_retries = 180
 ```
 
 ```bash
+# not run on the lab
 kolla-ansible reconfigure -i <inventory> --tags nova
 ```
 
-**Any:** set `block_device_allocate_retries` in the `[DEFAULT]` section of `nova.conf` on the computes and restart
+**Any:** *(not run on the lab)* set `block_device_allocate_retries` in the `[DEFAULT]` section of `nova.conf` on the computes and restart
 `nova-compute`. With the default 3-second interval, 180 retries is about nine minutes.
 
 ### For cause 4
@@ -302,6 +303,7 @@ follows `enable_cinder_backend_lvm`). A backend that uses iSCSI but was configur
 > the new `iscsid` containers. Undo: set the value back and deploy again (the containers stay until removed).
 
 ```bash
+# not run on the lab
 kolla-ansible deploy -i <inventory> --tags iscsi
 ```
 
@@ -326,6 +328,7 @@ time, so the running instance keeps the old ones. The fix is a new build from a 
 > does not change. Undo: `openstack volume unset --image-property <key> <volume-id>`.
 
 ```bash
+# not run on the lab
 openstack volume set --image-property hw_firmware_type=uefi <volume-id>      # example property
 openstack image set --property hw_firmware_type=uefi <image-id>              # for later volumes from this image
 ```
@@ -354,6 +357,7 @@ instance:
 > replaced. Only for an instance whose volume holds nothing to keep, such as one that never booted.
 
 ```bash
+# not run on the lab
 openstack --os-compute-api-version 2.93 server rebuild --image <image-id> <server-id>
 ```
 

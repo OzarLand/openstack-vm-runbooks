@@ -301,13 +301,15 @@ Restarting the service while its database is unreachable only loses the requests
 
 ### For causes 4 and 5: bring HAProxy or ProxySQL back on the load balancer nodes
 
+*(Cause 4, HAProxy down on every node, not run on the lab.)*
+
 Restart only the daemon whose check fails (*Diagnosis*). Read why it stops first: `sudo docker logs --tail 50 haproxy`
 shows configuration errors (`[ALERT]` lines with the file and line) and missing certificate files;
 `sudo docker logs --tail 50 proxysql` and `/var/log/kolla/proxysql/` show ProxySQL's.
 
 If the rendered configuration is wrong (a change in `/etc/kolla/`, a missing certificate), fix it on the deploy host
-and run `kolla-ansible reconfigure -i <inventory> -t loadbalancer`, which renders the files and restarts the
-containers itself. A plain restart is for a transient failure, when the configuration on the node is already right:
+and run `kolla-ansible reconfigure -i <inventory> -t loadbalancer` *(not run on the lab)*, which renders the files and
+restarts the containers itself. A plain restart is for a transient failure, when the configuration on the node is already right:
 
 > ⚠️ **State-changing.** Restarts HAProxy (or ProxySQL) on one node. If this node holds the VIP, every API connection
 > (or every database connection) through it is cut, and keepalived may move the VIP while the daemon is down.
@@ -338,13 +340,13 @@ Then fix the transport of the advertisements, and only then start it again:
 
 - cause 6: allow IP protocol 112 between the load balancer nodes on the API interface, or have the network team
   allow the VRRP multicast group on that segment; or switch to unicast, which needs no multicast;
-- cause 7: choose a virtual router ID not used on that segment.
+- cause 7: choose a virtual router ID not used on that segment *(not run on the lab)*.
 
 Both are deployment settings in `/etc/kolla/globals.yml`:
 
 ```yaml
 keepalived_traffic_mode: "unicast"        # cause 6, if multicast cannot be fixed
-keepalived_virtual_router_id: "<unused-id>"   # cause 7, 0 to 255, unique on the layer 2 segment
+keepalived_virtual_router_id: "<unused-id>"   # cause 7, 1 to 255, unique on the layer 2 segment
 ```
 
 > ⚠️ **State-changing.** Rewrites `keepalived.conf` and restarts keepalived on every load balancer node. With a new
@@ -354,6 +356,7 @@ keepalived_virtual_router_id: "<unused-id>"   # cause 7, 0 to 255, unique on the
 > and run the same command.
 
 ```bash
+# not run on the lab
 kolla-ansible reconfigure -i <inventory> -t loadbalancer
 ```
 

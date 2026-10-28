@@ -135,7 +135,7 @@ driver (the one in the lab's `openvswitch_agent.ini`; the `tap` device then sits
 port being processed. An agent that is alive but has a stale or stuck RPC connection (after a RabbitMQ incident, for
 example) processes nothing: look for `AMQP server unreachable` or long gaps in the log.
 
-**OVN:** on the host, `docker logs ovn_controller` (Kolla-Ansible) or `journalctl -u ovn-controller`. Check that
+**OVN** *(not run on the lab)*: on the host, `docker logs ovn_controller` (Kolla-Ansible) or `journalctl -u ovn-controller`. Check that
 the chassis is registered and claims the port:
 
 ```bash
@@ -171,9 +171,10 @@ or stale bus. See [VM creation fails platform-wide: check the shared dependencie
 > and, on some versions and configurations, existing flows; restarting `ovn-controller` is usually transparent
 > but re-syncs every port on the host. Do it on one host first.
 
-**Kolla-Ansible:** `sudo docker restart neutron_openvswitch_agent` or `sudo docker restart ovn_controller` on the
-host, or through the systemd unit Kolla-Ansible creates for the container:
-`sudo systemctl restart kolla-neutron_openvswitch_agent-container.service`. On a paused agent, the unit restart
+**Kolla-Ansible:** restart the agent through the systemd unit Kolla-Ansible creates for the container (since 2026.1;
+a plain `docker restart` bypasses the unit), on the host:
+`sudo systemctl restart kolla-neutron_openvswitch_agent-container.service` or
+`sudo systemctl restart kolla-ovn_controller-container.service` *(OVN not run on the lab)*. On a paused agent, the unit restart
 worked on a lab: it took about 60 s, because the paused container ignores the stop and is killed (`Exited (137)`),
 then the agent was alive again.
 **Any:** `systemctl restart neutron-openvswitch-agent` or `systemctl restart ovn-controller`.
@@ -192,6 +193,8 @@ Builds that already failed are not retried: clean them up as below.
 
 ### Bridge mappings or physical network mismatch
 
+*(Not run on the lab, nor is disabling the compute service below.)*
+
 Fix the host's configuration (`bridge_mappings` in the OVS agent config, or `ovn-bridge-mappings` in
 `ovs-vsctl get open . external_ids`) so that it matches the other hosts and the network's `provider:physical_network`,
 then restart the agent or controller as above. Until it is fixed, keep the scheduler away from the host:
@@ -204,6 +207,8 @@ openstack compute service set --disable --disable-reason "binding_failed on <net
 ```
 
 ### Neutron cannot notify Nova
+
+*(Not run on the lab.)*
 
 Fix the `[nova]` section of `neutron.conf` (auth URL, credentials, region, endpoint type) and restart
 `neutron-server`. Verify with a test boot.
@@ -298,3 +303,6 @@ releases. It was first written from an operator's description of the provisionin
 
 *Provenance: written by agent:ozarland-author, from the book *OpenStack, the Day After Tomorrow* and a lab reproduction by @soufian-zaouam on 2026.1.
 Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=lifecycle/instance-stuck-in-build-waiting-for-vif-plugged.md&title=Feedback%3A+lifecycle/instance-stuck-in-build-waiting-for-vif-plugged.md):
+your release, your deployment method, and what happened.

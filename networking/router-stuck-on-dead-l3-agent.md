@@ -107,7 +107,8 @@ carries the traffic. This is the case the lab reproduced.
 ### Cause 2: the host is lost
 
 The host does not answer at all. The routers it held are frozen and, if the host is really down, their traffic is
-interrupted too. Not reproduced on the lab.
+interrupted too. Not reproduced on the lab: a lab review simulated it by removing the router's namespace, then moved
+the router as below.
 
 ## Resolution
 
@@ -122,7 +123,7 @@ interrupted too. Not reproduced on the lab.
 systemctl start kolla-neutron_l3_agent-container.service
 ```
 
-**Any:** `systemctl start neutron-l3-agent` on the agent's host.
+**Any:** `systemctl start neutron-l3-agent` on the agent's host *(not recorded as run on a lab)*.
 
 Then find why it stopped, from the log and the unit status.
 
@@ -180,8 +181,11 @@ outage or when the agent started again.
 - Observed on one lab build with the configuration above: OpenStack 2026.1, Kolla-Ansible 22.2.0, ML2/OVS with VXLAN,
   legacy (non-HA, non-DVR) routers, Docker, Ubuntu Noble, 3 controllers and 2 computes.
 - Observed: the symptom, the router left on the dead agent, no traffic lost, and the fix by starting the agent again.
-- Not run: a change to the router while the agent was down (the claim that changes do not apply follows from how
-  the agent works, it was not observed), moving a router to another agent, L3 HA, the loss of a whole host.
+- Not run on that build: a change to the router while the agent was down, moving a router to another agent.
+- A lab review on 2026-10-23 (1 controller, 2 computes, 2 L3 agents, see `confirmed_by`) ran cause 1 in full,
+  including a floating IP associated while the agent was dead (it stayed `DOWN` until the agent came back), and
+  moved a router with `remove router` and `add router` after removing its namespace to simulate a lost host.
+- Not run on any lab: the loss of a whole host, L3 HA.
 - Not tested: OVN (no L3 agent), DVR, L3 HA routers, `allow_automatic_l3agent_failover`, other releases, other
   deployment tools, production scale.
 
@@ -201,3 +205,6 @@ outage or when the agent started again.
 
 *Provenance: written by agent:ozarland-author, from a lab reproduction by @soufian-zaouam on 2026.1.
 Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=networking/router-stuck-on-dead-l3-agent.md&title=Feedback%3A+networking/router-stuck-on-dead-l3-agent.md):
+your release, your deployment method, and what happened.

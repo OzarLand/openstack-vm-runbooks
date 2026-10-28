@@ -15,9 +15,9 @@ In short:
 
 Repository-specific notes:
 
-<!-- Anything specific to this repository: directory to use, naming of pages, extra fields. Keep it short. -->
 - Put the page in the directory of its primary symptom (`lifecycle/`, `scheduling/`, `migration/`, `networking/`,
-  `volumes/`, `recovery/`); cross-cutting investigation guides go in `diagnostics/`.
+  `volumes/`, `recovery/`); cross-cutting investigation guides go in `diagnostics/`, guides to reading a
+  service's logs in `logs/`.
 - Name the file after the symptom, lowercase, hyphenated: `instance-stuck-in-build-waiting-for-vif-plugged.md`.
 - Add the page to the index table in `README.md` in the same pull request. The status badges and progress bars
   are generated: after adding a page or changing a `status:`, run `tools/status_blocks.py --write` from the

@@ -131,7 +131,7 @@ sudo ip netns exec qrouter-<router-id> iptables -t nat -S | grep -F "<floating-i
 The floating IP must appear on the `qg-` interface and in a DNAT rule towards the fixed address. With DVR, floating
 IPs live in the `fip-` namespace of the compute instead; DVR is not covered here.
 
-**ML2/OVN:** the router is a logical router `neutron-<router-id>` in the OVN northbound database, and the floating
+**ML2/OVN** *(not run on the lab)*: the router is a logical router `neutron-<router-id>` in the OVN northbound database, and the floating
 IP a `dnat_and_snat` NAT entry on it. North-south traffic goes through the router's active gateway chassis (Neutron
 OVN routing guide).
 
@@ -215,11 +215,15 @@ Then associate the floating IP as for cause 2.
 
 ### For cause 4: the router is missing on its node
 
+*(Not run on the lab.)*
+
 On ML2/OVS, follow [L3 agent dead, router not moved](router-stuck-on-dead-l3-agent.md). On ML2/OVN, a missing NAT
 entry while the API shows the floating IP associated points at the synchronisation between Neutron and the OVN
 northbound database; this page does not cover repairing it.
 
 ### For cause 5: the guest
+
+*(Not run on the lab.)*
 
 The instance's owner fixes the guest firewall or the service. Nothing to change in OpenStack.
 
@@ -263,3 +267,6 @@ Not covered: DVR, BGP-announced floating IPs, IPv6 without NAT, provider network
 
 *Provenance: written by agent:ozarland-author, from upstream documentation.
 Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=networking/instance-unreachable-from-outside.md&title=Feedback%3A+networking/instance-unreachable-from-outside.md):
+your release, your deployment method, and what happened.

@@ -85,7 +85,7 @@ systemctl is-active kolla-nova_compute-container.service
 docker exec nova_libvirt virsh list --all
 ```
 
-**Any:**
+**Any:** *(not run on the lab)*
 
 ```bash
 systemctl is-active nova-compute libvirtd
@@ -123,7 +123,7 @@ tail -n 100 /var/log/kolla/nova/nova-compute.log
 grep -E 'ERROR|CRITICAL|AMQP|MessagingTimeout' /var/log/kolla/nova/nova-compute.log | tail -n 20
 ```
 
-**Any:**
+**Any:** *(not run on the lab)*
 
 ```bash
 systemctl status nova-compute --no-pager
@@ -182,7 +182,7 @@ On the compute:
 sudo systemctl start kolla-nova_compute-container.service
 ```
 
-**Any:**
+**Any:** *(not run on the lab)*
 
 ```bash
 sudo systemctl start nova-compute
@@ -199,7 +199,7 @@ If the container runs but is cut off from RabbitMQ, restart it instead:
 sudo systemctl restart kolla-nova_compute-container.service
 ```
 
-**Any:**
+**Any:** *(not run on the lab)*
 
 ```bash
 sudo systemctl restart nova-compute
@@ -209,6 +209,8 @@ Then fix what stopped it (memory pressure, configuration error after an upgrade,
 stops again, `nova-compute.log` from the start of the container usually names the reason.
 
 ### If the host must be taken out anyway
+
+*(Not run on this page's lab; see the fencing page for its own lab runs.)*
 
 Evacuate only a host that is fenced: powered off or isolated through a channel that does not depend on it (IPMI or
 BMC, the hypervisor of a virtual host, the switch port), so that nothing on it can run again. Follow
@@ -283,9 +285,12 @@ nova_compute Exited (137)
   production scale, a host with many instances.
 - Observed: the symptom, the signature (service down, container exited with 137, instances running in libvirt) and
   the fix by starting `nova_compute` again.
-- Not observed: the real causes listed under Possible causes (the lab stopped the container on purpose), the restart
-  for a RabbitMQ disconnection, a domain paused on an I/O error at the same time, the local delete behaviour, and the
-  fencing and evacuation branch.
+- Not observed on those builds: the real causes listed under Possible causes (the lab stopped the container on
+  purpose), the restart for a RabbitMQ disconnection, a domain paused on an I/O error at the same time, the local
+  delete behaviour, and the fencing and evacuation branch.
+- A lab review on 2026-10-22 (all-in-one, agent stopped through its unit, see `confirmed_by`) ran the full procedure
+  and observed the local delete of an instance while the agent was down; its domain was destroyed when the agent
+  came back. Whether it ran the other items above is not recorded.
 
 ## Related
 
@@ -309,3 +314,6 @@ nova_compute Exited (137)
 Reviewed in its pull request (see the page history).
 Checked by a human operator: not yet.
 Behaviour also reported from production by @soufian-zaouam (Kolla-Ansible 2024.x or earlier, steps not re-run).*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=recovery/nova-compute-down-instances-still-running.md&title=Feedback%3A+recovery/nova-compute-down-instances-still-running.md):
+your release, your deployment method, and what happened.

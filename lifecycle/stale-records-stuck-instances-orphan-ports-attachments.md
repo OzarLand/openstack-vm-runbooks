@@ -120,9 +120,13 @@ Truly dead instance (no domain on any host):
 ```bash
 openstack server set --state error --auto-approve <server-id>      # make it deletable
 openstack server delete <server-id>
-# python-openstackclient 10.x asks for confirmation without --auto-approve; without a terminal it does nothing.
 # An instance in BUILD can usually be deleted directly, without the reset.
 ```
+
+python-openstackclient 10.5.0 asks `Do you wish to continue? [y/n]` before `server set --state` and `--auto-approve`
+skips the question; without a terminal it exits without changing the state (seen on two labs, once with exit code
+1). Whether earlier clients (9.0.0 on other labs) prompt or accept `--auto-approve` is not recorded here: check
+`openstack server set --help`.
 
 Only for an instance whose domain is actually running fine after a failed operation (check `virsh list` on its host
 first), never as a second step after the delete above:
@@ -136,18 +140,23 @@ the service still reports `up` from a host that lost its storage, fix or fence t
 
 ### Placement: audit, then heal or delete
 
-> ⚠️ **State-changing.** `heal_allocations` creates or corrects allocations for existing instances; `audit --delete`
-> removes allocations whose consumer does not exist. Both change what the scheduler sees. Run `audit` without
-> `--delete` first and read the list.
+Run `audit` without `--delete` first: it only reports.
 
 ```bash
 nova-manage placement audit --verbose
 ```
 
-**Stop here and read the list.** Go on only for allocations whose consumer you have confirmed is gone:
+**Stop here and read the list.** Do not run `audit --delete` from this page. Deleting allocations is 🛑 destructive:
+without `--resource_provider` it acts on every provider, and it also removes the destination allocation of an
+instance that is being moved. Follow
+[Placement allocations do not match the instances](../scheduling/placement-allocations-out-of-sync-audit-and-heal.md#for-cause-1-delete-the-orphaned-allocations),
+which checks that no migration is in progress, saves each consumer's allocations first, and scopes the delete to one
+provider.
+
+> ⚠️ **State-changing.** `heal_allocations` creates or corrects allocations for existing instances, which changes
+> what the scheduler sees. Run it with `--dry-run` first, as the Placement page shows.
 
 ```bash
-nova-manage placement audit --verbose --delete
 nova-manage placement heal_allocations --verbose
 ```
 
@@ -159,7 +168,7 @@ nova-manage placement heal_allocations --verbose
 ```bash
 openstack port delete <port-id>
 
-# Volume still "in-use" for an instance that no longer exists
+# Volume still "in-use" for an instance that no longer exists (not run on this page's lab: no Cinder)
 cinder --os-volume-api-version 3.27 attachment-list --all-tenants 1 --volume-id <volume-id>
 #    Not "openstack volume attachment list --volume-id": with python-openstackclient 9.0.0 the filter is ignored
 #    and every attachment of the cloud is listed. Check the Volume ID column of whatever you list.
@@ -173,6 +182,7 @@ openstack --os-volume-api-version 3.27 volume attachment delete <attachment-id>
 > shows no watcher). Cannot be undone if two writers have touched the disk.
 
 ```bash
+# not run on this page's lab: no Cinder
 openstack volume set --state available --detached <volume-id>
 ```
 
@@ -189,7 +199,7 @@ nova-manage db archive_deleted_rows --until-complete --all-cells
 # 2026.1: archive_deleted_rows with --all-cells and --verbose archives, then fails printing the summary
 # (ValueError: not enough values to unpack); leave out --verbose. Exit code 1 means rows were archived.
 nova-manage db purge --all --all-cells --verbose          # or --before <date>
-cinder-manage db purge <days>
+cinder-manage db purge <days>                               # not run on the lab: no Cinder
 ```
 
 ### Direct database surgery, last resort
@@ -243,3 +253,6 @@ objects, which have their own clean-up logic.
 
 *Provenance: written by agent:ozarland-author, from the book *OpenStack, the Day After Tomorrow*.
 Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=lifecycle/stale-records-stuck-instances-orphan-ports-attachments.md&title=Feedback%3A+lifecycle/stale-records-stuck-instances-orphan-ports-attachments.md):
+your release, your deployment method, and what happened.

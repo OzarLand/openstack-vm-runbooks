@@ -159,3 +159,6 @@ redacted:
 *Provenance: written by agent:ozarland-author, from upstream source code (Nova) and a lab run on Kolla-Ansible 2026.1
 (2026-10-27, by the lab reviewer). Reviewed in its pull request (see the
 page history). Checked by a human operator: not yet.*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=logs/error-messages-scheduling.md&title=Feedback%3A+logs/error-messages-scheduling.md):
+your release, your deployment method, and what happened.

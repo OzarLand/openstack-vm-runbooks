@@ -421,3 +421,6 @@ KVM internal errors, a guest panic, the OOM killer, a recreate of `nova_libvirt`
 
 *Provenance: written by agent:ozarland-author, from upstream documentation and source code (libvirt, QEMU, Nova,
 Kolla-Ansible). Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=logs/libvirt-and-qemu-logs.md&title=Feedback%3A+logs/libvirt-and-qemu-logs.md):
+your release, your deployment method, and what happened.

@@ -118,7 +118,7 @@ which disk the rescue system runs from before changing anything (step 2).
 openstack server rescue <server-id>                                  # legacy rescue, the instance's image
 openstack server rescue --image <rescue-image> <server-id>          # another image
 openstack server rescue --password <password> <server-id>          # a password for the rescue system, if the driver
-                                                                     # and image support setting it
+                                                                     # and image support setting it (not run on the lab)
 openstack --os-compute-api-version 2.87 server rescue --image <image-with-hw_rescue-properties> <server-id>
                                                                      # volume-backed instance (stable device rescue);
                                                                      # python-openstackclient 9.0.0 already

@@ -219,9 +219,9 @@ Then reset the state and hard reboot, as for an instance in `ERROR` (below).
 
 ### For causes 3 and 4: fix the compute, then recover the instance
 
-Fix what the error names: the `nova_ssh` containers and keys (cause 3), or the destination's own problem (cause 4,
-with the runbooks of [boot from volume](../scheduling/instance-fails-to-boot-from-volume.md),
-[port binding](instance-stuck-in-build-waiting-for-vif-plugged.md), [disk full](compute-disk-full-instance-paused.md)).
+Fix what the error names: the `nova_ssh` containers and keys (cause 3), or the destination's own problem (cause 4, *not
+reproduced on the lab*, with the runbooks of [boot from volume](../scheduling/instance-fails-to-boot-from-volume.md),
+[port binding](../networking/port-binding-failed.md), [disk full](compute-disk-full-instance-paused.md)).
 
 Then recover the instance where Nova says it is (`host`). The python-openstackclient help for `server set --state`
 warns: "If the server is in an error state then this is almost never the correct command to run and you should
@@ -242,9 +242,15 @@ If the instance is still in a `RESIZE` task state, the reboot is refused; clear 
 > the compute. Undo: `openstack server set --state error <server-id>`.
 
 ```bash
+# with python-openstackclient 10.5.0 add --auto-approve (see below)
 openstack server set --state active <server-id>
 openstack server reboot --hard <server-id>
 ```
+
+python-openstackclient 10.5.0 asks `Do you wish to continue? [y/n]` before `server set --state` and `--auto-approve`
+skips the question; without a terminal it exits without changing the state (seen on two labs, once with exit code
+1). Whether earlier clients (9.0.0 on other labs) prompt or accept `--auto-approve` is not recorded here: check
+`openstack server set --help`.
 
 When the failure came after the disk copy (in `finish_resize`), the source compute keeps the previous copy as
 `<instances-path>/<server-id>_resize`. Leave it until the instance runs and its owner has checked it; it is the only

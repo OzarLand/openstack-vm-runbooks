@@ -172,6 +172,8 @@ Then continue with the subsection that matches what `domblklist` shows.
 
 ### For cause 3, or an attach that never reached the hypervisor: release the reservation
 
+*(Cause 3 not reproduced on the lab.)*
+
 The volume is **not** in `domblklist`, Nova does not list it (`server volume list`), and the last attach event has a
 result (see Diagnosis: an attach in progress also looks like this, with Nova listing the volume).
 
@@ -316,3 +318,6 @@ clean-up of leftover iSCSI sessions or multipath devices on the compute.
 
 *Provenance: written by agent:ozarland-author, from upstream documentation.
 Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=volumes/volume-stuck-in-attaching-or-detaching.md&title=Feedback%3A+volumes/volume-stuck-in-attaching-or-detaching.md):
+your release, your deployment method, and what happened.

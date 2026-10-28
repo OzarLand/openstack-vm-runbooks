@@ -54,6 +54,7 @@ On the compute host running the instance:
 virsh vcpupin <instance-name>              # instance-name is OS-EXT-SRV-ATTR:instance_name, e.g. instance-0000abcd
 virsh emulatorpin <instance-name>
 virsh dumpxml <instance-name> | sed -n '/<cputune>/,/<\/cputune>/p'
+#    Kolla-Ansible: virsh runs in the libvirt container, e.g. sudo docker exec nova_libvirt virsh vcpupin <instance-name>
 
 # 2. What else runs on those CPUs
 ps -eLo pid,tid,psr,comm | awk '$3==<host-cpu>'      # for each pinned host CPU
@@ -99,6 +100,8 @@ rather than relocating the symptom.
 
 ### Isolate the host CPUs
 
+*(Not run on the lab.)*
+
 > ⚠️ **State-changing.** Kernel parameters and tuned profiles need a host reboot, hence moving or stopping its
 > instances (see [Moving instances off a host](moving-instances-off-a-host-for-maintenance.md)). Do one host,
 > measure, then roll out.
@@ -109,15 +112,21 @@ CPUs for the host in `cpu_shared_set`.
 
 ### Move the emulator threads
 
-> ⚠️ **State-changing.** Changing flavor extra specs affects new instances and resized ones only. Existing instances
-> need a resize (to the same flavor is not enough; use a new flavor) or a rebuild to pick up the new policy.
+> ⚠️ **State-changing.** An instance keeps a copy of its flavor from when it was created or last resized, so
+> changing a flavor's extra specs does not change running instances, and a rebuild does not either. Create a new
+> flavor with the policy and resize the existing instances to it (a resize reboots the instance). Changing the
+> extra specs of a flavor in use only affects instances created from it afterwards.
 
 ```bash
-openstack flavor set --property hw:emulator_threads_policy=share <flavor>
+openstack flavor create <new-flavor> --vcpus <n> --ram <mb> --disk <gb> \
+  --property hw:cpu_policy=dedicated --property hw:emulator_threads_policy=share
+openstack server resize --flavor <new-flavor> <server>   # then confirm the resize once the instance is checked
 # and make sure every host has a [compute] cpu_shared_set for them to land on
 ```
 
 ### Fix overlapping pinning or mismatches
+
+*(Not run on the lab.)*
 
 > ⚠️ **State-changing.** Moving an instance changes its pinning. Live-migrate or cold-migrate one instance per
 > overlap to a host with free dedicated CPUs, then verify with `virsh vcpupin` on the destination.
@@ -128,7 +137,7 @@ openstack flavor set --property hw:emulator_threads_policy=share <flavor>
 # Inside the guest, over a representative period
 vmstat 5 12            # st column stays at 0
 # On the host
-virsh vcpupin <instance-name>; virsh emulatorpin <instance-name>
+virsh vcpupin <instance-name>; virsh emulatorpin <instance-name>   # Kolla-Ansible: sudo docker exec nova_libvirt virsh ...
 ps -eLo psr,comm | awk '$1==<pinned-cpu>' | sort | uniq -c
 # expected: the instance's vCPU threads (CPU n/KVM) plus the per-CPU kernel threads that always exist on every
 # CPU (ksoftirqd/N, migration/N, cpuhp/N, kworker/N); no other process or daemon
@@ -145,6 +154,10 @@ without recalculating the guest-to-host mapping and could itself create overlapp
 with `cpu_shared_set` dates from Rocky (Nova 18.0); check the release notes of your release. The host-isolation steps depend on the OS and hardware; check your vendor's
 guidance for real-time or NFV hosts.
 
+The lab confirmation (OpenStack 2026.1, Kolla-Ansible, 1 controller and 2 computes with nested KVM, 2026-10-23)
+ran the quick checks, reproduced the steal (0.8 % idle, 26.7 % with host processes on the pinned CPU) and moved
+the emulator threads with `hw:emulator_threads_policy=share`. Host isolation and moving instances were not run.
+
 ## Related
 
 - [Moving instances off a host for planned maintenance](moving-instances-off-a-host-for-maintenance.md).
@@ -154,3 +167,6 @@ guidance for real-time or NFV hosts.
 
 *Provenance: written by agent:ozarland-author, from the book *OpenStack, the Day After Tomorrow*.
 Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=migration/cpu-steal-on-pinned-instances.md&title=Feedback%3A+migration/cpu-steal-on-pinned-instances.md):
+your release, your deployment method, and what happened.

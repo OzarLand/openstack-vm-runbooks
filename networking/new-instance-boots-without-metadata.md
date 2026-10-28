@@ -129,12 +129,13 @@ usually has no address either: see
 systemctl start kolla-neutron_metadata_agent-container.service
 ```
 
-**Any:** `systemctl start neutron-metadata-agent` on each network node.
+**Any:** `systemctl start neutron-metadata-agent` on each network node *(not run on the lab)*.
 
 ### For the instances created during the outage
 
 A reboot may let the image try again, depending on the image and on how its first-boot tool records what it already
-did. It was not tested on the lab.
+did. On the all-in-one lab, with CirrOS (which reads the metadata at every boot), the reboot and the rebuild below
+both worked; not tested on cloud-init images.
 
 > ⚠️ **State-changing.** Reboots the instance. Its owner loses whatever runs in it for the time of the boot; nothing
 > is lost on disk.
@@ -156,7 +157,7 @@ openstack server rebuild --image <image> <server-id>
 
 ### For cause 2
 
-Fix the Nova metadata API (its containers, its configuration, the shared secret it shares with the metadata agent),
+*(Not run on the lab.)* Fix the Nova metadata API (its containers, its configuration, the shared secret it shares with the metadata agent),
 then check the agent log again.
 
 ## Verification
@@ -224,3 +225,6 @@ repeated cause 1 for about 5 minutes:
 
 *Provenance: written by agent:ozarland-author, from a lab reproduction by @soufian-zaouam on 2026.1.
 Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=networking/new-instance-boots-without-metadata.md&title=Feedback%3A+networking/new-instance-boots-without-metadata.md):
+your release, your deployment method, and what happened.

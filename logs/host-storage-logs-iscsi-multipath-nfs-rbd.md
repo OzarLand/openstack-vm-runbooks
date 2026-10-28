@@ -282,3 +282,6 @@ side, slow requests in the cluster's health.
 *Provenance: written by agent:ozarland-author, from upstream documentation and source code (open-iscsi,
 multipath-tools, Linux, Ceph, Kolla-Ansible, Nova). Reviewed in its pull request (see the page history). Checked by a
 human operator: not yet.*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=logs/host-storage-logs-iscsi-multipath-nfs-rbd.md&title=Feedback%3A+logs/host-storage-logs-iscsi-multipath-nfs-rbd.md):
+your release, your deployment method, and what happened.

@@ -17,7 +17,7 @@ upstream_refs:
   - https://galeracluster.com/library/documentation/crash-recovery.html
   - https://docs.openstack.org/kolla-ansible/latest/user/operating-kolla.html
 authored_by: agent:ozarland-author
-last_verified: 2026-10-18
+last_verified: 2026-10-27
 ---
 
 # Reopening provisioning after a control-plane incident. Stop the APIs, recover, verify, reopen
@@ -116,7 +116,8 @@ a reset. If a clean rejoin of one side is possible, prefer it. Otherwise, the in
 
 1. Stop the RabbitMQ application on every node (`rabbitmqctl stop_app`), the last node stopped first on restart.
 2. Reset or purge according to your deployment tool's procedure. **Kolla-Ansible:** `kolla-ansible rabbitmq-reset-state`
-   resets the cluster and recreates it. **Any:** `rabbitmqctl force_reset` on the nodes, then rejoin, or purge the
+   resets the cluster and recreates it, but **not with Khepri**: see the lab failure below, and re-join the affected
+   node by hand instead. **Any:** `rabbitmqctl force_reset` on the nodes, then rejoin, or purge the
    queues one by one (`rabbitmqctl purge_queue <queue>`) if the cluster itself is healthy.
    With Khepri (the default of a new RabbitMQ 4.2 cluster, as Kolla-Ansible 2026.1 deploys it), `force_reset` is
    refused (`Forced reset is unsupported with Khepri`). On the lab, `kolla-ansible rabbitmq-reset-state` failed: the
@@ -184,7 +185,8 @@ boot from volume), reachable through the internal VIP: Nova reaches Glance and N
 rabbitmqctl cluster_status                                   # one cluster, no partitions, no alarms
 rabbitmqctl list_queues name messages consumers | awk '$3==0 && $2>0'   # empty: every queue has consumers
 mysql -e "SHOW STATUS LIKE 'wsrep_cluster_size'; SHOW STATUS LIKE 'wsrep_cluster_status';"
-#    Kolla-Ansible: sudo docker exec mariadb mariadb -uroot -p<database_password> -e "..." (no mysql in the image)
+#    Kolla-Ansible: sudo docker exec -it mariadb mariadb -uroot -p -e "..." (no mysql in the image; -p alone prompts
+#    for database_password from /etc/kolla/passwords.yml, so it stays out of the process list and the history)
 
 # 2. Every compute service and network agent reporting again. These need nova-api and neutron-server (see below);
 #    read the output: with the API stopped, the command prints a 503 and grep still prints 0.
@@ -238,3 +240,6 @@ Kolla-Ansible, a Galera recovery, HAProxy `MAINT`, OVN, Mnesia.
 
 *Provenance: written by agent:ozarland-author, from the book *OpenStack, the Day After Tomorrow*.
 Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=recovery/reopening-provisioning-after-control-plane-incident.md&title=Feedback%3A+recovery/reopening-provisioning-after-control-plane-incident.md):
+your release, your deployment method, and what happened.

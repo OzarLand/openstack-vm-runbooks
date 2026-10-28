@@ -92,10 +92,11 @@ SHOW STATUS LIKE 'wsrep_local_state_comment';    -- Synced expected; Donor/Desyn
 SHOW STATUS LIKE 'wsrep_flow_control_paused';    -- fraction of time replication stalled the node; near 1 = stuck
 ```
 
-**Kolla-Ansible:** `sudo docker exec mariadb mariadb -uroot -p<database_password> -e "SHOW STATUS LIKE 'wsrep%'"` on a
-controller (the 2026.1 image has no `mysql` command; `-it` fails when there is no terminal; the password is
-`database_password` in `/etc/kolla/passwords.yml` on the deploy host; `-p<password>` on the command line puts it in
-the process list and the shell history: clear the history line, or run it from a root-only script). Run it
+**Kolla-Ansible:** `sudo docker exec -it mariadb mariadb -uroot -p -e "SHOW STATUS LIKE 'wsrep%'"` on a controller
+(the 2026.1 image has no `mysql` command; `-p` alone prompts for the password, which is `database_password` in
+`/etc/kolla/passwords.yml` on the deploy host). Without a terminal `-it` fails: drop it and pass `-p<password>`
+only from a root-only script, since a password on the command line lands in the process list and the shell
+history. Run it
 on every node: a node in `non-Primary` while the others are `Primary` is a node that lost quorum.
 
 ### RabbitMQ
@@ -180,3 +181,6 @@ agent RPC on RabbitMQ (OVN uses its own databases), so the "agents stale" sympto
 
 *Provenance: written by agent:ozarland-author, from the book *OpenStack, the Day After Tomorrow*.
 Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md&title=Feedback%3A+diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md):
+your release, your deployment method, and what happened.

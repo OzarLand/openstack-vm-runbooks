@@ -248,3 +248,6 @@ Kolla-Ansible 22.2.0 (2026.1) all-in-one with systemd-timesyncd (systemd 255), o
 *Provenance: written by agent:ozarland-author, from upstream documentation and source code (chrony, systemd,
 Kolla-Ansible, Nova, Neutron, Keystone). Reviewed in its pull request (see the page history). Checked by a human
 operator: not yet.*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=logs/time-sync-chrony-and-clock-skew.md&title=Feedback%3A+logs/time-sync-chrony-and-clock-skew.md):
+your release, your deployment method, and what happened.

@@ -177,7 +177,7 @@ increments it when the restart manager decides to restart). On Kolla-Ansible, sy
 `RestartCount` stayed `0` while `StartedAt` changed at each start, and the container's Docker restart policy was `no`.
 
 ```bash
-# On the host. Podman: same commands with podman instead of docker.
+# On the host. Podman: same commands with podman instead of docker (Podman not run on the lab).
 docker ps -a --format 'table {{.Names}}\t{{.Status}}' | grep -v ' Up [0-9]* \(hours\|days\|weeks\)'
 docker inspect -f '{{.Name}} restarts={{.RestartCount}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}' <container>
 docker logs --since 30m --tail 100 <container>
@@ -219,7 +219,7 @@ kill -SIGHUP $(pidof dockerd)
 If `dockerd` hangs, `kill -SIGUSR1 $(pidof dockerd)` logs a stack trace of all its goroutines without stopping it
 (same documentation).
 
-**Podman:** there is no daemon. With Kolla-Ansible, the host bootstrap sets the `k8s-file` log driver with a 50 MB
+**Podman** *(not run on the lab)*: there is no daemon. With Kolla-Ansible, the host bootstrap sets the `k8s-file` log driver with a 50 MB
 maximum (`podman_log_max_size`) and `events_logger: "file"`
 ([ansible-collection-kolla podman defaults](https://github.com/openstack/ansible-collection-kolla/blob/stable/2026.1/roles/podman/defaults/main.yml));
 upstream, Podman uses `journald` by default when the journal is writable
@@ -254,7 +254,7 @@ journalctl --list-boots | tail -3
 > if you no longer want the stored logs.
 
 ```bash
-# On the host
+# On the host (not run on the lab)
 mkdir -p /etc/systemd/journald.conf.d
 printf '[Journal]\nStorage=persistent\n' > /etc/systemd/journald.conf.d/persistent.conf
 systemctl restart systemd-journald
@@ -307,3 +307,6 @@ compute-1 systemd[1]: kolla-nova_compute-container.service: Scheduled restart jo
 *Provenance: written by agent:ozarland-author, from upstream documentation and source code (systemd, Kolla-Ansible,
 ansible-collection-kolla, Docker, Moby, containers-common). Reviewed in its pull request (see the page history).
 Checked by a human operator: not yet.*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=logs/systemd-journal-and-container-engine.md&title=Feedback%3A+logs/systemd-journal-and-container-engine.md):
+your release, your deployment method, and what happened.

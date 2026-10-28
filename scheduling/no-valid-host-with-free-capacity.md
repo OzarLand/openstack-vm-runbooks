@@ -172,6 +172,8 @@ Changing a ratio directly in Placement is overridden by the compute on its next 
 
 ### Heal stale allocations
 
+*(Not run on this page's lab.)*
+
 See [Stale records](../lifecycle/stale-records-stuck-instances-orphan-ports-attachments.md); in short,
 `nova-manage placement audit` to list, `nova-manage placement heal_allocations` to repair, with the warnings there.
 
@@ -230,3 +232,6 @@ Not covered: scheduling failures specific to Ironic bare-metal nodes.
 
 *Provenance: written by agent:ozarland-author, from the book *OpenStack, the Day After Tomorrow*.
 Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=scheduling/no-valid-host-with-free-capacity.md&title=Feedback%3A+scheduling/no-valid-host-with-free-capacity.md):
+your release, your deployment method, and what happened.

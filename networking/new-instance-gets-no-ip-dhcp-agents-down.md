@@ -124,6 +124,8 @@ fault of the agents.
 
 ### For causes 1 and 2: start the DHCP agents, then find why they stopped
 
+*(Run on the lab for cause 1; cause 2 not reproduced.)*
+
 > ⚠️ **State-changing.** Starts the DHCP agent on the network node. When all agents were down, Neutron may schedule
 > the networks again on other agents when they come back: their `qdhcp-` namespaces can move to another host (observed
 > on the lab). Running instances lost no traffic on the lab while it happened. Undo: stop the unit again (this
@@ -135,7 +137,7 @@ fault of the agents.
 systemctl start kolla-neutron_dhcp_agent-container.service
 ```
 
-**Any:** `systemctl start neutron-dhcp-agent` on each network node.
+**Any:** `systemctl start neutron-dhcp-agent` on each network node *(not run on the lab)*.
 
 Then read the agent log and the unit status from before the restart to find why it stopped.
 
@@ -153,7 +155,7 @@ openstack server reboot <server-id>
 
 ### For cause 3
 
-Read the agent log for that network. Restarting the agent, as above, makes it start dnsmasq for its networks again.
+*(Not run on the lab.)* Read the agent log for that network. Restarting the agent, as above, makes it start dnsmasq for its networks again.
 
 ### For cause 4
 
@@ -232,3 +234,6 @@ A lab review on a second platform (all-in-one, one DHCP agent, same releases) re
 
 *Provenance: written by agent:ozarland-author, from a lab reproduction by @soufian-zaouam on 2026.1.
 Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=networking/new-instance-gets-no-ip-dhcp-agents-down.md&title=Feedback%3A+networking/new-instance-gets-no-ip-dhcp-agents-down.md):
+your release, your deployment method, and what happened.

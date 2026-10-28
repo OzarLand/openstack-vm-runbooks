@@ -81,7 +81,7 @@ sudo docker exec -it mariadb mariadb -uroot -p -e "SHOW STATUS WHERE Variable_na
 sudo tail -n 50 /var/log/kolla/mariadb/mariadb.log
 ```
 
-**Any:** the same `SHOW STATUS` query with the `mariadb` (or `mysql`) client on each node, and the MariaDB error log.
+**Any:** *(not run on the lab)* the same `SHOW STATUS` query with the `mariadb` (or `mysql`) client on each node, and the MariaDB error log.
 
 | What the nodes show | Case |
 |---|---|
@@ -193,7 +193,7 @@ Observed on the Kolla-Ansible 2026.1 image (MariaDB 11.4.13): the Galera provide
 (`wsrep_provider_pc_*`): `SET GLOBAL wsrep_provider_options='pc.bootstrap=YES'` fails with
 `ERROR 1210 (HY000): wsrep_provider_options cannot be changed while the wsrep-provider plugin is loaded`.
 
-**Any:** `SET GLOBAL wsrep_provider_pc_bootstrap=ON;` where `SHOW GLOBAL VARIABLES LIKE 'wsrep_provider_pc%'` lists it,
+**Any:** *(not run on the lab)* `SET GLOBAL wsrep_provider_pc_bootstrap=ON;` where `SHOW GLOBAL VARIABLES LIKE 'wsrep_provider_pc%'` lists it,
 otherwise `SET GLOBAL wsrep_provider_options='pc.bootstrap=YES';`.
 
 The other running nodes then join this component. Nodes that were cut off join when they come back.
@@ -215,7 +215,8 @@ alone: the recovery reads the seqno from them.
 kolla-ansible mariadb-recovery -i <inventory>
 ```
 
-To choose the bootstrap host yourself (the backup and restore guide uses this form after a restore):
+To choose the bootstrap host yourself (the backup and restore guide uses this form after a restore) *(not run on
+the lab)*:
 
 > 🛑 **Destructive.** With `mariadb_recover_inventory_name`, the playbook skips the stop, the `--wsrep-recover` run
 > and the seqno comparison, and bootstraps the cluster from the host you name. If that host is not the most advanced,
@@ -244,7 +245,7 @@ sudo systemctl restart kolla-<container>-container.service   # for each of them,
                                                               # nova_metadata, neutron_server
 ```
 
-**Any:** the Galera crash recovery guide: find the node with the highest seqno (`grastate.dat`, or
+**Any:** *(not run on the lab)* the Galera crash recovery guide: find the node with the highest seqno (`grastate.dat`, or
 `mysqld --wsrep-recover` when it says `-1`), set `safe_to_bootstrap: 1` on that node only, start it with
 `--wsrep-new-cluster` (or `galera_new_cluster`), then start the others normally.
 

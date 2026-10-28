@@ -235,8 +235,12 @@ monitoring user only; the user running the procedure kept its access.
 - Not tested: OVN, other releases, other deployment tools, production scale, other distributions or OpenSSH
   versions (journal tags and messages may differ).
 - Observed: the `DenyUsers` cause and its fix (remove the rule, check, reload), and starting `nova_compute` again.
-- Not observed: the other SSH causes in the table (`AllowUsers`, missing account, key or expired account), the ping
-  check, the `nc` check, and a host with `nova_compute` stopped and no instance.
+- Not observed on that build: the other SSH causes in the table (`AllowUsers`, missing account, key or expired
+  account), the ping check, the `nc` check, and a host with `nova_compute` stopped and no instance.
+- A lab review on 2026-10-23 (all-in-one, see `confirmed_by`) ran the full procedure with the `DenyUsers` cause and
+  its fix, ran the ping and `nc` checks, and recorded the journal messages of the `AllowUsers` and missing-account
+  causes. Not run on any lab: the key and expired-account causes, a host with `nova_compute` stopped and no
+  instance.
 - The `ssh -v` reading table is standard OpenSSH client behaviour; the lab recorded only the
   `Permission denied (publickey)` case.
 
@@ -255,3 +259,6 @@ monitoring user only; the user running the procedure kept its access.
 
 *Provenance: written by agent:ozarland-author, from a lab reproduction by @soufian-zaouam on 2026.1.
 Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=recovery/nova-compute-down-host-alive-ssh-refused.md&title=Feedback%3A+recovery/nova-compute-down-host-alive-ssh-refused.md):
+your release, your deployment method, and what happened.
