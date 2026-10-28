@@ -116,7 +116,8 @@ a reset. If a clean rejoin of one side is possible, prefer it. Otherwise, the in
 
 1. Stop the RabbitMQ application on every node (`rabbitmqctl stop_app`), the last node stopped first on restart.
 2. Reset or purge according to your deployment tool's procedure. **Kolla-Ansible:** `kolla-ansible rabbitmq-reset-state`
-   resets the cluster and recreates it. **Any:** `rabbitmqctl force_reset` on the nodes, then rejoin, or purge the
+   resets the cluster and recreates it, but **not with Khepri**: see the lab failure below, and re-join the affected
+   node by hand instead. **Any:** `rabbitmqctl force_reset` on the nodes, then rejoin, or purge the
    queues one by one (`rabbitmqctl purge_queue <queue>`) if the cluster itself is healthy.
    With Khepri (the default of a new RabbitMQ 4.2 cluster, as Kolla-Ansible 2026.1 deploys it), `force_reset` is
    refused (`Forced reset is unsupported with Khepri`). On the lab, `kolla-ansible rabbitmq-reset-state` failed: the

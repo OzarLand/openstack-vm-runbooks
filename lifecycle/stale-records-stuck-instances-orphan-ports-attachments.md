@@ -136,18 +136,23 @@ the service still reports `up` from a host that lost its storage, fix or fence t
 
 ### Placement: audit, then heal or delete
 
-> ⚠️ **State-changing.** `heal_allocations` creates or corrects allocations for existing instances; `audit --delete`
-> removes allocations whose consumer does not exist. Both change what the scheduler sees. Run `audit` without
-> `--delete` first and read the list.
+Run `audit` without `--delete` first: it only reports.
 
 ```bash
 nova-manage placement audit --verbose
 ```
 
-**Stop here and read the list.** Go on only for allocations whose consumer you have confirmed is gone:
+**Stop here and read the list.** Do not run `audit --delete` from this page. Deleting allocations is 🛑 destructive:
+without `--resource_provider` it acts on every provider, and it also removes the destination allocation of an
+instance that is being moved. Follow
+[Placement allocations do not match the instances](../scheduling/placement-allocations-out-of-sync-audit-and-heal.md#for-cause-1-delete-the-orphaned-allocations),
+which checks that no migration is in progress, saves each consumer's allocations first, and scopes the delete to one
+provider.
+
+> ⚠️ **State-changing.** `heal_allocations` creates or corrects allocations for existing instances, which changes
+> what the scheduler sees. Run it with `--dry-run` first, as the Placement page shows.
 
 ```bash
-nova-manage placement audit --verbose --delete
 nova-manage placement heal_allocations --verbose
 ```
 

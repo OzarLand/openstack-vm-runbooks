@@ -171,9 +171,10 @@ or stale bus. See [VM creation fails platform-wide: check the shared dependencie
 > and, on some versions and configurations, existing flows; restarting `ovn-controller` is usually transparent
 > but re-syncs every port on the host. Do it on one host first.
 
-**Kolla-Ansible:** `sudo docker restart neutron_openvswitch_agent` or `sudo docker restart ovn_controller` on the
-host, or through the systemd unit Kolla-Ansible creates for the container:
-`sudo systemctl restart kolla-neutron_openvswitch_agent-container.service`. On a paused agent, the unit restart
+**Kolla-Ansible:** restart the agent through the systemd unit Kolla-Ansible creates for the container (since 2026.1;
+a plain `docker restart` bypasses the unit), on the host:
+`sudo systemctl restart kolla-neutron_openvswitch_agent-container.service` or
+`sudo systemctl restart kolla-ovn_controller-container.service`. On a paused agent, the unit restart
 worked on a lab: it took about 60 s, because the paused container ignores the stop and is killed (`Exited (137)`),
 then the agent was alive again.
 **Any:** `systemctl restart neutron-openvswitch-agent` or `systemctl restart ovn-controller`.

@@ -109,11 +109,15 @@ CPUs for the host in `cpu_shared_set`.
 
 ### Move the emulator threads
 
-> ⚠️ **State-changing.** Changing flavor extra specs affects new instances and resized ones only. Existing instances
-> need a resize (to the same flavor is not enough; use a new flavor) or a rebuild to pick up the new policy.
+> ⚠️ **State-changing.** An instance keeps a copy of its flavor from when it was created or last resized, so
+> changing a flavor's extra specs does not change running instances, and a rebuild does not either. Create a new
+> flavor with the policy and resize the existing instances to it (a resize reboots the instance). Changing the
+> extra specs of a flavor in use only affects instances created from it afterwards.
 
 ```bash
-openstack flavor set --property hw:emulator_threads_policy=share <flavor>
+openstack flavor create <new-flavor> --vcpus <n> --ram <mb> --disk <gb> \
+  --property hw:cpu_policy=dedicated --property hw:emulator_threads_policy=share
+openstack server resize --flavor <new-flavor> <server>   # then confirm the resize once the instance is checked
 # and make sure every host has a [compute] cpu_shared_set for them to land on
 ```
 

@@ -240,6 +240,19 @@ every OpenStack service stopped first, then redeployed.
 > Precondition: causes 1 to 4 ruled out; a maintenance window; `globals.yml` and `/etc/kolla/config` unchanged since
 > the last deploy, or reviewed (`genconfig` picks up any drift, and `deploy` applies it). Cannot be undone.
 
+> 🛑 **Known failure with Khepri.** Kolla-Ansible 2026.1 deploys RabbitMQ 4.2 with Khepri as its metadata store, where
+> `force_reset` is refused. On the lab (2026.1, three controllers, Khepri), `kolla-ansible rabbitmq-reset-state`
+> **failed**: the fallback `rabbitmqctl reset` timed out on one node, which was left with its application stopped,
+> and the two others waited for three nodes and failed (`Not enough nodes joined ...'s cluster`). The details and the
+> manual recovery are in
+> [reopening provisioning after a control-plane incident](reopening-provisioning-after-control-plane-incident.md).
+> **With Khepri, do not rely on this command until a run succeeds on your release.** First check whether the
+> partition healed by itself (`rabbitmqctl cluster_status` on every node), and prefer re-joining only the affected
+> node: on that node `rabbitmqctl stop_app`, `rabbitmqctl reset`, `rabbitmqctl join_cluster rabbit@<healthy-node>`,
+> `rabbitmqctl start_app`, then check that every quorum queue and stream has a member on it
+> (`rabbitmqctl list_queues name type members`). The commands below are for a cluster that still uses Mnesia, or once
+> the command has been shown to work with Khepri on your release.
+
 ```bash
 kolla-ansible genconfig -i <inventory>
 kolla-ansible stop -i <inventory> --tags <service-tags> --yes-i-really-really-mean-it \
