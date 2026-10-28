@@ -6,7 +6,10 @@
 
 Part of [OzarLand](https://github.com/OzarLand/ozarland), a collaborative knowledge-sharing space for OpenStack
 operators. Share experiences, document solutions, learn from each other. No imposed tools, no single way of
-operating OpenStack.
+operating OpenStack. Practise these runbooks on a disposable lab with
+[openstack-quick-lab](https://github.com/OzarLand/openstack-quick-lab); the
+[openstack-operator-skills](https://github.com/OzarLand/openstack-operator-skills) Claude skills draw on them and keep
+their status attached. A correction belongs here first.
 
 ## Scope
 
@@ -28,22 +31,23 @@ Everything an operator does when an instance misbehaves, from the first symptom 
 - Recovery after an incident (compute node loss, storage outage, control plane outage) as it affects instances,
   and the verifications to run afterwards.
 
-**Out of scope:** deploying OpenStack (see `kolla-ansible-deployment-patterns`), upgrading it (see
-`openstack-upgrade-playbooks`), and problems that do not surface through instances (control-plane-only,
-networking-agent-only, storage-backend-only), which are collected in `ozarland` discussions until a dedicated
-runbook repository exists.
+**Out of scope:** deploying OpenStack (see
+[kolla-ansible-deployment-patterns](https://github.com/OzarLand/kolla-ansible-deployment-patterns)), upgrade
+campaigns (planned for a future `openstack-upgrade-playbooks` repository), and storage-backend-only problems.
+Control-plane failures (database, message queue, load balancer, Keystone) are covered where they affect instances:
+see `recovery/` and `logs/`.
 
 ## How content is organised
 
 ```text
 lifecycle/        stuck states, create, delete, resize, shelve
 scheduling/       No valid host, Placement, flavors, images, boot from volume
-migration/        live and cold migration, evacuation, resize across hosts
+migration/        live and cold migration, moving instances off a host for maintenance
 networking/       instance connectivity, DHCP, metadata, floating IPs, security groups, port binding
 volumes/          attach, detach, stale attachments, boot volumes
-diagnostics/      how to read Nova, Neutron, Cinder, Glance, Placement, libvirt logs and states
+diagnostics/      cross-cutting investigations: what a request traverses, platform-wide failures, clock skew
 logs/             where the logs are and how to read them: services, infrastructure, hypervisor (see logs/README.md)
-recovery/         after a compute, storage or control plane incident; post-incident checks
+recovery/         after a compute, storage or control plane incident, evacuation; post-incident checks
 templates/        runbook template
 ```
 
@@ -56,10 +60,18 @@ A runbook's `status` says how much it has been verified (see the
 
 | Status | What it means |
 |---|---|
-| `draft` | Written and reviewed, not yet run on a lab nor confirmed by another operator |
-| `lab-verified` | Its steps were run on a lab, on the release and deployment method stated, and behaved as written |
-| `validated` | Confirmed by an operator other than its author, in another environment |
-| `experimental` | Plausible but unconfirmed, narrow, or possibly outdated |
+| `draft` | Written; its commands have not been run by anyone other than the author. |
+| `lab-verified` | Its commands were run on a lab by someone other than the author, on the release stated in the page, and behaved as the page says. |
+| `validated` | Confirmed by a human operator, other than the author, on a real platform. |
+| `experimental` | Possibly outdated, or confirmed only under narrow conditions. |
+
+**Where things stand (2026-10-28):** 72 pages, 44 `lab-verified`, 28 `draft`, none `validated` or `experimental`.
+Nothing here has been confirmed on a production platform by an operator other than the author. Lab verification so
+far was done by OzarLand's AI lab agent, on OpenStack 2026.1 deployed with Kolla-Ansible 22.2.0 (all-in-one, or
+3 controllers and 2 computes), mostly with ML2/OVS; OVN, Ceph and other deployment tools are largely untested. A
+`lab-verified` page can still contain steps that were not run: its `confirmed_by` note and its *Validity and limits*
+section say which. Read every page as a well-documented lead, not as a proven procedure, and read its
+read-only checks before any ⚠️ or 🛑 step.
 
 A page written for one deployment method is welcome; variants for other methods are added by whoever has them.
 
@@ -111,24 +123,24 @@ lab), **documentation** (upstream documentation and source), **production incide
 | [Compute disk full. An instance that writes is frozen, while Nova still shows it ACTIVE](lifecycle/compute-disk-full-instance-paused.md) | nova, libvirt, qemu | 2026.1 | lab-verified | lab run |
 | [Instance stuck in BUILD, then ERROR after vif_plugging_timeout](lifecycle/instance-stuck-in-build-waiting-for-vif-plugged.md) | nova, neutron, ovn, ovs | 2026.1 | lab-verified | book, lab run |
 | [Instance goes SHUTOFF by itself, nobody stopped it. The compute's OOM killer killed its QEMU process](lifecycle/instance-shut-off-by-host-oom-killer.md) | nova, libvirt, qemu, placement, linux-kernel | 2026.1 | draft | documentation |
-| [Instance stuck in deleting, or in ERROR after a delete. Deleting it again does nothing](lifecycle/instance-stuck-in-deleting.md) | nova, libvirt, cinder, neutron, placement | 2026.1 | draft | documentation |
+| [Instance stuck in deleting, or in ERROR after a delete. Deleting it again does nothing](lifecycle/instance-stuck-in-deleting.md) | nova, libvirt, cinder, neutron, placement | 2026.1 | lab-verified | documentation, lab run |
 | [I need to restart nova_libvirt on a compute. Its instances keep running](lifecycle/restarting-nova-libvirt-does-not-stop-instances.md) | nova, libvirt | 2026.1 | lab-verified | lab run |
-| [Resize or cold migration not finished. Instance in VERIFY_RESIZE, stuck in RESIZE, or in ERROR after a failed resize](lifecycle/resize-stuck-in-verify-resize-or-failed.md) | nova, placement, libvirt | 2026.1 | draft | documentation |
-| [The guest does not boot or cannot be reached (broken fstab, kernel, network or SSH configuration). Repair its disk in rescue mode](lifecycle/rescue-mode-repair-an-unbootable-guest.md) | nova, libvirt, glance | 2026.1 | draft | documentation |
-| [Stale records. Instances stuck in BUILD, ERROR or deleting, orphan ports and attachments, phantom allocations](lifecycle/stale-records-stuck-instances-orphan-ports-attachments.md) | nova, placement, neutron, cinder, mariadb | not recorded ([help wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=lifecycle%2Fstale-records-stuck-instances-orphan-ports-attachments.md&title=Release+for+lifecycle%2Fstale-records-stuck-instances-orphan-ports-attachments.md)) | draft | book |
-| [Instance snapshot never finishes. Task state image_pending_upload or image_uploading, image queued or saving](lifecycle/snapshot-stuck-in-image-uploading.md) | nova, glance, libvirt, ceph | 2026.1 | draft | documentation |
+| [Resize or cold migration not finished. Instance in VERIFY_RESIZE, stuck in RESIZE, or in ERROR after a failed resize](lifecycle/resize-stuck-in-verify-resize-or-failed.md) | nova, placement, libvirt | 2026.1 | lab-verified | documentation, lab run |
+| [The guest does not boot or cannot be reached (broken fstab, kernel, network or SSH configuration). Repair its disk in rescue mode](lifecycle/rescue-mode-repair-an-unbootable-guest.md) | nova, libvirt, glance | 2026.1 | lab-verified | documentation, lab run |
+| [Stale records. Instances stuck in BUILD, ERROR or deleting, orphan ports and attachments, phantom allocations](lifecycle/stale-records-stuck-instances-orphan-ports-attachments.md) | nova, placement, neutron, cinder, mariadb | 2026.1 | lab-verified | book, lab run |
+| [Instance snapshot never finishes. Task state image_pending_upload or image_uploading, image queued or saving](lifecycle/snapshot-stuck-in-image-uploading.md) | nova, glance, libvirt, ceph | 2026.1 | lab-verified | documentation, lab run |
 
 ### Scheduling
 
 | Page | Components | Releases | Status | Source |
 |---|---|---|---|---|
-| [New instance in ERROR with "Exceeded maximum number of retries". The real error is on the computes that tried](scheduling/build-fails-exceeded-maximum-number-of-retries.md) | nova, placement | 2026.1 | draft | documentation |
-| [Boot refused or aborted because the flavor's disk is too small for the image](scheduling/image-larger-than-flavor-disk.md) | nova, glance, cinder | 2026.1 | draft | documentation |
-| [Instance fails to boot from volume. ERROR at build, or ACTIVE with no bootable disk](scheduling/instance-fails-to-boot-from-volume.md) | nova, cinder, glance, libvirt | 2026.1 | draft | documentation |
-| [No valid host was found, although capacity exists](scheduling/no-valid-host-with-free-capacity.md) | nova, placement | 2026.1 | lab-verified | book |
-| [A compute shows disabled or down. Why, what still works on it, and how to bring it back](scheduling/compute-service-disabled-or-forced-down.md) | nova, placement, libvirt | 2026.1 | draft | documentation |
+| [New instance in ERROR with "Exceeded maximum number of retries". The real error is on the computes that tried](scheduling/build-fails-exceeded-maximum-number-of-retries.md) | nova, placement | 2026.1 | lab-verified | documentation, lab run |
+| [Boot refused or aborted because the flavor's disk is too small for the image](scheduling/image-larger-than-flavor-disk.md) | nova, glance, cinder | 2026.1 | lab-verified | documentation, lab run |
+| [Instance fails to boot from volume. ERROR at build, or ACTIVE with no bootable disk](scheduling/instance-fails-to-boot-from-volume.md) | nova, cinder, glance, libvirt | 2026.1 | lab-verified | documentation, lab run |
+| [No valid host was found, although capacity exists](scheduling/no-valid-host-with-free-capacity.md) | nova, placement | 2026.1 | lab-verified | book, lab run |
+| [A compute shows disabled or down. Why, what still works on it, and how to bring it back](scheduling/compute-service-disabled-or-forced-down.md) | nova, placement, libvirt | 2026.1 | lab-verified | documentation, lab run |
 | [A compute was renamed, reinstalled or re-added. nova-compute refuses to start, or gets no resource provider](scheduling/compute-renamed-or-re-registered-resource-provider-conflict.md) | nova, placement | 2026.1 | draft | documentation |
-| [Placement allocations do not match the instances. Compute looks full or empty, audit and heal](scheduling/placement-allocations-out-of-sync-audit-and-heal.md) | nova, placement | 2026.1 | draft | documentation |
+| [Placement allocations do not match the instances. Compute looks full or empty, audit and heal](scheduling/placement-allocations-out-of-sync-audit-and-heal.md) | nova, placement | 2026.1 | lab-verified | documentation, lab run |
 
 ### Migration
 
@@ -136,7 +148,7 @@ lab), **documentation** (upstream documentation and source), **production incide
 |---|---|---|---|---|
 | [CPU steal time on instances with dedicated (pinned) CPUs. Live migration moves the symptom, not the cause](migration/cpu-steal-on-pinned-instances.md) | nova, libvirt, qemu | 2026.1 | lab-verified | book, lab run |
 | [Live migration runs for a long time, then is aborted. The instance writes memory faster than it can be copied](migration/live-migration-never-completes-or-times-out.md) | nova, libvirt, qemu | 2026.1 | draft | documentation |
-| [Moving instances off a compute host for planned maintenance (patching, reboot, hardware)](migration/moving-instances-off-a-host-for-maintenance.md) | nova, libvirt, qemu | 2026.1 | lab-verified | book |
+| [Moving instances off a compute host for planned maintenance (patching, reboot, hardware)](migration/moving-instances-off-a-host-for-maintenance.md) | nova, libvirt, qemu | 2026.1 | lab-verified | book, lab run |
 
 ### Networking
 
@@ -146,7 +158,7 @@ lab), **documentation** (upstream documentation and source), **production incide
 | [New instance has an address, but no SSH key, no user data, default hostname](networking/new-instance-boots-without-metadata.md) | neutron, nova | 2026.1 | lab-verified | lab run |
 | [Instance build or live migration fails with "Binding failed for port". Neutron could not bind the port on that host](networking/port-binding-failed.md) | neutron, nova, ovs, ovn | 2026.1 | draft | documentation |
 | [New instance is ACTIVE but unreachable, it never got an IP address](networking/new-instance-gets-no-ip-dhcp-agents-down.md) | neutron, nova | 2026.1 | lab-verified | lab run |
-| [Every instance on one compute loses the network while Nova shows them ACTIVE (ovs-vswitchd down)](networking/ovs-vswitchd-down-on-compute.md) | neutron, ovs | 2026.1 | draft | lab run |
+| [Every instance on one compute loses the network while Nova shows them ACTIVE (ovs-vswitchd down)](networking/ovs-vswitchd-down-on-compute.md) | neutron, ovs | 2026.1 | lab-verified | lab run |
 | [I need to restart the Open vSwitch agent on a compute. Its instances keep their network](networking/restarting-the-ovs-agent-does-not-cut-instances.md) | neutron, ovs | 2026.1 | lab-verified | lab run |
 | [L3 agent dead, instances still reachable, router not moved](networking/router-stuck-on-dead-l3-agent.md) | neutron | 2026.1 | lab-verified | lab run |
 | [A security group rule has no effect. Traffic it allows is still blocked, or traffic it should block still passes](networking/security-group-rules-not-applied.md) | neutron, ovs, ovn, iptables | 2026.1 | draft | documentation |
@@ -157,55 +169,63 @@ lab), **documentation** (upstream documentation and source), **production incide
 | Page | Components | Releases | Status | Source |
 |---|---|---|---|---|
 | [Extending an attached volume. Refused, error_extending, or the instance still sees the old size](volumes/extend-in-use-volume-guest-sees-old-size.md) | cinder, nova, libvirt, os-brick | 2026.1 | draft | documentation |
-| [Stale volume attachment. The volume is still in-use for an instance that was deleted or evacuated](volumes/stale-volume-attachment-after-instance-deleted-or-evacuated.md) | cinder, nova, libvirt | 2026.1 | draft | documentation |
-| [Volume stuck in attaching, reserved or detaching. The attach or detach never finishes](volumes/volume-stuck-in-attaching-or-detaching.md) | cinder, nova, libvirt | 2026.1 | lab-verified | documentation |
-| [Volume stuck in creating, or in error right after create](volumes/volume-stuck-in-creating-or-error-after-create.md) | cinder, glance, rabbitmq | 2026.1 | draft | documentation |
-| [Volume stuck in deleting, in error_deleting, or back to available after a delete](volumes/volume-stuck-in-deleting-or-error-deleting.md) | cinder, ceph, rabbitmq | 2026.1 | draft | documentation |
+| [Stale volume attachment. The volume is still in-use for an instance that was deleted or evacuated](volumes/stale-volume-attachment-after-instance-deleted-or-evacuated.md) | cinder, nova, libvirt | 2026.1 | lab-verified | documentation, lab run |
+| [Volume stuck in attaching, reserved or detaching. The attach or detach never finishes](volumes/volume-stuck-in-attaching-or-detaching.md) | cinder, nova, libvirt | 2026.1 | lab-verified | documentation, lab run |
+| [Volume stuck in creating, or in error right after create](volumes/volume-stuck-in-creating-or-error-after-create.md) | cinder, glance, rabbitmq | 2026.1 | lab-verified | documentation, lab run |
+| [Volume stuck in deleting, in error_deleting, or back to available after a delete](volumes/volume-stuck-in-deleting-or-error-deleting.md) | cinder, ceph, rabbitmq | 2026.1 | lab-verified | documentation, lab run |
 
 ### Diagnostics
 
 | Page | Components | Releases | Status | Source |
 |---|---|---|---|---|
-| [The logs of one compute do not line up with the controllers. Its clock has drifted](diagnostics/compute-clock-skew.md) | nova, neutron, ntp | 2026.1 | draft | lab run |
-| [Control plane down. What still works for running instances, and what does not](diagnostics/control-plane-down-what-still-works-for-instances.md) | nova, neutron, ovn, ovs, libvirt | not recorded ([help wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=diagnostics%2Fcontrol-plane-down-what-still-works-for-instances.md&title=Release+for+diagnostics%2Fcontrol-plane-down-what-still-works-for-instances.md)) | draft | book |
-| [Every API call fails at once. Expired TLS certificates or inconsistent Keystone Fernet keys](diagnostics/expired-certificates-and-fernet-keys-break-every-api-call.md) | keystone, haproxy, rabbitmq, mariadb, memcached | not recorded ([help wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=diagnostics%2Fexpired-certificates-and-fernet-keys-break-every-api-call.md&title=Release+for+diagnostics%2Fexpired-certificates-and-fernet-keys-break-every-api-call.md)) | draft | book |
-| [VM creation fails platform-wide while instances keep running. Check the shared dependencies first](diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md) | nova, neutron, rabbitmq, mariadb, memcached, haproxy, keystone | not recorded ([help wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=diagnostics%2Fvm-creation-fails-platform-wide-check-shared-dependencies.md&title=Release+for+diagnostics%2Fvm-creation-fails-platform-wide-check-shared-dependencies.md)) | draft | book |
-| [What a VM creation traverses, and how to trace one failed boot by request id](diagnostics/what-a-vm-creation-traverses-and-tracing-by-request-id.md) | nova, placement, neutron, glance, cinder, keystone, rabbitmq | not recorded ([help wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=diagnostics%2Fwhat-a-vm-creation-traverses-and-tracing-by-request-id.md&title=Release+for+diagnostics%2Fwhat-a-vm-creation-traverses-and-tracing-by-request-id.md)) | draft | book |
+| [The logs of one compute do not line up with the controllers. Its clock has drifted](diagnostics/compute-clock-skew.md) | nova, neutron, ntp | 2026.1 | lab-verified | lab run |
+| [Control plane down. What still works for running instances, and what does not](diagnostics/control-plane-down-what-still-works-for-instances.md) | nova, neutron, ovn, ovs, libvirt | 2026.1 | lab-verified | book, lab run |
+| [Every API call fails at once. Expired TLS certificates or inconsistent Keystone Fernet keys](diagnostics/expired-certificates-and-fernet-keys-break-every-api-call.md) | keystone, haproxy, rabbitmq, mariadb, memcached | 2026.1 | draft | book |
+| [VM creation fails platform-wide while instances keep running. Check the shared dependencies first](diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md) | nova, neutron, rabbitmq, mariadb, memcached, haproxy, keystone | 2026.1 | draft | book |
+| [What a VM creation traverses, and how to trace one failed boot by request id](diagnostics/what-a-vm-creation-traverses-and-tracing-by-request-id.md) | nova, placement, neutron, glance, cinder, keystone, rabbitmq | 2026.1 | lab-verified | book, lab run |
 
 ### Logs
 
 | Page | Components | Releases | Status | Source |
 |---|---|---|---|---|
-| [Where the OpenStack logs are, and how to read one log line](logs/where-openstack-logs-are-and-how-to-read-a-line.md) | nova, neutron, placement, keystone, glance, cinder, rabbitmq, mariadb, haproxy, ovs, ovn, libvirt | 2026.1 | draft | documentation |
+| [Where the OpenStack logs are, and how to read one log line](logs/where-openstack-logs-are-and-how-to-read-a-line.md) | nova, neutron, placement, keystone, glance, cinder, rabbitmq, mariadb, haproxy, ovs, ovn, libvirt | 2026.1 | lab-verified | documentation, lab run |
 | [Reading the Keystone logs, and the authentication lines every service writes (401, 503, Fernet)](logs/reading-keystone-and-auth-logs.md) | keystone, memcached, nova, neutron | 2026.1 | draft | documentation |
 | [Reading the Cinder logs. cinder-api, cinder-scheduler, cinder-volume, and os-brick on the compute](logs/reading-cinder-logs.md) | cinder, nova | 2026.1 | draft | documentation |
 | [Following one request, instance, port or volume through the logs of every service and host](logs/tracing-one-request-across-services-and-hosts.md) | nova, neutron, placement, cinder, glance, ovs, libvirt | 2026.1 | draft | documentation |
-| [Reading the MariaDB and Galera logs, and the oslo.db lines that go with them](logs/reading-mariadb-galera-logs.md) | mariadb, proxysql, haproxy, nova, neutron, keystone | 2026.1 | draft | documentation |
+| [Reading the MariaDB and Galera logs, and the oslo.db lines that go with them](logs/reading-mariadb-galera-logs.md) | mariadb, proxysql, haproxy, nova, neutron, keystone | 2026.1 | lab-verified | documentation, lab run |
 | [Reading the Glance logs, and the image lines in Nova's logs (boot, snapshot)](logs/reading-glance-logs.md) | glance, nova | 2026.1 | draft | documentation |
 | [Reading the Nova logs. What normal looks like, and what the common lines mean](logs/reading-nova-logs.md) | nova, placement, rabbitmq, libvirt | 2026.1 | draft | documentation |
-| [Reading the HAProxy, keepalived and memcached logs in front of the OpenStack APIs](logs/reading-haproxy-keepalived-memcached-logs.md) | haproxy, keepalived, proxysql, memcached, keystone | 2026.1 | draft | documentation |
+| [Reading the HAProxy, keepalived and memcached logs in front of the OpenStack APIs](logs/reading-haproxy-keepalived-memcached-logs.md) | haproxy, keepalived, proxysql, memcached, keystone | 2026.1 | lab-verified | documentation, lab run |
 | [Reading the Octavia logs. Health manager, amphora heartbeats, failovers and the worker](logs/reading-octavia-logs.md) | octavia, nova, neutron | 2026.1 | draft | documentation |
-| [Reading the RabbitMQ logs, and the oslo.messaging lines that go with them](logs/reading-rabbitmq-logs.md) | rabbitmq, nova, neutron, cinder | 2026.1 | draft | documentation |
+| [Reading the RabbitMQ logs, and the oslo.messaging lines that go with them](logs/reading-rabbitmq-logs.md) | rabbitmq, nova, neutron, cinder | 2026.1 | lab-verified | documentation, lab run |
 | [Reading the Placement logs, and the Placement lines in Nova's logs](logs/reading-placement-logs.md) | placement, nova | 2026.1 | draft | documentation |
 | [Reading the Heat logs. From a failed stack to the service that really failed](logs/reading-heat-logs.md) | heat, nova, neutron, cinder | 2026.1 | draft | documentation |
 | [Reading the Neutron logs with ML2/OVS](logs/reading-neutron-logs-ml2-ovs.md) | neutron, ovs, nova, rabbitmq | 2026.1 | draft | documentation |
 | [Reading the OVN logs with Neutron](logs/reading-ovn-logs.md) | ovn, neutron, ovs | 2026.1 | draft | documentation |
+| [Error messages: messaging and database. MessagingTimeout, AMQP connection and heartbeat lines, DBConnectionError](logs/error-messages-messaging-and-database.md) | rabbitmq, mariadb, proxysql, haproxy, nova, neutron, cinder | 2026.1 | draft | documentation |
+| [Error messages: scheduling. No valid host was found, Exceeded maximum number of retries](logs/error-messages-scheduling.md) | nova, placement | 2026.1 | draft | documentation |
+| [Reading the storage logs of a compute. iscsid, multipathd, NFS client messages and Ceph client (librbd) logs](logs/host-storage-logs-iscsi-multipath-nfs-rbd.md) | nova, cinder, iscsi, multipath, nfs, ceph | 2026.1 | draft | documentation |
+| [Reading the kernel log of a compute (dmesg, journalctl -k). OOM killer, KVM, links and bonds, MTU, disks, conntrack, hung tasks](logs/kernel-messages-on-computes.md) | nova, libvirt, qemu, ovs, linux | 2026.1 | draft | documentation |
+| [Reading the libvirt and QEMU logs of a compute, and the guest console log](logs/libvirt-and-qemu-logs.md) | nova, libvirt, qemu | 2026.1 | draft | documentation |
+| [Reading the Open vSwitch logs (ovs-vswitchd, ovsdb-server) and changing their levels with ovs-appctl](logs/open-vswitch-logs.md) | ovs, neutron | 2026.1 | draft | documentation |
+| [Reading the systemd journal and the container engine on an OpenStack host. Units, priorities, time ranges, restart loops](logs/systemd-journal-and-container-engine.md) | systemd, docker, podman, nova, neutron | 2026.1 | lab-verified | documentation, lab run |
+| [Reading the time synchronisation logs (chrony, systemd-timesyncd), and how clock skew shows in OpenStack logs](logs/time-sync-chrony-and-clock-skew.md) | chrony, systemd, nova, neutron, keystone | 2026.1 | draft | documentation |
 
 ### Recovery
 
 | Page | Components | Releases | Status | Source |
 |---|---|---|---|---|
-| [After a compute reboot, instances stay SHUTOFF or come back without network](recovery/after-a-compute-reboot-instances-shutoff-or-without-network.md) | nova, neutron, ovs, libvirt | 2026.1 | lab-verified | documentation |
-| [The API returns 503, an HAProxy backend is DOWN, or the VIP flaps or sits on two nodes](recovery/api-returns-503-haproxy-backend-down-or-vip-flapping.md) | haproxy, keepalived, keystone, nova, neutron | 2026.1 | draft | documentation |
+| [After a compute reboot, instances stay SHUTOFF or come back without network](recovery/after-a-compute-reboot-instances-shutoff-or-without-network.md) | nova, neutron, ovs, libvirt | 2026.1 | lab-verified | documentation, lab run |
+| [The API returns 503, an HAProxy backend is DOWN, or the VIP flaps or sits on two nodes](recovery/api-returns-503-haproxy-backend-down-or-vip-flapping.md) | haproxy, keepalived, keystone, nova, neutron | 2026.1 | lab-verified | documentation, lab run |
 | [Compute host unreachable, instances down. Fence before you evacuate](recovery/compute-host-failure-fence-before-evacuate.md) | nova, libvirt, cinder, ceph | 2026.1 | lab-verified | book, lab run |
-| [Requests fail with 401 for tokens that should be valid. Fernet keys differ between Keystone nodes, or a clock is off](recovery/keystone-401-for-every-request-fernet-keys-or-clock.md) | keystone, nova, neutron | 2026.1 | draft | documentation |
+| [Requests fail with 401 for tokens that should be valid. Fernet keys differ between Keystone nodes, or a clock is off](recovery/keystone-401-for-every-request-fernet-keys-or-clock.md) | keystone, nova, neutron | 2026.1 | lab-verified | documentation, lab run |
 | [Services fail on "Too many connections", "Max connect timeout" or "QueuePool limit". Database connections are exhausted](recovery/database-too-many-connections-or-pool-exhausted.md) | mariadb, proxysql, nova, neutron, keystone | 2026.1 | draft | documentation |
-| [Every API fails on database errors. The Galera cluster lost quorum, or stopped on every node](recovery/galera-cluster-lost-quorum-database-unavailable.md) | mariadb, galera, kolla-ansible, nova, neutron, keystone | 2026.1 | draft | documentation |
+| [Every API fails on database errors. The Galera cluster lost quorum, or stopped on every node](recovery/galera-cluster-lost-quorum-database-unavailable.md) | mariadb, galera, kolla-ansible, nova, neutron, keystone | 2026.1 | lab-verified | documentation, lab run |
 | [nova-compute is down and the compute refuses an SSH login, but the host is alive](recovery/nova-compute-down-host-alive-ssh-refused.md) | nova, libvirt, ssh | 2026.1 | lab-verified | lab run |
 | [nova-compute is down on a compute, but its instances are still running](recovery/nova-compute-down-instances-still-running.md) | nova, libvirt | 2026.1 | lab-verified | lab run |
-| [RPC timeouts in every service, computes reported down. RabbitMQ is partitioned, blocked by an alarm, or a node is missing](recovery/rabbitmq-partition-or-alarm-rpc-timeouts.md) | rabbitmq, oslo.messaging, kolla-ansible, nova, neutron, cinder | 2026.1 | draft | documentation |
-| [nova-conductor or nova-scheduler is down. What still works, what waits, what fails, and where failed builds go (cell0)](recovery/nova-conductor-or-scheduler-down-what-still-works.md) | nova, rabbitmq | 2026.1 | draft | documentation |
-| [Reopening provisioning after a control-plane incident. Stop the APIs, recover, verify, reopen](recovery/reopening-provisioning-after-control-plane-incident.md) | nova, neutron, rabbitmq, mariadb, haproxy | not recorded ([help wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=recovery%2Freopening-provisioning-after-control-plane-incident.md&title=Release+for+recovery%2Freopening-provisioning-after-control-plane-incident.md)) | draft | book |
+| [RPC timeouts in every service, computes reported down. RabbitMQ is partitioned, blocked by an alarm, or a node is missing](recovery/rabbitmq-partition-or-alarm-rpc-timeouts.md) | rabbitmq, oslo.messaging, kolla-ansible, nova, neutron, cinder | 2026.1 | lab-verified | documentation, lab run |
+| [nova-conductor or nova-scheduler is down. What still works, what waits, what fails, and where failed builds go (cell0)](recovery/nova-conductor-or-scheduler-down-what-still-works.md) | nova, rabbitmq | 2026.1 | lab-verified | documentation, lab run |
+| [Reopening provisioning after a control-plane incident. Stop the APIs, recover, verify, reopen](recovery/reopening-provisioning-after-control-plane-incident.md) | nova, neutron, rabbitmq, mariadb, haproxy | 2026.1 | draft | book |
 
 ## Pages wanted next
 
@@ -213,7 +233,8 @@ Candidate runbooks that almost every operator has met and that are not written y
 behind it; open a *Problem solved* issue if you have one.
 
 1. Live migration fails: pre-check errors, shared storage assumptions, CPU model mismatch.
-2. Floating IP does not answer: where to look between the router, the gateway and the security groups.
+2. Floating IP does not answer with ML2/OVN (the ML2/OVS case is in
+   [instance unreachable from outside](networking/instance-unreachable-from-outside.md)).
 
 ## Contributing
 
