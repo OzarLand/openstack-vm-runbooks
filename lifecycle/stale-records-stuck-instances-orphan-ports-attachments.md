@@ -106,7 +106,8 @@ cause; the clean-up is routine maintenance.
 
 ## Resolution
 
-Work with project tools in this order. Take a database backup before anything that touches the database directly.
+Work with project tools in this order. Take a database backup before anything that touches the database directly
+(with Kolla-Ansible: [backing up the MariaDB cluster](https://github.com/OzarLand/kolla-ansible-deployment-patterns/blob/main/operations/mariadb-backup-and-restore-with-mariabackup.md)).
 
 ### Instances: reset state, then delete through the API
 
@@ -114,13 +115,20 @@ Work with project tools in this order. Take a database backup before anything th
 > `--state active` on an instance whose domain does not run gives users a false picture; setting `--state error`
 > then deleting is the usual path for a truly dead instance.
 
+Truly dead instance (no domain on any host):
+
 ```bash
 openstack server set --state error --auto-approve <server-id>      # make it deletable
 openstack server delete <server-id>
-# Instance whose domain is actually running fine after a failed operation:
-openstack server set --state active --auto-approve <server-id>
 # python-openstackclient 10.x asks for confirmation without --auto-approve; without a terminal it does nothing.
 # An instance in BUILD can usually be deleted directly, without the reset.
+```
+
+Only for an instance whose domain is actually running fine after a failed operation (check `virsh list` on its host
+first), never as a second step after the delete above:
+
+```bash
+openstack server set --state active --auto-approve <server-id>
 ```
 
 If the delete hangs because the host is gone, Nova performs a local delete once the compute service is `down`; if
@@ -134,6 +142,11 @@ the service still reports `up` from a host that lost its storage, fix or fence t
 
 ```bash
 nova-manage placement audit --verbose
+```
+
+**Stop here and read the list.** Go on only for allocations whose consumer you have confirmed is gone:
+
+```bash
 nova-manage placement audit --verbose --delete
 nova-manage placement heal_allocations --verbose
 ```
@@ -173,9 +186,9 @@ openstack volume set --state available --detached <volume-id>
 
 ```bash
 nova-manage db archive_deleted_rows --until-complete --all-cells
-nova-manage db purge --all --all-cells --verbose          # or --before <date>
-# 2026.1: --all-cells with --verbose archives, then fails printing the summary
+# 2026.1: archive_deleted_rows with --all-cells and --verbose archives, then fails printing the summary
 # (ValueError: not enough values to unpack); leave out --verbose. Exit code 1 means rows were archived.
+nova-manage db purge --all --all-cells --verbose          # or --before <date>
 cinder-manage db purge <days>
 ```
 
