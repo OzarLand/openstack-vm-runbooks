@@ -124,10 +124,13 @@ openstack server migrate --live-migration --block-migration <server-id>
 openstack server migration list --server <server-id>
 openstack server show <server-id> -c status -c OS-EXT-STS:task_state -c OS-EXT-SRV-ATTR:host
 # Abort one that does not converge (migration id from the list above)
-openstack server migration abort <server-id> <migration-id>
-# Force completion with post-copy if enabled ([libvirt] live_migration_permit_post_copy = true)
-openstack server migration force complete <server-id> <migration-id>
+openstack --os-compute-api-version 2.24 server migration abort <server-id> <migration-id>
+# Force completion: pauses the instance until the rest of its memory is copied, or switches to post-copy
+# if it is enabled ([libvirt] live_migration_permit_post_copy = true). Agree the pause with the owner.
+openstack --os-compute-api-version 2.22 server migration force complete <server-id> <migration-id>
 ```
+
+See [live migration never completes](live-migration-never-completes-or-times-out.md) before forcing completion.
 
 ### Step 3: cold-migrate or restart the rest, as agreed with the owners
 
