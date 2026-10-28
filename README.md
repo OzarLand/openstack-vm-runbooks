@@ -28,7 +28,7 @@
 
 ---
 
-Part of [🏝️ OzarLand](https://github.com/OzarLand/ozarland), a collaborative knowledge-sharing space for OpenStack
+Part of [OzarLand](https://github.com/OzarLand/ozarland), a collaborative knowledge-sharing space for OpenStack
 operators. Share experiences, document solutions, learn from each other. No imposed tools, no single way of
 operating OpenStack.
 
