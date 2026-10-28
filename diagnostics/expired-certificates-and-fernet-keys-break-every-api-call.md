@@ -10,7 +10,7 @@ environment:
   network: any
   storage: any
   os: any
-risk: read-only
+risk: destructive
 confirmed_by:
   - { who: "agent:lab-reviewer", type: lab, release: "2026.1", deployment: kolla-ansible all-in-one, date: 2026-10-26, note: "Fernet part only, on a disposable lab: key set replaced, old tokens 401 once the memcached cache was cleared, fixed by restoring the set; certificate part not tested (no TLS), one Keystone node" }
 upstream_refs:
@@ -95,14 +95,34 @@ its own keys with `fernet_setup` instead of receiving the shared set is the othe
 
 ## What to do next
 
-This page is read-only. Fixing is a deployment-tool procedure: regenerate and distribute certificates, or
-distribute one consistent Fernet key set to every Keystone node and restart Keystone, with the tool you deployed
-with (Kolla-Ansible: `kolla-ansible certificates` then `reconfigure`; Fernet keys live in the `keystone_fernet_tokens`
-volume on each controller, and `kolla-ansible reconfigure -t keystone` re-runs the Keystone deployment that
-distributes them). That distribution copies the key set of the first host where `keystone_fernet` runs
-(`fernet-push.sh`, run once); make sure that host holds the right set before running it. After the fix, every
-service and agent that cached the old certificate may need a restart. For Fernet keys alone, the services did not
-need a restart on a lab: their cached service token got one 401, then they re-authenticated by themselves.
+The checks on this page are read-only. Fixing is a deployment-tool procedure: regenerate and distribute
+certificates, or distribute one consistent Fernet key set to every Keystone node, with the tool you deployed with.
+For Fernet keys, follow [requests fail with 401: Fernet keys differ between Keystone nodes](../recovery/keystone-401-for-every-request-fernet-keys-or-clock.md),
+which chooses the source node first and pushes from it.
+
+On Kolla-Ansible, Fernet keys live in the `keystone_fernet_tokens` volume on each controller, and
+`kolla-ansible reconfigure -t keystone` re-runs the Keystone deployment that distributes them: it copies the key set
+of the first host of the `keystone` group where `keystone_fernet` runs (`fernet-push.sh`, run once), not of a node
+you choose.
+
+> 🛑 **Destructive.** The push replaces the key set on every other Keystone node with that host's set (`rsync
+> --delete`): if that host has the wrong set, it replaces the good one everywhere, and every live token issued with
+> the lost keys gets a 401; users and scripts must authenticate again, and builds, attachments and migrations in
+> progress can fail. It also re-renders the Keystone configuration and runs the Keystone bootstrap, so it can
+> restart the `keystone`, `keystone_fernet` and `keystone_ssh` containers, with failed requests while they restart.
+> Precondition: you have compared the key sets of every node and the first host of the group holds the right one;
+> a quiet window; every node's key directory saved first. There is no real undo: restoring the saved sets brings
+> the divergence back.
+
+```bash
+kolla-ansible reconfigure -i <inventory> -t keystone
+```
+
+Keystone reads its key repository each time it encrypts or decrypts a token, so a new key set needs no Keystone
+restart. For certificates on Kolla-Ansible, `kolla-ansible certificates` then `reconfigure`; after the fix, every
+service and agent that cached the old certificate may need a restart *(certificate part not run on the lab)*. For
+Fernet keys alone, the services did not need a restart on a lab: their cached service token got one 401, then they
+re-authenticated by themselves.
 
 ## Prevention, which is the actual runbook
 
