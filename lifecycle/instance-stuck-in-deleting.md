@@ -187,9 +187,14 @@ task state, then delete again (the 🛑 above applies):
 > the previous step applies to it.
 
 ```bash
-openstack server set --state error <server-id>
+openstack server set --state error <server-id>     # add --auto-approve with python-openstackclient 10.5.0, see below
 openstack server delete <server-id>
 ```
+
+python-openstackclient 10.5.0 asks `Do you wish to continue? [y/n]` before `server set --state` and `--auto-approve`
+skips the question; without a terminal it exits without changing the state (seen on two labs, once with exit code
+1). Whether earlier clients (9.0.0 on other labs) prompt or accept `--auto-approve` is not recorded here: check
+`openstack server set --help`.
 
 ### For cause 4: make sure the host is down, then let Nova delete locally
 

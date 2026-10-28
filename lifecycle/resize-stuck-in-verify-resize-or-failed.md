@@ -242,9 +242,14 @@ If the instance is still in a `RESIZE` task state, the reboot is refused; clear 
 > the compute. Undo: `openstack server set --state error <server-id>`.
 
 ```bash
-openstack server set --state active <server-id>
+openstack server set --state active <server-id>     # add --auto-approve with python-openstackclient 10.5.0, see below
 openstack server reboot --hard <server-id>
 ```
+
+python-openstackclient 10.5.0 asks `Do you wish to continue? [y/n]` before `server set --state` and `--auto-approve`
+skips the question; without a terminal it exits without changing the state (seen on two labs, once with exit code
+1). Whether earlier clients (9.0.0 on other labs) prompt or accept `--auto-approve` is not recorded here: check
+`openstack server set --help`.
 
 When the failure came after the disk copy (in `finish_resize`), the source compute keeps the previous copy as
 `<instances-path>/<server-id>_resize`. Leave it until the instance runs and its owner has checked it; it is the only

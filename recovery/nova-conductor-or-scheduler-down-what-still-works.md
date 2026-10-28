@@ -224,8 +224,12 @@ the state is an admin action (`os_compute_api:os-admin-actions:reset_state` is a
 On the lab, a hard reboot was refused with the `task_state` at `powering-on` (`409 ... Cannot 'reboot' instance
 <server-id> while it is in task_state powering-on`): reset the state first. A hard reboot is accepted only with no
 `task_state` or one of `task_states.ALLOW_REBOOT` (`rebooting`, `reboot_pending`, `reboot_started`, `resuming`,
-`rebooting_hard`, `unpausing`, `pausing`, `suspending`). `openstack server set --state` asks for confirmation
-(python-openstackclient 10.5.0); `--auto-approve` skips the question, and without a terminal the command fails.
+`rebooting_hard`, `unpausing`, `pausing`, `suspending`).
+
+python-openstackclient 10.5.0 asks `Do you wish to continue? [y/n]` before `server set --state` and `--auto-approve`
+skips the question; without a terminal it exits without changing the state (seen on two labs, once with exit code
+1). Whether earlier clients (9.0.0 on other labs) prompt or accept `--auto-approve` is not recorded here: check
+`openstack server set --help`.
 
 > ⚠️ **State-changing.** Changes the instance record only (its `vm_state`, and clears `task_state`); nothing happens
 > to the guest. Precondition: the conductor is back and the power state has been checked as above. Undo: set the

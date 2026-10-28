@@ -120,9 +120,13 @@ Truly dead instance (no domain on any host):
 ```bash
 openstack server set --state error --auto-approve <server-id>      # make it deletable
 openstack server delete <server-id>
-# python-openstackclient 10.x asks for confirmation without --auto-approve; without a terminal it does nothing.
 # An instance in BUILD can usually be deleted directly, without the reset.
 ```
+
+python-openstackclient 10.5.0 asks `Do you wish to continue? [y/n]` before `server set --state` and `--auto-approve`
+skips the question; without a terminal it exits without changing the state (seen on two labs, once with exit code
+1). Whether earlier clients (9.0.0 on other labs) prompt or accept `--auto-approve` is not recorded here: check
+`openstack server set --help`.
 
 Only for an instance whose domain is actually running fine after a failed operation (check `virsh list` on its host
 first), never as a second step after the delete above:
