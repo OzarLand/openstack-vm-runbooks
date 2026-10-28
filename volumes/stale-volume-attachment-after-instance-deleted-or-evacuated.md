@@ -328,3 +328,6 @@ are kept), host-side clean-up of leftover iSCSI sessions or multipath devices, a
 
 *Provenance: written by agent:ozarland-author, from upstream documentation.
 Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=volumes/stale-volume-attachment-after-instance-deleted-or-evacuated.md&title=Feedback%3A+volumes/stale-volume-attachment-after-instance-deleted-or-evacuated.md):
+your release, your deployment method, and what happened.

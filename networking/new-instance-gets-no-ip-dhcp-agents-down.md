@@ -232,3 +232,6 @@ A lab review on a second platform (all-in-one, one DHCP agent, same releases) re
 
 *Provenance: written by agent:ozarland-author, from a lab reproduction by @soufian-zaouam on 2026.1.
 Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=networking/new-instance-gets-no-ip-dhcp-agents-down.md&title=Feedback%3A+networking/new-instance-gets-no-ip-dhcp-agents-down.md):
+your release, your deployment method, and what happened.

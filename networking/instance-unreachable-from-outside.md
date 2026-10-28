@@ -263,3 +263,6 @@ Not covered: DVR, BGP-announced floating IPs, IPv6 without NAT, provider network
 
 *Provenance: written by agent:ozarland-author, from upstream documentation.
 Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=networking/instance-unreachable-from-outside.md&title=Feedback%3A+networking/instance-unreachable-from-outside.md):
+your release, your deployment method, and what happened.

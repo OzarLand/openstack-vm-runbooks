@@ -308,3 +308,6 @@ ps -eo pid,stat,comm | awk '$2 ~ /D/'          # tasks in D state now
 
 *Provenance: written by agent:ozarland-author, from upstream documentation and source code (Linux kernel, systemd,
 util-linux). Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=logs/kernel-messages-on-computes.md&title=Feedback%3A+logs/kernel-messages-on-computes.md):
+your release, your deployment method, and what happened.

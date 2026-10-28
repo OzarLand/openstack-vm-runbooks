@@ -240,3 +240,6 @@ Kolla-Ansible, a Galera recovery, HAProxy `MAINT`, OVN, Mnesia.
 
 *Provenance: written by agent:ozarland-author, from the book *OpenStack, the Day After Tomorrow*.
 Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=recovery/reopening-provisioning-after-control-plane-incident.md&title=Feedback%3A+recovery/reopening-provisioning-after-control-plane-incident.md):
+your release, your deployment method, and what happened.

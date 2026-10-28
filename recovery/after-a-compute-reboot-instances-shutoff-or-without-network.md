@@ -245,3 +245,6 @@ whose disks are on Ceph, an unplanned host failure where the instances must be e
 
 *Provenance: written by agent:ozarland-author, from upstream documentation.
 Reviewed in its pull request (see the page history). Checked by a human operator: not yet.*
+
+**Worked for you, or not?** [Tell us in one line](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml&page=recovery/after-a-compute-reboot-instances-shutoff-or-without-network.md&title=Feedback%3A+recovery/after-a-compute-reboot-instances-shutoff-or-without-network.md):
+your release, your deployment method, and what happened.
