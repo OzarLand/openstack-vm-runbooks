@@ -65,17 +65,17 @@ Everything an operator does when an instance misbehaves, from the first symptom 
 |---|---|
 | Instances stuck in an unexpected state (`BUILD`, `deleting`, `resizing`, `migrating`, `ERROR`, `SHUTOFF` when it should run, task states that never clear) | Deploying OpenStack: see [kolla-ansible-deployment-patterns](https://github.com/OzarLand/kolla-ansible-deployment-patterns) |
 | Boot and scheduling failures: `No valid host`, Placement allocation problems, image or flavor issues, boot from volume failures, console not available | Upgrade campaigns: planned for a future `openstack-upgrade-playbooks` repository |
-| Create, delete and migration errors: live and cold migration, resize, evacuation, shelve and unshelve | Storage-backend-only problems |
+| Create, delete and migration errors: live and cold migration, resize, evacuation. Shelve and unshelve: no page yet, [wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=problem-solved.yml) | Storage-backend-only problems |
 | Instance networking: no DHCP lease, no metadata, no floating IP connectivity, security group surprises, MTU symptoms as seen from the instance, port binding failures | Control-plane failures (database, message queue, load balancer, Keystone), except where they affect instances: see `recovery/` and `logs/` |
-| Volumes: attach and detach failures, stale attachments, volumes stuck `attaching`/`detaching`/`in-use`, boot volume problems, multi-attach | |
+| Volumes: attach and detach failures, stale attachments, volumes stuck `attaching`/`detaching`/`in-use`, boot volume problems. Multi-attach: no page yet, [wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=problem-solved.yml) | |
 | Diagnostics across Nova, Neutron, Glance, Cinder and Placement with the OpenStack CLI, service logs and the hypervisor (libvirt, QEMU) | |
-| Recovery after an incident (compute node loss, storage outage, control plane outage) as it affects instances, and the verifications to run afterwards | |
+| Recovery after an incident (compute node loss, control plane outage) as it affects instances, and the verifications to run afterwards. Storage outage: no page yet, [wanted](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=problem-solved.yml) | |
 
 ## 🗂️ How content is organised
 
 | Folder | What it holds |
 |---|---|
-| 🔄 `lifecycle/` | Stuck states, create, delete, resize, shelve |
+| 🔄 `lifecycle/` | Stuck states, create, delete, resize |
 | 📅 `scheduling/` | No valid host, Placement, flavors, images, boot from volume |
 | 🚚 `migration/` | Live and cold migration, moving instances off a host for maintenance |
 | 🌐 `networking/` | Instance connectivity, DHCP, metadata, floating IPs, security groups, port binding |
@@ -139,7 +139,7 @@ flowchart LR
 > [!WARNING]
 > Nothing here has been confirmed on a production platform by an operator other than the author. Lab verification
 > so far was done by OzarLand's AI lab agent, on OpenStack 2026.1 deployed with Kolla-Ansible 22.2.0 (all-in-one,
-> or 3 controllers and 2 computes), mostly with ML2/OVS; OVN, Ceph and other deployment tools are largely untested.
+> 1 controller and 2 computes, or 3 controllers and 2 computes), mostly with ML2/OVS; OVN, Ceph and other deployment tools are largely untested.
 > A `lab-verified` page can still contain steps that were not run: its `confirmed_by` note and its *Validity and
 > limits* section say which. Read every page as a well-documented lead, not as a proven procedure, and read its
 > read-only checks before any ⚠️ or 🛑 step.
@@ -335,6 +335,10 @@ behind it; open a *Problem solved* issue if you have one.
 1. Live migration fails: pre-check errors, shared storage assumptions, CPU model mismatch.
 2. Floating IP does not answer with ML2/OVN (the ML2/OVS case is in
    [instance unreachable from outside](networking/instance-unreachable-from-outside.md)).
+3. Shelve and unshelve: instance stuck in `SHELVED_OFFLOADED`, unshelve fails or lands without its network.
+4. Multi-attach volumes: attach refused, or a second instance does not see the volume.
+5. Storage outage: what happens to running instances when the volume or image backend goes away, and how to
+   recover them afterwards.
 
 ## 🤝 Contributing
 

@@ -344,7 +344,7 @@ Both are deployment settings in `/etc/kolla/globals.yml`:
 
 ```yaml
 keepalived_traffic_mode: "unicast"        # cause 6, if multicast cannot be fixed
-keepalived_virtual_router_id: "<unused-id>"   # cause 7, 0 to 255, unique on the layer 2 segment
+keepalived_virtual_router_id: "<unused-id>"   # cause 7, 1 to 255, unique on the layer 2 segment
 ```
 
 > ⚠️ **State-changing.** Rewrites `keepalived.conf` and restarts keepalived on every load balancer node. With a new

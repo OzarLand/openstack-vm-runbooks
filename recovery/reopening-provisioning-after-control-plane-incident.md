@@ -17,7 +17,7 @@ upstream_refs:
   - https://galeracluster.com/library/documentation/crash-recovery.html
   - https://docs.openstack.org/kolla-ansible/latest/user/operating-kolla.html
 authored_by: agent:ozarland-author
-last_verified: 2026-10-18
+last_verified: 2026-10-27
 ---
 
 # Reopening provisioning after a control-plane incident. Stop the APIs, recover, verify, reopen
@@ -185,7 +185,8 @@ boot from volume), reachable through the internal VIP: Nova reaches Glance and N
 rabbitmqctl cluster_status                                   # one cluster, no partitions, no alarms
 rabbitmqctl list_queues name messages consumers | awk '$3==0 && $2>0'   # empty: every queue has consumers
 mysql -e "SHOW STATUS LIKE 'wsrep_cluster_size'; SHOW STATUS LIKE 'wsrep_cluster_status';"
-#    Kolla-Ansible: sudo docker exec mariadb mariadb -uroot -p<database_password> -e "..." (no mysql in the image)
+#    Kolla-Ansible: sudo docker exec -it mariadb mariadb -uroot -p -e "..." (no mysql in the image; -p alone prompts
+#    for database_password from /etc/kolla/passwords.yml, so it stays out of the process list and the history)
 
 # 2. Every compute service and network agent reporting again. These need nova-api and neutron-server (see below);
 #    read the output: with the API stopped, the command prints a 503 and grep still prints 0.

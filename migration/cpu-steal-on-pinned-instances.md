@@ -54,6 +54,7 @@ On the compute host running the instance:
 virsh vcpupin <instance-name>              # instance-name is OS-EXT-SRV-ATTR:instance_name, e.g. instance-0000abcd
 virsh emulatorpin <instance-name>
 virsh dumpxml <instance-name> | sed -n '/<cputune>/,/<\/cputune>/p'
+#    Kolla-Ansible: virsh runs in the libvirt container, e.g. sudo docker exec nova_libvirt virsh vcpupin <instance-name>
 
 # 2. What else runs on those CPUs
 ps -eLo pid,tid,psr,comm | awk '$3==<host-cpu>'      # for each pinned host CPU
@@ -132,7 +133,7 @@ openstack server resize --flavor <new-flavor> <server>   # then confirm the resi
 # Inside the guest, over a representative period
 vmstat 5 12            # st column stays at 0
 # On the host
-virsh vcpupin <instance-name>; virsh emulatorpin <instance-name>
+virsh vcpupin <instance-name>; virsh emulatorpin <instance-name>   # Kolla-Ansible: sudo docker exec nova_libvirt virsh ...
 ps -eLo psr,comm | awk '$1==<pinned-cpu>' | sort | uniq -c
 # expected: the instance's vCPU threads (CPU n/KVM) plus the per-CPU kernel threads that always exist on every
 # CPU (ksoftirqd/N, migration/N, cpuhp/N, kworker/N); no other process or daemon
