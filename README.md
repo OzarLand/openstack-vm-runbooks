@@ -1,62 +1,114 @@
 [← OzarLand home](https://github.com/OzarLand/ozarland)
 
-# openstack-vm-runbooks
+<div align="center">
+
+# 🔧 openstack-vm-runbooks
 
 **Community runbooks for diagnosing and resolving virtual machine problems in OpenStack.**
 
-Part of [OzarLand](https://github.com/OzarLand/ozarland), a collaborative knowledge-sharing space for OpenStack
-operators. Share experiences, document solutions, learn from each other. No imposed tools, no single way of
-operating OpenStack. Practise these runbooks on a disposable lab with
-[openstack-quick-lab](https://github.com/OzarLand/openstack-quick-lab); the
-[openstack-operator-skills](https://github.com/OzarLand/openstack-operator-skills) Claude skills draw on them and keep
-their status attached. A correction belongs here first.
+<p>
+  <img src="https://img.shields.io/badge/pages-72-informational.svg" alt="72 pages">
+  <img src="https://img.shields.io/badge/lab--verified-44-16a34a.svg" alt="44 pages lab-verified">
+  <img src="https://img.shields.io/badge/draft-28-9ca3af.svg" alt="28 pages draft">
+  <img src="https://img.shields.io/badge/validated-0-2563eb.svg" alt="0 pages validated">
+  <img src="https://img.shields.io/badge/OpenStack-2026.1-ED1944.svg" alt="OpenStack 2026.1">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
+</p>
 
-## Scope
+<p>
+  <a href="#-start-from-what-you-see"><b>Start from a symptom</b></a> ·
+  <a href="#index"><b>Index</b></a> ·
+  <a href="#-how-much-each-page-was-checked"><b>Status</b></a> ·
+  <a href="#-contributing"><b>Contribute</b></a>
+</p>
+
+</div>
+
+---
+
+Part of [🏝️ OzarLand](https://github.com/OzarLand/ozarland), a collaborative knowledge-sharing space for OpenStack
+operators. Share experiences, document solutions, learn from each other. No imposed tools, no single way of
+operating OpenStack.
+
+- 🧪 Practise these runbooks on a disposable lab with
+  [openstack-quick-lab](https://github.com/OzarLand/openstack-quick-lab).
+- 🤖 The [openstack-operator-skills](https://github.com/OzarLand/openstack-operator-skills) Claude skills draw on
+  them and keep their status attached. A correction belongs here first.
+
+## 🧭 How a runbook works
+
+Each runbook follows the shared [runbook structure](https://github.com/OzarLand/ozarland/blob/main/docs/conventions/runbook-structure.md):
+
+```mermaid
+flowchart LR
+    S["👀 Symptom<br/>and impact"] --> Q["🔍 Quick checks<br/><i>read-only</i>"]
+    Q --> D["🧩 Diagnosis<br/>and possible causes"]
+    D --> R["🛠️ Resolution<br/><i>⚠️ changes state<br/>🛑 destructive</i>"]
+    R --> V["✅ Verification"]
+    V --> L["📏 Validity<br/>and limits"]
+    classDef read fill:#dcfce7,stroke:#16a34a,color:#14532d
+    classDef change fill:#fef3c7,stroke:#d97706,color:#78350f
+    classDef neutral fill:#f3f4f6,stroke:#9ca3af,color:#111827
+    class S,D,L neutral
+    class Q,V read
+    class R change
+```
+
+State-changing commands carry ⚠️, destructive ones carry 🛑 with what can be lost and what to check first.
+
+## 🎯 Scope
 
 Everything an operator does when an instance misbehaves, from the first symptom to the post-fix checks.
 
-**In scope:**
+| ✅ In scope | ❌ Out of scope |
+|---|---|
+| Instances stuck in an unexpected state (`BUILD`, `deleting`, `resizing`, `migrating`, `ERROR`, `SHUTOFF` when it should run, task states that never clear) | Deploying OpenStack: see [kolla-ansible-deployment-patterns](https://github.com/OzarLand/kolla-ansible-deployment-patterns) |
+| Boot and scheduling failures: `No valid host`, Placement allocation problems, image or flavor issues, boot from volume failures, console not available | Upgrade campaigns: planned for a future `openstack-upgrade-playbooks` repository |
+| Create, delete and migration errors: live and cold migration, resize, evacuation, shelve and unshelve | Storage-backend-only problems |
+| Instance networking: no DHCP lease, no metadata, no floating IP connectivity, security group surprises, MTU symptoms as seen from the instance, port binding failures | Control-plane failures (database, message queue, load balancer, Keystone), except where they affect instances: see `recovery/` and `logs/` |
+| Volumes: attach and detach failures, stale attachments, volumes stuck `attaching`/`detaching`/`in-use`, boot volume problems, multi-attach | |
+| Diagnostics across Nova, Neutron, Glance, Cinder and Placement with the OpenStack CLI, service logs and the hypervisor (libvirt, QEMU) | |
+| Recovery after an incident (compute node loss, storage outage, control plane outage) as it affects instances, and the verifications to run afterwards | |
 
-- Instances stuck in an unexpected state (`BUILD`, `deleting`, `resizing`, `migrating`, `ERROR`, `SHUTOFF` when
-  it should run, task states that never clear).
-- Boot and scheduling failures: `No valid host`, Placement allocation problems, image or flavor issues, boot from
-  volume failures, console not available.
-- Create, delete and migration errors: live and cold migration, resize, evacuation, shelve and unshelve.
-- Instance networking: no DHCP lease, no metadata, no floating IP connectivity, security group surprises, MTU
-  symptoms as seen from the instance, port binding failures.
-- Volumes: attach and detach failures, stale attachments, volumes stuck `attaching`/`detaching`/`in-use`, boot
-  volume problems, multi-attach.
-- Diagnostics across Nova, Neutron, Glance, Cinder and Placement with the OpenStack CLI, service logs and the
-  hypervisor (libvirt, QEMU).
-- Recovery after an incident (compute node loss, storage outage, control plane outage) as it affects instances,
-  and the verifications to run afterwards.
+## 🗂️ How content is organised
 
-**Out of scope:** deploying OpenStack (see
-[kolla-ansible-deployment-patterns](https://github.com/OzarLand/kolla-ansible-deployment-patterns)), upgrade
-campaigns (planned for a future `openstack-upgrade-playbooks` repository), and storage-backend-only problems.
-Control-plane failures (database, message queue, load balancer, Keystone) are covered where they affect instances:
-see `recovery/` and `logs/`.
+| Folder | What it holds |
+|---|---|
+| 🔄 `lifecycle/` | Stuck states, create, delete, resize, shelve |
+| 📅 `scheduling/` | No valid host, Placement, flavors, images, boot from volume |
+| 🚚 `migration/` | Live and cold migration, moving instances off a host for maintenance |
+| 🌐 `networking/` | Instance connectivity, DHCP, metadata, floating IPs, security groups, port binding |
+| 💾 `volumes/` | Attach, detach, stale attachments, boot volumes |
+| 🩺 `diagnostics/` | Cross-cutting investigations: what a request traverses, platform-wide failures, clock skew |
+| 📜 `logs/` | Where the logs are and how to read them: services, infrastructure, hypervisor (see [logs/README.md](logs/README.md)) |
+| 🚑 `recovery/` | After a compute, storage or control plane incident, evacuation; post-incident checks |
+| 📄 `templates/` | Runbook template |
 
-## How content is organised
+A page written for one deployment method is welcome; variants for other methods are added by whoever has them.
 
-```text
-lifecycle/        stuck states, create, delete, resize, shelve
-scheduling/       No valid host, Placement, flavors, images, boot from volume
-migration/        live and cold migration, moving instances off a host for maintenance
-networking/       instance connectivity, DHCP, metadata, floating IPs, security groups, port binding
-volumes/          attach, detach, stale attachments, boot volumes
-diagnostics/      cross-cutting investigations: what a request traverses, platform-wide failures, clock skew
-logs/             where the logs are and how to read them: services, infrastructure, hypervisor (see logs/README.md)
-recovery/         after a compute, storage or control plane incident, evacuation; post-incident checks
-templates/        runbook template
-```
-
-Each runbook follows the shared [runbook structure](https://github.com/OzarLand/ozarland/blob/main/docs/conventions/runbook-structure.md):
-symptom, impact, quick checks, diagnosis, possible causes, resolution, verification, validity and limits.
-State-changing commands carry ⚠️, destructive ones carry 🛑 with what can be lost and what to check first.
+## 🔬 How much each page was checked
 
 A runbook's `status` says how much it has been verified (see the
 [knowledge lifecycle](https://github.com/OzarLand/ozarland/blob/main/docs/knowledge-lifecycle.md)):
+
+```mermaid
+flowchart LR
+    D["📝 draft<br/><i>commands not run by<br/>anyone but the author</i>"] --> L["🧪 lab-verified<br/><i>run on a lab by someone<br/>else, behaved as written</i>"]
+    L --> V["✅ validated<br/><i>confirmed by a human operator<br/>on a real platform</i>"]
+    L -. "outdated or<br/>narrow conditions" .-> E["⚠️ experimental"]
+    V -.-> E
+    classDef grey fill:#f3f4f6,stroke:#9ca3af,color:#111827
+    classDef green fill:#dcfce7,stroke:#16a34a,color:#14532d
+    classDef blue fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+    classDef amber fill:#fef3c7,stroke:#d97706,color:#78350f
+    class D grey
+    class L green
+    class V blue
+    class E amber
+```
+
+<details>
+<summary><b>The four statuses, word for word</b></summary>
 
 | Status | What it means |
 |---|---|
@@ -65,17 +117,32 @@ A runbook's `status` says how much it has been verified (see the
 | `validated` | Confirmed by a human operator, other than the author, on a real platform. |
 | `experimental` | Possibly outdated, or confirmed only under narrow conditions. |
 
+</details>
+
 **Where things stand (2026-10-28):** 72 pages, 44 `lab-verified`, 28 `draft`, none `validated` or `experimental`.
-Nothing here has been confirmed on a production platform by an operator other than the author. Lab verification so
-far was done by OzarLand's AI lab agent, on OpenStack 2026.1 deployed with Kolla-Ansible 22.2.0 (all-in-one, or
-3 controllers and 2 computes), mostly with ML2/OVS; OVN, Ceph and other deployment tools are largely untested. A
-`lab-verified` page can still contain steps that were not run: its `confirmed_by` note and its *Validity and limits*
-section say which. Read every page as a well-documented lead, not as a proven procedure, and read its
-read-only checks before any ⚠️ or 🛑 step.
 
-A page written for one deployment method is welcome; variants for other methods are added by whoever has them.
+| Folder | Progress | Lab-verified |
+|---|---|---:|
+| 🔄 Lifecycle | 🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜ | 8 / 10 |
+| 📅 Scheduling | 🟩🟩🟩🟩🟩🟩🟩🟩🟩⬜ | 6 / 7 |
+| 🚚 Migration | 🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜ | 2 / 3 |
+| 🌐 Networking | 🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜ | 7 / 9 |
+| 💾 Volumes | 🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜ | 4 / 5 |
+| 🩺 Diagnostics | 🟩🟩🟩🟩🟩🟩⬜⬜⬜⬜ | 3 / 5 |
+| 📜 Logs | 🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜ | 5 / 22 |
+| 🚑 Recovery | 🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜ | 9 / 11 |
 
-## Start from what you see
+<sub>🟩 lab-verified · ⬜ draft · one square is about 10 % of the folder's pages</sub>
+
+> [!WARNING]
+> Nothing here has been confirmed on a production platform by an operator other than the author. Lab verification
+> so far was done by OzarLand's AI lab agent, on OpenStack 2026.1 deployed with Kolla-Ansible 22.2.0 (all-in-one,
+> or 3 controllers and 2 computes), mostly with ML2/OVS; OVN, Ceph and other deployment tools are largely untested.
+> A `lab-verified` page can still contain steps that were not run: its `confirmed_by` note and its *Validity and
+> limits* section say which. Read every page as a well-documented lead, not as a proven procedure, and read its
+> read-only checks before any ⚠️ or 🛑 step.
+
+## 🚦 Start from what you see
 
 | You see | Start with |
 |---|---|
@@ -112,10 +179,11 @@ A page written for one deployment method is welcome; variants for other methods 
 
 ## Index
 
-Source: **book** (*OpenStack, the Day After Tomorrow*, the maintainer's book), **lab run** (observed on a
+Click a category to open it. Source: **book** (*OpenStack, the Day After Tomorrow*, the maintainer's book), **lab run** (observed on a
 lab), **documentation** (upstream documentation and source), **production incident**.
 
-### Lifecycle
+<details>
+<summary><b>🔄 Lifecycle</b></summary>
 
 | Page | Components | Releases | Status | Source |
 |---|---|---|---|---|
@@ -130,7 +198,11 @@ lab), **documentation** (upstream documentation and source), **production incide
 | [Stale records. Instances stuck in BUILD, ERROR or deleting, orphan ports and attachments, phantom allocations](lifecycle/stale-records-stuck-instances-orphan-ports-attachments.md) | nova, placement, neutron, cinder, mariadb | 2026.1 | lab-verified | book, lab run |
 | [Instance snapshot never finishes. Task state image_pending_upload or image_uploading, image queued or saving](lifecycle/snapshot-stuck-in-image-uploading.md) | nova, glance, libvirt, ceph | 2026.1 | lab-verified | documentation, lab run |
 
-### Scheduling
+</details>
+
+
+<details>
+<summary><b>📅 Scheduling</b></summary>
 
 | Page | Components | Releases | Status | Source |
 |---|---|---|---|---|
@@ -142,7 +214,11 @@ lab), **documentation** (upstream documentation and source), **production incide
 | [A compute was renamed, reinstalled or re-added. nova-compute refuses to start, or gets no resource provider](scheduling/compute-renamed-or-re-registered-resource-provider-conflict.md) | nova, placement | 2026.1 | draft | documentation |
 | [Placement allocations do not match the instances. Compute looks full or empty, audit and heal](scheduling/placement-allocations-out-of-sync-audit-and-heal.md) | nova, placement | 2026.1 | lab-verified | documentation, lab run |
 
-### Migration
+</details>
+
+
+<details>
+<summary><b>🚚 Migration</b></summary>
 
 | Page | Components | Releases | Status | Source |
 |---|---|---|---|---|
@@ -150,7 +226,11 @@ lab), **documentation** (upstream documentation and source), **production incide
 | [Live migration runs for a long time, then is aborted. The instance writes memory faster than it can be copied](migration/live-migration-never-completes-or-times-out.md) | nova, libvirt, qemu | 2026.1 | draft | documentation |
 | [Moving instances off a compute host for planned maintenance (patching, reboot, hardware)](migration/moving-instances-off-a-host-for-maintenance.md) | nova, libvirt, qemu | 2026.1 | lab-verified | book, lab run |
 
-### Networking
+</details>
+
+
+<details>
+<summary><b>🌐 Networking</b></summary>
 
 | Page | Components | Releases | Status | Source |
 |---|---|---|---|---|
@@ -164,7 +244,11 @@ lab), **documentation** (upstream documentation and source), **production incide
 | [A security group rule has no effect. Traffic it allows is still blocked, or traffic it should block still passes](networking/security-group-rules-not-applied.md) | neutron, ovs, ovn, iptables | 2026.1 | draft | documentation |
 | [Instances of one compute answer ping, but large transfers stall](networking/tunnel-mtu-mismatch-large-packets-dropped.md) | neutron, ovs | 2026.1 | lab-verified | lab run |
 
-### Volumes
+</details>
+
+
+<details>
+<summary><b>💾 Volumes</b></summary>
 
 | Page | Components | Releases | Status | Source |
 |---|---|---|---|---|
@@ -174,7 +258,11 @@ lab), **documentation** (upstream documentation and source), **production incide
 | [Volume stuck in creating, or in error right after create](volumes/volume-stuck-in-creating-or-error-after-create.md) | cinder, glance, rabbitmq | 2026.1 | lab-verified | documentation, lab run |
 | [Volume stuck in deleting, in error_deleting, or back to available after a delete](volumes/volume-stuck-in-deleting-or-error-deleting.md) | cinder, ceph, rabbitmq | 2026.1 | lab-verified | documentation, lab run |
 
-### Diagnostics
+</details>
+
+
+<details>
+<summary><b>🩺 Diagnostics</b></summary>
 
 | Page | Components | Releases | Status | Source |
 |---|---|---|---|---|
@@ -184,7 +272,11 @@ lab), **documentation** (upstream documentation and source), **production incide
 | [VM creation fails platform-wide while instances keep running. Check the shared dependencies first](diagnostics/vm-creation-fails-platform-wide-check-shared-dependencies.md) | nova, neutron, rabbitmq, mariadb, memcached, haproxy, keystone | 2026.1 | draft | book |
 | [What a VM creation traverses, and how to trace one failed boot by request id](diagnostics/what-a-vm-creation-traverses-and-tracing-by-request-id.md) | nova, placement, neutron, glance, cinder, keystone, rabbitmq | 2026.1 | lab-verified | book, lab run |
 
-### Logs
+</details>
+
+
+<details>
+<summary><b>📜 Logs</b></summary>
 
 | Page | Components | Releases | Status | Source |
 |---|---|---|---|---|
@@ -211,7 +303,11 @@ lab), **documentation** (upstream documentation and source), **production incide
 | [Reading the systemd journal and the container engine on an OpenStack host. Units, priorities, time ranges, restart loops](logs/systemd-journal-and-container-engine.md) | systemd, docker, podman, nova, neutron | 2026.1 | lab-verified | documentation, lab run |
 | [Reading the time synchronisation logs (chrony, systemd-timesyncd), and how clock skew shows in OpenStack logs](logs/time-sync-chrony-and-clock-skew.md) | chrony, systemd, nova, neutron, keystone | 2026.1 | draft | documentation |
 
-### Recovery
+</details>
+
+
+<details>
+<summary><b>🚑 Recovery</b></summary>
 
 | Page | Components | Releases | Status | Source |
 |---|---|---|---|---|
@@ -227,7 +323,9 @@ lab), **documentation** (upstream documentation and source), **production incide
 | [nova-conductor or nova-scheduler is down. What still works, what waits, what fails, and where failed builds go (cell0)](recovery/nova-conductor-or-scheduler-down-what-still-works.md) | nova, rabbitmq | 2026.1 | lab-verified | documentation, lab run |
 | [Reopening provisioning after a control-plane incident. Stop the APIs, recover, verify, reopen](recovery/reopening-provisioning-after-control-plane-incident.md) | nova, neutron, rabbitmq, mariadb, haproxy | 2026.1 | draft | book |
 
-## Pages wanted next
+</details>
+
+## 📝 Pages wanted next
 
 Candidate runbooks that almost every operator has met and that are not written yet. Each needs a real occurrence
 behind it; open a *Problem solved* issue if you have one.
@@ -236,22 +334,20 @@ behind it; open a *Problem solved* issue if you have one.
 2. Floating IP does not answer with ML2/OVN (the ML2/OVS case is in
    [instance unreachable from outside](networking/instance-unreachable-from-outside.md)).
 
-## Contributing
+## 🤝 Contributing
 
-- **Ask a question:** [open a Q&A discussion](https://github.com/OzarLand/ozarland/discussions/new?category=q-a) in
-  `ozarland`, where all OzarLand discussions live.
-- **Share a problem you solved:** open an issue with the
-  [*Problem solved* form](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=problem-solved.yml), or a
-  pull request with a runbook.
-- **Confirm a runbook in your environment:** open a
-  [*Documentation proposal* issue](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml)
-  and choose "I confirmed an existing page in my environment". This is how runbooks become validated.
-- **Add or improve a runbook:** copy `templates/runbook.md`, open a pull request.
+| | How |
+|:-:|---|
+| 💬 | **Ask a question:** [open a Q&A discussion](https://github.com/OzarLand/ozarland/discussions/new?category=q-a) in `ozarland`, where all OzarLand discussions live |
+| 🛠️ | **Share a problem you solved:** open an issue with the [*Problem solved* form](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=problem-solved.yml), or a pull request with a runbook |
+| ✅ | **Confirm a runbook in your environment:** open a [*Documentation proposal* issue](https://github.com/OzarLand/openstack-vm-runbooks/issues/new?template=documentation-proposal.yml) and choose "I confirmed an existing page in my environment". This is how runbooks become validated |
+| ✍️ | **Add or improve a runbook:** copy `templates/runbook.md`, open a pull request |
 
-Rules that are not optional: no secrets, hostnames, addresses or unredacted logs; flag state-changing and
-destructive commands; say where your solution was observed. Full guide: [CONTRIBUTING.md](CONTRIBUTING.md).
+> [!IMPORTANT]
+> Rules that are not optional: no secrets, hostnames, addresses or unredacted logs; flag state-changing and
+> destructive commands; say where your solution was observed. Full guide: [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## License
+## ⚖️ License
 
 All content, documentation and code alike, is licensed under the Apache License 2.0 ([LICENSE](LICENSE)). Reuse it
 freely with attribution. See [licensing](https://github.com/OzarLand/ozarland/blob/main/docs/conventions/licensing.md).
