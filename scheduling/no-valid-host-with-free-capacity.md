@@ -172,6 +172,8 @@ Changing a ratio directly in Placement is overridden by the compute on its next 
 
 ### Heal stale allocations
 
+*(Not run on this page's lab.)*
+
 See [Stale records](../lifecycle/stale-records-stuck-instances-orphan-ports-attachments.md); in short,
 `nova-manage placement audit` to list, `nova-manage placement heal_allocations` to repair, with the warnings there.
 

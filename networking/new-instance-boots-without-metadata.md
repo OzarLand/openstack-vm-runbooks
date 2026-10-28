@@ -129,12 +129,13 @@ usually has no address either: see
 systemctl start kolla-neutron_metadata_agent-container.service
 ```
 
-**Any:** `systemctl start neutron-metadata-agent` on each network node.
+**Any:** `systemctl start neutron-metadata-agent` on each network node *(not run on the lab)*.
 
 ### For the instances created during the outage
 
 A reboot may let the image try again, depending on the image and on how its first-boot tool records what it already
-did. It was not tested on the lab.
+did. On the all-in-one lab, with CirrOS (which reads the metadata at every boot), the reboot and the rebuild below
+both worked; not tested on cloud-init images.
 
 > ⚠️ **State-changing.** Reboots the instance. Its owner loses whatever runs in it for the time of the boot; nothing
 > is lost on disk.
@@ -156,7 +157,7 @@ openstack server rebuild --image <image> <server-id>
 
 ### For cause 2
 
-Fix the Nova metadata API (its containers, its configuration, the shared secret it shares with the metadata agent),
+*(Not run on the lab.)* Fix the Nova metadata API (its containers, its configuration, the shared secret it shares with the metadata agent),
 then check the agent log again.
 
 ## Verification

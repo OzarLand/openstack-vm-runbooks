@@ -312,6 +312,7 @@ where `keystone_fernet` runs, not from the node you chose.
 > preconditions; no real undo.
 
 ```bash
+# not run on the lab
 kolla-ansible reconfigure -i <inventory> -t keystone
 ```
 
@@ -329,7 +330,7 @@ skew.
 > (`chronyc sources` shows `^*` or `^+`). Undo: none needed.
 
 ```bash
-sudo chronyc makestep
+sudo chronyc makestep        # not run on the lab (no chrony there; the timesyncd form below was)
 ```
 
 On a host with systemd-timesyncd instead of chrony (no `chronyc`), turn NTP back on; timesyncd steps the clock at

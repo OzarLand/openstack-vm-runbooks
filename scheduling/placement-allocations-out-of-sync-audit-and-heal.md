@@ -240,7 +240,8 @@ Run `audit` without `--delete` first, and sort each consumer it lists:
 > allocation once the move ends), and a migration's allocation that `audit` failed to match; `heal_allocations`
 > restores neither. Who is affected: the scheduler sees the freed capacity at once. Precondition: every migration in
 > a final state and no instance with a task state (the checks above), and the saved JSON of each listed consumer.
-> Undo: recreate the allocation by hand with `openstack resource provider allocation set` from the saved JSON.
+> Undo: recreate the allocation by hand with `openstack resource provider allocation set` from the saved JSON
+> *(not run on the lab)*.
 
 **Kolla-Ansible:**
 
@@ -259,7 +260,7 @@ The instance keeps its allocation on the compute where it runs; only the part on
 
 > ⚠️ **State-changing.** Removes the instance's allocation on `<old-rp-uuid>` only. Precondition: the instance runs
 > on the other compute and no move is in progress for it (`task_state` empty). Undo: set the allocation back from
-> the saved JSON with `openstack resource provider allocation set`.
+> the saved JSON with `openstack resource provider allocation set` *(not run on the lab)*.
 
 ```bash
 openstack --os-placement-api-version 1.12 resource provider allocation unset --provider <old-rp-uuid> <server-id>
@@ -284,7 +285,7 @@ If the old compute is decommissioned for good, its provider can be deleted once 
 
 ```bash
 sudo docker exec nova_api nova-manage placement heal_allocations --verbose --instance <server-id>
-# or every instance, in batches of 50:
+# or every instance, in batches of 50 (not run on the lab):
 sudo docker exec nova_api nova-manage placement heal_allocations --verbose
 ```
 
@@ -301,7 +302,7 @@ ones computed from its flavor on its compute node, without deleting them first.
 
 > ⚠️ **State-changing.** Replaces the instance's allocations with flavor-based ones on its compute node.
 > Precondition: no task state on the instance, and its allocation saved as JSON above. Undo: `openstack resource
-> provider allocation set` from the saved JSON.
+> provider allocation set` from the saved JSON *(not run on the lab)*.
 
 ```bash
 sudo docker exec nova_api nova-manage placement heal_allocations --verbose --instance <server-id> --force
@@ -313,7 +314,7 @@ If that is not enough, the upstream procedure is to delete all its allocations a
 > allocation if the instance is in a move (the move then fails or overcommits its destination), nested allocations
 > (vGPU, Cyborg, child providers from `provider.yaml`) that `heal_allocations` cannot recreate. Precondition: the
 > instance is `ACTIVE`, `SHUTOFF` or `PAUSED` with no `task_state`, and its allocation is saved as JSON above.
-> Undo: `openstack resource provider allocation set` from the saved JSON.
+> Undo: `openstack resource provider allocation set` from the saved JSON *(not run on the lab)*.
 
 ```bash
 openstack resource provider allocation delete <server-id>

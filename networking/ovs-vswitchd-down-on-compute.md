@@ -112,7 +112,7 @@ Without `sudo`, `tail` gives `Permission denied` and `dmesg` gives `read kernel 
 permitted`. After a plain stop of the unit (as on the lab), the journal shows `Stopping`, `Deactivated successfully`,
 `Stopped`, the container `Exited (0)`, and `dmesg` has no out-of-memory line.
 
-**Any:** with a packaged Open vSwitch, the service is `ovs-vswitchd` (or `openvswitch-switch` on Ubuntu); read
+**Any:** *(not run on the lab)* with a packaged Open vSwitch, the service is `ovs-vswitchd` (or `openvswitch-switch` on Ubuntu); read
 `journalctl -u ovs-vswitchd` and `/var/log/openvswitch/ovs-vswitchd.log`.
 
 ### Neutron
@@ -164,7 +164,7 @@ On the compute, start ovs-vswitchd through its unit.
 sudo systemctl start kolla-openvswitch_vswitchd-container.service
 ```
 
-**Any:**
+**Any:** *(not run on the lab)*
 
 ```bash
 systemctl start ovs-vswitchd
@@ -193,7 +193,7 @@ On the lab (frozen ovs-vswitchd), the restart returned in about 1 s and the inst
 a few seconds after the restart, `ovs-appctl version` prints `cannot read pidfile
 "/var/run/openvswitch/ovs-vswitchd.pid" (No such process)`; it answers once ovs-vswitchd has started.
 
-**Any:**
+**Any:** *(not run on the lab)*
 
 ```bash
 systemctl restart ovs-vswitchd

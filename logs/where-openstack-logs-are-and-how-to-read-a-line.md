@@ -124,6 +124,8 @@ sudo docker logs --tail 50 nova_compute     # podman logs on a Podman deployment
 
 ### Package installs (distribution packages)
 
+*(Not run on the lab: the lab was Kolla-Ansible.)*
+
 Nova's documentation gives `/var/log/nova/` as the directory of its log files, one per service, with service
 names that differ by distribution
 ([Compute log files](https://docs.openstack.org/nova/latest/admin/configuration/logs.html)):
@@ -168,7 +170,7 @@ When a service logs natively to the journal (`use_journal = true`), each entry c
 That lets you filter by field instead of by text:
 
 ```bash
-journalctl REQUEST_ID=<request-id>
+journalctl REQUEST_ID=<request-id>                        # not run on the lab
 journalctl SYSLOG_IDENTIFIER=nova-compute PRIORITY=3      # errors only (3 = err)
 ```
 
@@ -351,7 +353,7 @@ When a service hangs without logging anything, its log cannot tell you why. Nova
 dump a *Guru Meditation report* (GMR): version, configuration, the stack of every thread and green thread. Sending
 `SIGUSR2` to the process writes it to the process's standard error, or to a file in `[oslo_reports] log_dir` when set
 ([Nova GMR reference](https://docs.openstack.org/nova/latest/reference/gmr.html)). Services run under uWSGI intercept
-`SIGUSR2`: for them, configure `[oslo_reports] file_event_handler` and touch that file.
+`SIGUSR2`: for them, configure `[oslo_reports] file_event_handler` and touch that file *(not run on the lab)*.
 
 **Any:**
 

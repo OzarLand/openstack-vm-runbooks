@@ -195,7 +195,7 @@ shows only `Compute service nova-compute of host <host> failed to set.`; the rea
 
 ```bash
 openstack compute service set --up <host> nova-compute
-# then, when the host is ready for new instances:
+# then, when the host is ready for new instances (not run on the lab: the service was still enabled):
 openstack compute service set --enable <host> nova-compute
 ```
 

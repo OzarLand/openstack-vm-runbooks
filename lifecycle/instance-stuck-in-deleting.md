@@ -152,6 +152,8 @@ killed.
 
 ### For cause 2: free the guest, then delete again
 
+*(Not run on the lab.)*
+
 Repair the storage path if you can: the QEMU process then dies and the delete completes. A process waiting on
 storage that is gone for good often cannot be killed; then the host needs a reboot, after moving its other
 instances ([maintenance](../migration/moving-instances-off-a-host-for-maintenance.md)). Once the guest is gone from
@@ -164,6 +166,8 @@ Do not shortcut with `virsh undefine`, by removing the instance's disks by hand,
 Neutron, Cinder and Placement would keep records that no longer match the host.
 
 ### For cause 3: delete again
+
+*(Cause 3 not reproduced on the lab.)*
 
 An instance in `ERROR` with no task state accepts a new delete, which runs every step again:
 
@@ -187,7 +191,8 @@ task state, then delete again (the 🛑 above applies):
 > the previous step applies to it.
 
 ```bash
-openstack server set --state error <server-id>     # add --auto-approve with python-openstackclient 10.5.0, see below
+# not run on the lab; with python-openstackclient 10.5.0 add --auto-approve (see below)
+openstack server set --state error <server-id>
 openstack server delete <server-id>
 ```
 
@@ -216,6 +221,7 @@ has the guest defined, and its `nova-compute` finds an instance it no longer kno
 > deleted instance.
 
 ```bash
+# not run on the lab: cause 4 was reproduced with the service down from a lost heartbeat
 openstack --os-compute-api-version 2.11 compute service set --disable --disable-reason "<why>" --down \
   <compute> nova-compute
 openstack server delete <server-id>

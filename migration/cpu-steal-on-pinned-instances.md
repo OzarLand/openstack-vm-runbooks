@@ -100,6 +100,8 @@ rather than relocating the symptom.
 
 ### Isolate the host CPUs
 
+*(Not run on the lab.)*
+
 > ⚠️ **State-changing.** Kernel parameters and tuned profiles need a host reboot, hence moving or stopping its
 > instances (see [Moving instances off a host](moving-instances-off-a-host-for-maintenance.md)). Do one host,
 > measure, then roll out.
@@ -123,6 +125,8 @@ openstack server resize --flavor <new-flavor> <server>   # then confirm the resi
 ```
 
 ### Fix overlapping pinning or mismatches
+
+*(Not run on the lab.)*
 
 > ⚠️ **State-changing.** Moving an instance changes its pinning. Live-migrate or cold-migrate one instance per
 > overlap to a host with free dedicated CPUs, then verify with `virsh vcpupin` on the destination.
@@ -149,6 +153,10 @@ Train (Nova 20.0); on Stein with the `enable_numa_live_migration` workaround, an
 without recalculating the guest-to-host mapping and could itself create overlapping pinning. `hw:emulator_threads_policy=share`
 with `cpu_shared_set` dates from Rocky (Nova 18.0); check the release notes of your release. The host-isolation steps depend on the OS and hardware; check your vendor's
 guidance for real-time or NFV hosts.
+
+The lab confirmation (OpenStack 2026.1, Kolla-Ansible, 1 controller and 2 computes with nested KVM, 2026-10-23)
+ran the quick checks, reproduced the steal (0.8 % idle, 26.7 % with host processes on the pinned CPU) and moved
+the emulator threads with `hw:emulator_threads_policy=share`. Host isolation and moving instances were not run.
 
 ## Related
 

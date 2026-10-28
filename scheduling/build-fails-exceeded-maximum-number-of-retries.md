@@ -80,7 +80,7 @@ ERROR nova.compute.manager [...] [instance: <server-id>] Instance failed to spaw
 and the conductor `WARNING nova.scheduler.utils [...] Failed to compute_task_build_instances: Exceeded maximum number
 of retries. ...` then `Setting instance to ERROR state.`
 
-**Any:** the `nova-compute` service log on that compute.
+**Any:** *(not run on the lab)* the `nova-compute` service log on that compute.
 
 ## Diagnosis
 

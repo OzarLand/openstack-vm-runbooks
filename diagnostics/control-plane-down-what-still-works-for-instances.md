@@ -77,8 +77,9 @@ cat /var/lib/dhcp/dhclient*.leases 2>/dev/null | tail -5     # dhclient; or netw
 pgrep -af dnsmasq | grep -F "<network-id>"     # the command line is not always "dnsmasq --no-hosts" (Kolla: "dnsmasq -k --no-hosts")
 # OVN: controller still up on the compute, ports still bound
 ovs-vsctl show | head; ovn-sbctl show 2>/dev/null       # sbctl needs the southbound DB, which may be up independently
+#      (OVN not run on the lab)
 
-# L3 HA: which node is master for the router
+# L3 HA: which node is master for the router (not run on the lab: the lab router was not HA)
 ip netns exec qrouter-<router-id> ip addr | grep -F "<router-external-address>"
 ```
 

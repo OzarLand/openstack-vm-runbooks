@@ -163,6 +163,8 @@ instances, plan snapshots where the network and Glance allow, or snapshot their 
 
 ### For causes 2 and 3: free space, then snapshot again
 
+*(Not run on the lab.)*
+
 Free space on the compute (cause 2) or on Glance's storage (cause 3), from the error in the traceback. The failed
 snapshot cleaned up after itself: run the snapshot again.
 
@@ -202,13 +204,13 @@ sudo docker exec nova_compute ls -la /var/lib/nova/instances/snapshots/      # t
 sudo docker exec -u root nova_compute rm -rf /var/lib/nova/instances/snapshots/<tmp-dir>
 ```
 
-With a direct snapshot (Ceph), deleting the `queued` image may not remove what Ceph already created: a snapshot or a
+With a direct snapshot (Ceph) *(not run on the lab: no Ceph)*, deleting the `queued` image may not remove what Ceph already created: a snapshot or a
 clone can remain in the images pool or on the instance's disk. Look, read-only, with
 `rbd snap ls <pool>/<server-id>_disk` and `rbd ls -l <images-pool>`, and escalate to whoever runs Ceph rather than
 deleting there.
 
-If the task state stays set with `nova-compute` up and no snapshot in progress on the compute, restart `nova-compute`
-on that compute: it clears the task state of its instances (above). First check the other instances on that compute
+If the task state stays set with `nova-compute` up and no snapshot in progress on the compute *(not run on the lab)*,
+restart `nova-compute` on that compute: it clears the task state of its instances (above). First check the other instances on that compute
 (`openstack server list --all-projects --host <compute> --long`): a restart interrupts their migrations, resizes and
 snapshots too.
 
@@ -220,7 +222,7 @@ snapshots too.
 
 **Any:** restart the `nova-compute` service.
 
-A cold snapshot suspends a running instance with a libvirt managed save, while Nova's `vm_state` stays `active`.
+A cold snapshot *(not run on the lab)* suspends a running instance with a libvirt managed save, while Nova's `vm_state` stays `active`.
 Interrupted, it most likely leaves the instance `SHUTOFF`: start it with `openstack server start <server-id>` once the
 task state is clear (`openstack server resume` is refused unless Nova shows it `SUSPENDED`).
 

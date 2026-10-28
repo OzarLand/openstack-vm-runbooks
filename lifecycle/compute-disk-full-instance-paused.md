@@ -208,7 +208,7 @@ virsh resume <domain>
 
 ### Step 4: keep it from coming back
 
-Not tested on the lab. Options to weigh:
+Options to weigh *(not run on the lab)*:
 
 - Monitor the actual usage of the instance store on every compute, and the power state of instances (Paused while
   `ACTIVE`). Nova and Placement do not watch the disk.
@@ -283,9 +283,15 @@ directory of `nova_compute`:
   the root file system, two on a dedicated ext4 file system.
 - Not tested: OVN, other releases, other deployment tools, production scale, Ceph or other shared instance storage,
   volume-backed instances, raw or LVM image backends, guests other than CirrOS.
-- Observed resolution steps: freeing space (removing a known file) and `virsh resume`. Not observed: disabling the
-  compute service, finding the cause on a real store, removing base images, Step 4, and whether Nova's power state
-  returns to Running after a resume (the lab deleted the test instance right after).
+- Observed resolution steps on those builds: freeing space (removing a known file) and `virsh resume`; the test
+  instance was deleted right after.
+- A lab review on 2026-10-23 (1 controller, 2 computes, a dedicated 5 GB instance store filled by a stray file, see
+  `confirmed_by`) ran the rest: disabling the compute service, `fuser` then `rm`, the `virsh resume` loop, enabling
+  the service again and the verification. Nova's power state went back to `Running` on its own within a minute of
+  the resume, and a new instance built afterwards was `ACTIVE` and `Running`. `df` on the Docker volume path needed
+  `sudo`.
+- Not run on any lab: finding the cause on a real store, removing base images, `reserved_host_disk_mb` and
+  `disk_allocation_ratio`.
 - The pause comes from QEMU's default write-error policy (`werror=enospc`); Nova sets no `error_policy` in the domain
   XML on this release. Not checked on other releases.
 

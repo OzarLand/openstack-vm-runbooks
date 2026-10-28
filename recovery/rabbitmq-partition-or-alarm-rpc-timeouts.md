@@ -181,7 +181,8 @@ With quorum queues, Khepri, or `pause_minority`, the minority side catches up or
 is back (lab, Khepri: 4 s after the network came back, `detected a new leader` in the minority node's log, and all
 three nodes running). Check `cluster_status` on every node.
 
-If a partition is still listed after the network is fixed (Mnesia, or a node that was suspended), the RabbitMQ
+If a partition is still listed after the network is fixed (Mnesia, or a node that was suspended) *(not run on the
+lab: its partition healed by itself)*, the RabbitMQ
 partitions guide says to choose the side you trust, "stop all nodes in the other partitions, then start them all up
 again", so that they restore their state from the trusted side, then restart the trusted side's nodes to clear the
 warning.
@@ -205,6 +206,7 @@ sudo systemctl restart kolla-rabbitmq-container.service
 
 ### For cause 3: free the resource
 
+*(Not run on the lab: no disk alarm was raised, and the memory alarm was cleared by setting the watermark back.)*
 Free disk space or memory on the node that raised the alarm: remove what filled the disk (see
 [compute disk full](../lifecycle/compute-disk-full-instance-paused.md) for the method, the same applies to a
 controller), or find the queue whose backlog grew (quick check 3) and fix its consumer (cause 4). The alarm clears
@@ -248,12 +250,13 @@ every OpenStack service stopped first, then redeployed.
 > [reopening provisioning after a control-plane incident](reopening-provisioning-after-control-plane-incident.md).
 > **With Khepri, do not rely on this command until a run succeeds on your release.** First check whether the
 > partition healed by itself (`rabbitmqctl cluster_status` on every node), and prefer re-joining only the affected
-> node: on that node `rabbitmqctl stop_app`, `rabbitmqctl reset`, `rabbitmqctl join_cluster rabbit@<healthy-node>`,
+> node *(not run on the lab)*: on that node `rabbitmqctl stop_app`, `rabbitmqctl reset`, `rabbitmqctl join_cluster rabbit@<healthy-node>`,
 > `rabbitmqctl start_app`, then check that every quorum queue and stream has a member on it
 > (`rabbitmqctl list_queues name type members`). The commands below are for a cluster that still uses Mnesia, or once
 > the command has been shown to work with Khepri on your release.
 
 ```bash
+# not run from this page; on the reopening-provisioning lab (Khepri) rabbitmq-reset-state failed, see above
 kolla-ansible genconfig -i <inventory>
 kolla-ansible stop -i <inventory> --tags <service-tags> --yes-i-really-really-mean-it \
   -e '{"skip_stop_containers": ["nova_libvirt"]}'

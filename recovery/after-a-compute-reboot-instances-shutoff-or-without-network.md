@@ -159,6 +159,8 @@ kolla-ansible reconfigure -i <inventory> --tags nova
 
 ### For cause 2: start the unit, then find why it did not start
 
+*(Cause 2 not reproduced on this page's lab.)*
+
 > ⚠️ **State-changing.** Starts the container. For `openvswitch_vswitchd`, the instances regain their network about
 > half a minute later on the lab of the ovs-vswitchd runbook.
 
@@ -168,6 +170,8 @@ journalctl -u kolla-<container>-container.service -b --no-pager | tail -n 50
 ```
 
 ### For causes 3 and 4: fix the host's network configuration, persistently
+
+*(Run on the lab for cause 3; cause 4 not reproduced.)*
 
 Put the interface, bond, VLAN and MTU in the host's network configuration (netplan, NetworkManager,
 systemd-networkd), so that the next reboot brings them back. To restore service now:
@@ -181,6 +185,8 @@ sudo ip link set dev <tunnel-interface> mtu <mtu-used-by-the-other-computes>
 ```
 
 ### For cause 5: the address on the external interface
+
+*(Not run on the lab.)*
 
 Restore the host's address from the console, in the host's network configuration, on an interface that is not
 plugged into `br-ex`. Kolla-Ansible's Neutron guide calls a shared external interface (an address and the bridge on

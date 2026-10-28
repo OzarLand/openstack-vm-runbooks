@@ -180,7 +180,7 @@ sudo systemctl restart kolla-nova_conductor-container.service   # or kolla-nova_
 ```
 
 If the configuration is at fault, fix it on the deploy host and run `kolla-ansible reconfigure -i <inventory> -t
-nova`.
+nova` *(not run on the lab)*.
 
 ### For cause 2: fix RabbitMQ first
 
@@ -236,7 +236,7 @@ skips the question; without a terminal it exits without changing the state (seen
 > other state with the same command; the old `task_state` cannot be restored, which is the point.
 
 ```bash
-openstack server set --auto-approve --state active <server-id>     # the guest runs
+openstack server set --auto-approve --state active <server-id>     # the guest runs (not run on the lab)
 openstack server set --auto-approve --state error <server-id>      # the guest is off
 ```
 

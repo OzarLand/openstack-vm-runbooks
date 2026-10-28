@@ -173,10 +173,14 @@ Then find out who changed the MTU, or the change may come back.
 
 ### For cause 2: fix the underlay
 
+*(Not run on the lab.)*
+
 Fix the MTU of the switch ports or links on the path. This is outside OpenStack. Until it is fixed, the path carries
 less than Neutron assumes, and cause 3 applies.
 
 ### For cause 3, or when the smaller MTU is the new reality
+
+*(Not run on the lab: neither the `global_physnet_mtu` change nor `openstack network set --mtu`.)*
 
 Lower what Neutron assumes so that it matches what the underlay carries end to end.
 

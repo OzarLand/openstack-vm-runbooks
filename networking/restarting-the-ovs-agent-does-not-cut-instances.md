@@ -106,7 +106,8 @@ A configuration change, a Neutron reconfigure or upgrade. Follow the resolution 
 ### Cause 2: the agent is stuck or reported dead while ovs-vswitchd runs
 
 The agent is not alive in `openstack network agent list`, but ovs-vswitchd answers (Quick check 3). A restart of the
-agent is the usual first step; this case itself was not reproduced on the lab, only the restart of a healthy agent.
+agent is the usual first step. A lab review reproduced a stuck agent that was alive but not processing ports, and its
+restart lost no requests; an agent reported dead while ovs-vswitchd runs was not reproduced.
 
 ## Resolution
 
@@ -125,7 +126,7 @@ On the compute.
 systemctl restart kolla-neutron_openvswitch_agent-container.service
 ```
 
-**Any:**
+**Any:** *(not recorded as run on a lab)*
 
 ```bash
 systemctl restart neutron-openvswitch-agent
@@ -189,8 +190,12 @@ sent every 0.5 s to one instance on each compute.
   exact release not recorded), by @soufian-zaouam, who confirmed on 2026-10-24 that the page matches; the page's
   steps were not re-run there.
 - Observed: the restart of the agent's unit, no loss on the instances, agents alive afterwards.
-- Not run: Quick check 4 (`drop_flows_on_start`), the flow dump during the restart, the restart of a stuck agent
-  (cause 2), the `Any:` commands, creating an instance or changing a security group during the restart.
+- Not run on that build: Quick check 4 (`drop_flows_on_start`), the flow dump during the restart, the restart of a
+  stuck agent (cause 2), the `Any:` commands, creating an instance or changing a security group during the restart.
+- A lab review on 2026-10-22 (all-in-one, see `confirmed_by`) ran the procedure twice, on a healthy agent and on a
+  stuck agent alive but not processing ports (cause 2): 0 requests lost, and an instance created during the restart
+  was `ACTIVE` after about 80 s. Whether it ran Quick check 4, the flow dump or the `Any:` commands is not recorded.
+- Not recorded as run on any lab: changing a security group during the restart.
 - Not tested: OVN (no Open vSwitch agent there), other releases, other deployment tools, production scale (many
   ports make the resynchronisation longer), DPDK datapaths, `drop_flows_on_start = True`.
 - An interruption shorter than 0.5 s could have been missed.

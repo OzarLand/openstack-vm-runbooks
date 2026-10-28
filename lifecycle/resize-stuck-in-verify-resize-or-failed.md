@@ -219,8 +219,8 @@ Then reset the state and hard reboot, as for an instance in `ERROR` (below).
 
 ### For causes 3 and 4: fix the compute, then recover the instance
 
-Fix what the error names: the `nova_ssh` containers and keys (cause 3), or the destination's own problem (cause 4,
-with the runbooks of [boot from volume](../scheduling/instance-fails-to-boot-from-volume.md),
+Fix what the error names: the `nova_ssh` containers and keys (cause 3), or the destination's own problem (cause 4, *not
+reproduced on the lab*, with the runbooks of [boot from volume](../scheduling/instance-fails-to-boot-from-volume.md),
 [port binding](../networking/port-binding-failed.md), [disk full](compute-disk-full-instance-paused.md)).
 
 Then recover the instance where Nova says it is (`host`). The python-openstackclient help for `server set --state`
@@ -242,7 +242,8 @@ If the instance is still in a `RESIZE` task state, the reboot is refused; clear 
 > the compute. Undo: `openstack server set --state error <server-id>`.
 
 ```bash
-openstack server set --state active <server-id>     # add --auto-approve with python-openstackclient 10.5.0, see below
+# with python-openstackclient 10.5.0 add --auto-approve (see below)
+openstack server set --state active <server-id>
 openstack server reboot --hard <server-id>
 ```
 

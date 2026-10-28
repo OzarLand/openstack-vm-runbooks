@@ -172,6 +172,8 @@ Then continue with the subsection that matches what `domblklist` shows.
 
 ### For cause 3, or an attach that never reached the hypervisor: release the reservation
 
+*(Cause 3 not reproduced on the lab.)*
+
 The volume is **not** in `domblklist`, Nova does not list it (`server volume list`), and the last attach event has a
 result (see Diagnosis: an attach in progress also looks like this, with Nova listing the volume).
 

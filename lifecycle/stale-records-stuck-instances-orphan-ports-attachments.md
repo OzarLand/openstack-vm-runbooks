@@ -168,7 +168,7 @@ nova-manage placement heal_allocations --verbose
 ```bash
 openstack port delete <port-id>
 
-# Volume still "in-use" for an instance that no longer exists
+# Volume still "in-use" for an instance that no longer exists (not run on this page's lab: no Cinder)
 cinder --os-volume-api-version 3.27 attachment-list --all-tenants 1 --volume-id <volume-id>
 #    Not "openstack volume attachment list --volume-id": with python-openstackclient 9.0.0 the filter is ignored
 #    and every attachment of the cloud is listed. Check the Volume ID column of whatever you list.
@@ -182,6 +182,7 @@ openstack --os-volume-api-version 3.27 volume attachment delete <attachment-id>
 > shows no watcher). Cannot be undone if two writers have touched the disk.
 
 ```bash
+# not run on this page's lab: no Cinder
 openstack volume set --state available --detached <volume-id>
 ```
 
@@ -198,7 +199,7 @@ nova-manage db archive_deleted_rows --until-complete --all-cells
 # 2026.1: archive_deleted_rows with --all-cells and --verbose archives, then fails printing the summary
 # (ValueError: not enough values to unpack); leave out --verbose. Exit code 1 means rows were archived.
 nova-manage db purge --all --all-cells --verbose          # or --before <date>
-cinder-manage db purge <days>
+cinder-manage db purge <days>                               # not run on the lab: no Cinder
 ```
 
 ### Direct database surgery, last resort

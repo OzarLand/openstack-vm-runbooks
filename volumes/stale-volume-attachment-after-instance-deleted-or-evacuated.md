@@ -153,6 +153,8 @@ openstack volume show <volume-id> -c status      # expected: available, once no 
 
 ### For cause 2: remove the old host's attachment, keep Nova's
 
+*(Not run on the lab: the evacuation case needs two computes.)*
+
 Preferred, documented in the Nova administration guide for 2026.1: a hard reboot makes Nova check the instance's
 attachments against Cinder and remove the dangling ones from both databases.
 

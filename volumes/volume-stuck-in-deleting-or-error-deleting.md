@@ -167,8 +167,8 @@ openstack volume set --state error <volume-id>
 openstack volume delete <volume-id>
 ```
 
-`openstack volume delete --force <volume-id>` (admin) has the same effect as the reset and the delete together, with
-the same 🛑 and both preconditions: the ⚠️ one (no delete of this volume in progress) and the 🛑 one.
+`openstack volume delete --force <volume-id>` (admin) *(not run on the lab on a `deleting` volume)* has the same effect
+as the reset and the delete together, with the same 🛑 and both preconditions: the ⚠️ one (no delete of this volume in progress) and the 🛑 one.
 
 ### For cause 2: fix the backend, then delete again
 
@@ -178,12 +178,12 @@ list of states the API accepts: set it to `error` first, as for cause 1.
 ### For cause 3: wait
 
 Follow the log, and do not reset the state or delete again while the flatten runs: it would race the delete Cinder is
-running. On Ceph, `rbd status <pool>/volume-<volume-id>` shows its watchers and `rbd children` its clones
+running. On Ceph *(not run on the lab)*, `rbd status <pool>/volume-<volume-id>` shows its watchers and `rbd children` its clones
 (read-only).
 
 ### For cause 4: find who still uses the volume, never force it
 
-On Ceph, `rbd status <pool>/volume-<volume-id>` lists the watchers: the address of each client. Find the compute and
+On Ceph *(not run on the lab)*, `rbd status <pool>/volume-<volume-id>` lists the watchers: the address of each client. Find the compute and
 the instance that still has the volume open (`virsh domblklist` on that compute), and detach it there through Nova
 ([stale volume attachment](stale-volume-attachment-after-instance-deleted-or-evacuated.md)). Delete only once no
 watcher remains.
@@ -199,6 +199,8 @@ applies). `--cascade` deletes the volume **and its snapshots** in one call: the 
 
 ### For cause 6: fix the key manager, then delete again
 
+*(Not run on the lab.)*
+
 Fix the key manager (Barbican, or the configured backend) from the API log, then reset to `error` and delete again
 (the ⚠️ and 🛑 above apply).
 
@@ -209,7 +211,7 @@ openstack volume show <volume-id>                 # No Volume found for <volume-
 openstack quota show --usage <project>            # volumes and gigabytes in use went down
 ```
 
-On Ceph: `rbd ls <pool> | grep <volume-id>` shows nothing, or only a `.deleted` image kept for its clones; `rbd trash
+On Ceph *(not run on the lab)*: `rbd ls <pool> | grep <volume-id>` shows nothing, or only a `.deleted` image kept for its clones; `rbd trash
 ls <pool>` shows whether it waits in the trash: without `enable_deferred_deletion`, Cinder never purges it.
 
 ## Lab observations
