@@ -28,9 +28,8 @@
 
 ---
 
-Part of [OzarLand](https://github.com/OzarLand/ozarland), a collaborative knowledge-sharing space for OpenStack
-operators. Share experiences, document solutions, learn from each other. No imposed tools, no single way of
-operating OpenStack.
+Part of [OzarLand](https://github.com/OzarLand/ozarland): *a shared land for better OpenStack operations.* No imposed
+tools, no single way of operating OpenStack.
 
 - 🧪 Practise these runbooks on a disposable lab with
   [openstack-quick-lab](https://github.com/OzarLand/openstack-quick-lab).
@@ -349,6 +348,21 @@ behind it; open a *Problem solved* issue if you have one.
 > [!IMPORTANT]
 > Rules that are not optional: no secrets, hostnames, addresses or unredacted logs; flag state-changing and
 > destructive commands; say where your solution was observed. Full guide: [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## 🌍 Part of OzarLand
+
+**OzarLand: a shared land for better OpenStack operations.** It started as a personal initiative by Soufian Zaouam
+to share practical OpenStack operational knowledge, and it is meant to grow into a space where operators exchange
+experience, document solutions and help each other run more reliable platforms. It is open to everyone: your
+knowledge, questions and corrections are welcome.
+
+| | Repository | What it holds |
+|:-:|---|---|
+| | [ozarland](https://github.com/OzarLand/ozarland) | Start here: newcomer path, community rules, [Discussions](https://github.com/OzarLand/ozarland/discussions) |
+| 🔧 | `openstack-vm-runbooks` **(you are here)** | Symptom-driven runbooks for instance problems |
+| 🏗️ | [kolla-ansible-deployment-patterns](https://github.com/OzarLand/kolla-ansible-deployment-patterns) | Ways to deploy with Kolla-Ansible, compared |
+| 🧪 | [openstack-quick-lab](https://github.com/OzarLand/openstack-quick-lab) | A disposable OpenStack lab to practise on |
+| 🤖 | [openstack-operator-skills](https://github.com/OzarLand/openstack-operator-skills) | Claude skills that apply this knowledge |
 
 ## ⚖️ License
 
